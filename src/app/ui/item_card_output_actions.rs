@@ -24,6 +24,7 @@ pub(super) fn open_export_dialog(
     }
 
     let mut dialog = rfd::FileDialog::new();
+    let preferred_extension = state.item_export_default_extension(item_index, kind);
     if let Some(directory) = state.item_export_initial_directory(item_index) {
         dialog = dialog.set_directory(directory);
     }
@@ -37,15 +38,9 @@ pub(super) fn open_export_dialog(
             .add_filter(".webm", &["webm"])
             .add_filter(".mov", &["mov"])
             .add_filter(".flv", &["flv"]),
-        DownloadTargetKind::Audio => dialog
-            .add_filter(".mp3", &["mp3"])
-            .add_filter(".m4a", &["m4a"])
-            .add_filter(".flac", &["flac"])
-            .add_filter(".wav", &["wav"])
-            .add_filter(".opus", &["opus"])
-            .add_filter(".aac", &["aac"])
-            .add_filter(".vorbis", &["vorbis"])
-            .add_filter(".alac", &["alac"]),
+        DownloadTargetKind::Audio => {
+            add_audio_export_filters(dialog, preferred_extension.as_deref())
+        }
         DownloadTargetKind::Subtitle => dialog
             .add_filter(".srt", &["srt"])
             .add_filter(".vtt", &["vtt"])
@@ -66,6 +61,44 @@ pub(super) fn open_export_dialog(
             state.set_last_action_message(error);
         }
     }
+}
+
+const AUDIO_EXPORT_EXTENSIONS: [&str; 8] =
+    ["mp3", "m4a", "flac", "wav", "opus", "aac", "vorbis", "alac"];
+
+fn ordered_audio_export_extensions(preferred_extension: Option<&str>) -> Vec<&'static str> {
+    let preferred = preferred_extension
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mut extensions = Vec::with_capacity(AUDIO_EXPORT_EXTENSIONS.len());
+    if let Some(preferred) = preferred {
+        if let Some(extension) = AUDIO_EXPORT_EXTENSIONS
+            .iter()
+            .copied()
+            .find(|extension| extension.eq_ignore_ascii_case(preferred))
+        {
+            extensions.push(extension);
+        }
+    }
+    for extension in AUDIO_EXPORT_EXTENSIONS {
+        if !extensions
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(extension))
+        {
+            extensions.push(extension);
+        }
+    }
+    extensions
+}
+
+fn add_audio_export_filters(
+    mut dialog: rfd::FileDialog,
+    preferred_extension: Option<&str>,
+) -> rfd::FileDialog {
+    for extension in ordered_audio_export_extensions(preferred_extension) {
+        dialog = dialog.add_filter(format!(".{extension}"), &[extension]);
+    }
+    dialog
 }
 
 pub(super) fn row_output_action_button(
@@ -211,4 +244,32 @@ fn output_action_button_size_for_available_width(
         available_width,
     );
     egui::vec2(size.width, size.height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_export_filters_start_with_selected_source_extension() {
+        let extensions = ordered_audio_export_extensions(Some("opus"));
+
+        assert_eq!(extensions.first().copied(), Some("opus"));
+        assert_eq!(extensions.len(), AUDIO_EXPORT_EXTENSIONS.len());
+        assert_eq!(
+            extensions
+                .iter()
+                .filter(|extension| extension.eq_ignore_ascii_case("opus"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn unknown_audio_extension_keeps_stable_filter_order() {
+        assert_eq!(
+            ordered_audio_export_extensions(Some("unknown")),
+            AUDIO_EXPORT_EXTENSIONS
+        );
+    }
 }

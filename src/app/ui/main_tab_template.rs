@@ -53,17 +53,24 @@ struct MainTabTemplateContext {
     section_spacing: f32,
     content_output_gap: f32,
     bottom_trailing_spacing: f32,
+    music_window_material_progress: f32,
 }
 
 impl MainTabTemplate {
     fn resolve(ui: &mut Ui, state: &mut AppState, render_resources: &UiRenderResources) -> Self {
-        let context = MainTabTemplateContext::resolve(ui, state);
+        let context = MainTabTemplateContext::resolve(
+            ui,
+            state,
+            render_resources.music_window_material_progress(),
+        );
         let controls = MainTabControls::resolve(ui, state, context.row);
         let music_player_panel = MusicPlayerPanel::resolve(
             ui,
             state,
             context.row_height,
             render_resources.music_player_aura(),
+            render_resources.music_aura_presentation(),
+            context.music_window_material_progress,
         );
         let root = main_tab_root_template(context, controls, music_player_panel);
 
@@ -80,7 +87,7 @@ impl MainTabTemplate {
 }
 
 impl MainTabTemplateContext {
-    fn resolve(ui: &Ui, state: &AppState) -> Self {
+    fn resolve(ui: &Ui, state: &AppState, music_window_material_progress: f32) -> Self {
         let row_height = ui.spacing().interact_size.y;
         let section_spacing = semantic_ui_metrics::main_section_vertical_spacing();
         let content_output_gap = if state.app_mode() == AppMode::Origin {
@@ -96,6 +103,7 @@ impl MainTabTemplateContext {
             section_spacing,
             content_output_gap,
             bottom_trailing_spacing,
+            music_window_material_progress,
         }
     }
 }
@@ -270,8 +278,14 @@ fn show_main_tab_content_body(
     match state.app_mode() {
         AppMode::Origin => build_single_mode_item(tui, state, context.row_height),
         _ => {
-            xaml_taffy_styles::XamlTaffyElement::grow_block()
-                .show_fill_ui(tui, |ui| render_batch_list(ui, state, bottom_safe_area));
+            xaml_taffy_styles::XamlTaffyElement::grow_block().show_fill_ui(tui, |ui| {
+                render_batch_list(
+                    ui,
+                    state,
+                    bottom_safe_area,
+                    context.music_window_material_progress,
+                )
+            });
         }
     }
 }

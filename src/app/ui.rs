@@ -2,6 +2,7 @@
 mod common;
 mod measure;
 mod semantic_ui_metrics;
+mod settings_components;
 mod settings_detail_template;
 mod titlebar;
 
@@ -59,6 +60,7 @@ mod main_tab_url_action;
 // Options tab sections.
 mod options_behavior;
 mod options_cache;
+mod options_formats;
 mod options_language;
 mod options_layout;
 mod options_prompts;
@@ -88,12 +90,16 @@ mod xaml_taffy_styles;
 mod xaml_template_renderer;
 mod xaml_ui_nodes;
 
+use std::cell::Cell;
+
 use eframe::egui::{self, CentralPanel, Ui};
 
 use crate::app::state::{AppState, AppTab};
 
 pub(crate) struct UiRenderResources {
     music_player_aura: Option<main_tab_music_aura::MusicPlayerAuraRenderer>,
+    music_aura_presentation: Cell<main_tab_music_aura::MusicAuraPresentation>,
+    music_window_material_progress: Cell<f32>,
 }
 
 impl UiRenderResources {
@@ -105,11 +111,33 @@ impl UiRenderResources {
                 })
                 .ok()
         });
-        Self { music_player_aura }
+        Self {
+            music_player_aura,
+            music_aura_presentation: Cell::new(Default::default()),
+            music_window_material_progress: Cell::new(0.0),
+        }
     }
 
     fn music_player_aura(&self) -> Option<main_tab_music_aura::MusicPlayerAuraRenderer> {
         self.music_player_aura.clone()
+    }
+
+    fn toggle_music_aura_presentation(&self) {
+        let presentation = self.music_aura_presentation.get().toggled();
+        self.music_aura_presentation.set(presentation);
+        eprintln!("[music-aura] presentation: {presentation:?}");
+    }
+
+    fn music_window_ambient_enabled(&self) -> bool {
+        self.music_aura_presentation.get().window_layer_enabled()
+    }
+
+    fn music_aura_presentation(&self) -> main_tab_music_aura::MusicAuraPresentation {
+        self.music_aura_presentation.get()
+    }
+
+    fn music_window_material_progress(&self) -> f32 {
+        self.music_window_material_progress.get()
     }
 
     pub(crate) fn destroy(&mut self, gl: Option<&eframe::glow::Context>) {
@@ -120,6 +148,8 @@ impl UiRenderResources {
 }
 
 pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiRenderResources) {
+    handle_hidden_music_aura_shortcut(root_ui, render_resources);
+
     let prompt_open = state.youtube_playlist_prompt.is_some()
         || state.music_download_prompt_open()
         || state.youtube_login_rescue_dialog_visible();
@@ -128,70 +158,120 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
     }
 
     let panel_fill = root_ui.visuals().panel_fill;
+    let window_ambient_visible =
+        music_window_ambient_visible(state, render_resources.music_window_ambient_enabled());
+    let material_progress = main_tab_music_aura::music_window_material_progress(
+        root_ui,
+        window_ambient_visible
+            && render_resources
+                .music_aura_presentation()
+                .background_glass_enabled(),
+        state.music_player_is_playing(),
+    );
+    render_resources
+        .music_window_material_progress
+        .set(material_progress);
 
     CentralPanel::default()
         .frame(egui::Frame::NONE.fill(panel_fill))
         .show(root_ui, |ui| {
-            titlebar::render_titlebar(ui, state);
+            if window_ambient_visible {
+                render_music_window_ambient(ui, state, render_resources);
+            }
+            titlebar::render_titlebar(ui, state, window_ambient_visible);
 
-            egui::Frame::NONE
-                .fill(panel_fill)
-                .inner_margin(egui::Margin {
-                    left: 8,
-                    right: 8,
-                    top: 4,
-                    bottom: 6,
-                })
-                .show(ui, |ui| {
-                    ui.add_enabled_ui(!prompt_open, |ui| {
-                        if state.format_picker.open {
-                            format_picker::render_format_picker_screen(ui, state);
-                            return;
+            let content_frame = egui::Frame::NONE.inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 4,
+                bottom: 6,
+            });
+            let content_frame = if window_ambient_visible {
+                content_frame
+            } else {
+                content_frame.fill(panel_fill)
+            };
+            content_frame.show(ui, |ui| {
+                ui.add_enabled_ui(!prompt_open, |ui| {
+                    if state.format_picker.open {
+                        format_picker::render_format_picker_screen(ui, state);
+                        return;
+                    }
+
+                    if state.should_show_prepare_tab() {
+                        match state.active_tab {
+                            AppTab::Options => options_tab::render_options_tab(ui, state),
+                            AppTab::About => about_tab::render_about_tab(ui, state),
+                            AppTab::Log if state.config.show_log_tab => {
+                                processing_tab::render_log_tab(ui, state);
+                            }
+                            _ => {
+                                state.active_tab = AppTab::Prepare;
+                                prepare_tab::render_prepare_tab(ui, state);
+                            }
                         }
-
-                        if state.should_show_prepare_tab() {
-                            match state.active_tab {
-                                AppTab::Options => options_tab::render_options_tab(ui, state),
-                                AppTab::About => about_tab::render_about_tab(ui, state),
-                                AppTab::Log if state.config.show_log_tab => {
+                    } else {
+                        match state.active_tab {
+                            AppTab::Prepare => {
+                                main_tab::render_main_tab(ui, state, render_resources)
+                            }
+                            AppTab::Main => main_tab::render_main_tab(ui, state, render_resources),
+                            AppTab::Advance => advance_tab::render_advance_tab(ui, state),
+                            AppTab::Options => options_tab::render_options_tab(ui, state),
+                            AppTab::About => about_tab::render_about_tab(ui, state),
+                            AppTab::Log => {
+                                if state.config.show_log_tab {
                                     processing_tab::render_log_tab(ui, state);
-                                }
-                                _ => {
-                                    state.active_tab = AppTab::Prepare;
-                                    prepare_tab::render_prepare_tab(ui, state);
-                                }
-                            }
-                        } else {
-                            match state.active_tab {
-                                AppTab::Prepare => {
-                                    main_tab::render_main_tab(ui, state, render_resources)
-                                }
-                                AppTab::Main => {
-                                    main_tab::render_main_tab(ui, state, render_resources)
-                                }
-                                AppTab::Advance => advance_tab::render_advance_tab(ui, state),
-                                AppTab::Options => options_tab::render_options_tab(ui, state),
-                                AppTab::About => about_tab::render_about_tab(ui, state),
-                                AppTab::Log => {
-                                    if state.config.show_log_tab {
-                                        processing_tab::render_log_tab(ui, state);
-                                    } else {
-                                        state.active_tab = AppTab::Options;
-                                        options_tab::render_options_tab(ui, state);
-                                    }
+                                } else {
+                                    state.active_tab = AppTab::Options;
+                                    options_tab::render_options_tab(ui, state);
                                 }
                             }
                         }
+                    }
 
-                        if !state.last_action.is_empty() && !state.should_show_prepare_tab() {
-                            ui.separator();
-                            ui.small(state.localize_message(&state.last_action));
-                        }
-                    });
+                    if !state.last_action.is_empty() && !state.should_show_prepare_tab() {
+                        ui.separator();
+                        ui.small(state.localize_message(&state.last_action));
+                    }
                 });
+            });
         });
 
     options_prompts::render_youtube_playlist_prompt(root_ui.ctx(), state);
     options_prompts::render_music_download_prompt(root_ui.ctx(), state);
     advance_cookie_rescue::render_youtube_login_rescue_dialog(root_ui.ctx(), state);
+}
+
+fn handle_hidden_music_aura_shortcut(ui: &Ui, render_resources: &UiRenderResources) {
+    let modifiers = egui::Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Default::default()
+    };
+    if ui
+        .ctx()
+        .input_mut(|input| input.consume_key(modifiers, egui::Key::F10))
+    {
+        render_resources.toggle_music_aura_presentation();
+        ui.ctx().request_repaint();
+    }
+}
+
+fn render_music_window_ambient(ui: &Ui, state: &AppState, render_resources: &UiRenderResources) {
+    main_tab_music_aura::render_music_window_ambient_at(
+        ui,
+        ui.max_rect(),
+        render_resources.music_player_aura().as_ref(),
+        state.music_player_aura_display(),
+        render_resources.music_window_material_progress(),
+    );
+}
+
+fn music_window_ambient_visible(state: &AppState, presentation_enabled: bool) -> bool {
+    presentation_enabled
+        && !state.format_picker.open
+        && !state.should_show_prepare_tab()
+        && state.music_player_visible()
+        && matches!(state.active_tab, AppTab::Prepare | AppTab::Main)
 }

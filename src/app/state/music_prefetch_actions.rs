@@ -38,23 +38,21 @@ impl AppState {
         let use_cookies = item.selection.use_cookies;
         let tool_log_action_id = self.push_tool_log_action("audio", "resolve stream");
         thread::spawn(move || {
-            let (result, command_line, success) =
-                match tool_paths.analyze_music_stream_url_detailed(&source, use_cookies) {
-                    Ok(output) => {
-                        let command_line = output.command_line.clone();
-                        let result = music_stream_seed_from_json(&output.json, &source);
-                        (result, Some(command_line), true)
-                    }
-                    Err(error) => (Err(error.message), error.command_line, false),
+            let worker =
+                resolve_music_stream_seed_with_cookie_fallback(&tool_paths, &source, use_cookies);
+            for attempt in worker.attempts {
+                let command_line = attempt
+                    .command_line
+                    .or_else(|| (!attempt.success).then(|| "yt-dlp".to_owned()));
+                let Some(command_line) = command_line else {
+                    continue;
                 };
-            let command_line = command_line.or_else(|| (!success).then(|| "yt-dlp".to_owned()));
-            if let Some(command_line) = command_line {
                 let _ = tx.send(MusicStreamResolveEvent::ToolCommandFinished {
                     action_id: tool_log_action_id,
                     tool: "yt-dlp".to_owned(),
                     action: "resolve stream".to_owned(),
                     command_line,
-                    success,
+                    success: attempt.success,
                 });
             }
             let _ = tx.send(MusicStreamResolveEvent::Resolve {
@@ -62,7 +60,7 @@ impl AppState {
                 session_id,
                 source,
                 play_after_resolve: true,
-                result,
+                result: worker.result,
             });
         });
     }
@@ -179,23 +177,21 @@ impl AppState {
         let use_cookies = item.selection.use_cookies;
         let tool_log_action_id = self.push_tool_log_action("audio", "prefetch resolve");
         thread::spawn(move || {
-            let (result, command_line, success) =
-                match tool_paths.analyze_music_stream_url_detailed(&source, use_cookies) {
-                    Ok(output) => {
-                        let command_line = output.command_line.clone();
-                        let result = music_stream_seed_from_json(&output.json, &source);
-                        (result, Some(command_line), true)
-                    }
-                    Err(error) => (Err(error.message), error.command_line, false),
+            let worker =
+                resolve_music_stream_seed_with_cookie_fallback(&tool_paths, &source, use_cookies);
+            for attempt in worker.attempts {
+                let command_line = attempt
+                    .command_line
+                    .or_else(|| (!attempt.success).then(|| "yt-dlp".to_owned()));
+                let Some(command_line) = command_line else {
+                    continue;
                 };
-            let command_line = command_line.or_else(|| (!success).then(|| "yt-dlp".to_owned()));
-            if let Some(command_line) = command_line {
                 let _ = tx.send(MusicStreamResolveEvent::ToolCommandFinished {
                     action_id: tool_log_action_id,
                     tool: "yt-dlp".to_owned(),
                     action: "prefetch resolve".to_owned(),
                     command_line,
-                    success,
+                    success: attempt.success,
                 });
             }
             let _ = tx.send(MusicStreamResolveEvent::Resolve {
@@ -203,7 +199,7 @@ impl AppState {
                 session_id,
                 source,
                 play_after_resolve: false,
-                result,
+                result: worker.result,
             });
         });
     }
@@ -235,6 +231,24 @@ impl AppState {
                 return;
             }
         };
+        let cache_cookie_free_retry_command = if item.selection.use_cookies {
+            match self.tool_paths.prepare_music_stream_cache_command(
+                &item.source_url,
+                &cache_media_path,
+                &item.music_stream_format_id,
+                false,
+            ) {
+                Ok(command) => Some(command),
+                Err(error) => {
+                    eprintln!(
+                        "[music-prefetch] cookie-free cache retry preparation skipped: {error}"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let session_id = self.next_music_prefetch_session_id();
         self.music.music_prefetch_active_item_id = Some(item.id);
@@ -258,6 +272,7 @@ impl AppState {
             expected_bytes: item.music_stream_expected_bytes,
             cache_root,
             cache_command,
+            cache_cookie_free_retry_command,
             volume: 0.0,
         };
         let control =

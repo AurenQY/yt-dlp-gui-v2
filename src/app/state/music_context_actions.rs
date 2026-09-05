@@ -145,7 +145,6 @@ impl AppState {
     pub fn request_main_download(&mut self) {
         if self.queue_mode_downloads_as_audio() {
             self.prepare_queue_items_for_audio_mode();
-            self.music.music_download_prompt_choice.mode = MusicDownloadMode::Original;
             self.music.music_download_prompt_choice.embed_cover = true;
             self.music.music_download_prompt_choice.write_tags = true;
             self.music.music_download_prompt_open = true;
@@ -183,12 +182,38 @@ impl AppState {
     }
 
     pub fn confirm_music_download_choice(&mut self) {
-        let mut choice = self.music.music_download_prompt_choice;
-        choice.mode = MusicDownloadMode::Original;
-        choice.embed_cover = true;
-        choice.write_tags = true;
+        let choice = confirmed_music_download_choice(self.music.music_download_prompt_choice);
         self.music.music_download_prompt_choice = choice;
         self.music.music_download_prompt_open = false;
         self.start_download_with_music_choice(choice);
+    }
+}
+
+fn confirmed_music_download_choice(mut choice: MusicDownloadChoice) -> MusicDownloadChoice {
+    choice.embed_cover = true;
+    choice.write_tags = true;
+    choice
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirming_music_download_preserves_unified_mp3_output() {
+        let choice = MusicDownloadChoice {
+            mode: MusicDownloadMode::Unified,
+            unified_format: MusicDownloadFormat::Mp3,
+            embed_cover: false,
+            write_tags: false,
+            ..MusicDownloadChoice::default()
+        };
+
+        let confirmed = confirmed_music_download_choice(choice);
+
+        assert_eq!(confirmed.mode, MusicDownloadMode::Unified);
+        assert_eq!(confirmed.target_format(), Some(MusicDownloadFormat::Mp3));
+        assert!(confirmed.embed_cover);
+        assert!(confirmed.write_tags);
     }
 }

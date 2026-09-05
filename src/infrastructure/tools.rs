@@ -21,7 +21,9 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::process::CommandExt;
 
 const DEFAULT_FORMAT_SELECTOR: &str = "bestvideo*+bestaudio/best";
-const MUSIC_STREAM_FORMAT_SELECTOR: &str = "bestaudio/best[acodec!=none]";
+// Audio Mode must never fall back to a muxed video format. Besides wasting
+// bandwidth and cache space, a muxed fallback is not a valid audio cache entry.
+const MUSIC_STREAM_FORMAT_SELECTOR: &str = "bestaudio[vcodec=none][acodec!=none]";
 const SECTION_FORMAT_SELECTOR: &str =
     "best[protocol!*=dash][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best";
 const COOKIE_SOURCE_AUTO: &str = "auto";
@@ -108,6 +110,7 @@ pub struct DownloadRequest {
     pub video_ext: String,
     pub audio_ext: String,
     pub merge_output_container: Option<String>,
+    pub output_extension_override: Option<String>,
     pub upload_date: String,
     pub subtitle_lang: Option<String>,
     pub subtitle_ext: String,
@@ -1739,7 +1742,12 @@ fn build_output_plan(request: &DownloadRequest) -> Result<OutputPlan, String> {
 
 fn build_directory_output_plan(request: &DownloadRequest, output_dir: &Path) -> OutputPlan {
     let expected_extension = determine_expected_container(request);
-    let (base_name, forced_extension) = split_file_name_parts(request.file_name.trim());
+    let (base_name, legacy_forced_extension) = if request.target_kind == DownloadTargetKind::Normal
+    {
+        split_normal_download_file_name_parts(request.file_name.trim())
+    } else {
+        split_file_name_parts(request.file_name.trim())
+    };
     let base_name = if base_name.is_empty() {
         "%(title)s".to_owned()
     } else {
@@ -1751,20 +1759,24 @@ fn build_directory_output_plan(request: &DownloadRequest, output_dir: &Path) -> 
         .as_deref()
         .and_then(normalized_download_merge_container)
         .is_some();
-    let final_extension = if has_explicit_merge_container {
-        expected_extension.clone()
+    let explicit_output_extension = if request.target_kind == DownloadTargetKind::Normal {
+        request
+            .output_extension_override
+            .as_deref()
+            .and_then(normalized_normal_output_extension)
     } else {
-        forced_extension
-            .clone()
-            .unwrap_or_else(|| expected_extension.clone())
+        legacy_forced_extension.clone()
     };
+    let final_extension = explicit_output_extension
+        .clone()
+        .unwrap_or_else(|| expected_extension.clone());
     let final_output_path = output_dir.join(format!("{base_name}.{final_extension}"));
     let output_base_name =
         output_base_name_with_section_number(&base_name, request.download_section_args.len());
 
     if !has_explicit_merge_container
         && request.target_kind != DownloadTargetKind::Subtitle
-        && forced_extension
+        && explicit_output_extension
             .as_deref()
             .is_some_and(|ext| !ext.eq_ignore_ascii_case(&expected_extension))
     {
@@ -1990,6 +2002,28 @@ fn split_file_name_parts(file_name: &str) -> (String, Option<String>) {
     }
 }
 
+fn split_normal_download_file_name_parts(file_name: &str) -> (String, Option<String>) {
+    if file_name.is_empty() {
+        return (String::new(), None);
+    }
+
+    let path = Path::new(file_name);
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .and_then(normalized_normal_output_extension);
+    if let Some(extension) = extension {
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or(file_name)
+            .to_owned();
+        (stem, Some(extension))
+    } else {
+        (file_name.to_owned(), None)
+    }
+}
+
 fn is_known_output_extension(extension: &str) -> bool {
     matches!(
         extension,
@@ -2068,7 +2102,13 @@ fn normalized_extension(extension: &str) -> Option<String> {
 }
 
 fn normalized_download_merge_container(container: &str) -> Option<String> {
-    normalized_extension(container).filter(|container| matches!(container.as_str(), "mkv" | "webm"))
+    normalized_extension(container)
+        .filter(|container| matches!(container.as_str(), "mkv" | "mp4" | "webm"))
+}
+
+fn normalized_normal_output_extension(extension: &str) -> Option<String> {
+    normalized_extension(extension)
+        .filter(|extension| matches!(extension.as_str(), "mkv" | "mp4" | "webm" | "mov" | "flv"))
 }
 
 #[cfg(test)]
@@ -2086,6 +2126,7 @@ mod tests {
             video_ext: "mkv".to_owned(),
             audio_ext: String::new(),
             merge_output_container: None,
+            output_extension_override: None,
             upload_date: String::new(),
             subtitle_lang: Some("en".to_owned()),
             subtitle_ext: "vtt".to_owned(),
@@ -2114,6 +2155,15 @@ mod tests {
             .get_args()
             .map(|arg| arg.to_string_lossy().to_string())
             .collect()
+    }
+
+    #[test]
+    fn music_stream_selector_is_audio_only_without_muxed_fallback() {
+        assert_eq!(
+            MUSIC_STREAM_FORMAT_SELECTOR,
+            "bestaudio[vcodec=none][acodec!=none]"
+        );
+        assert!(!MUSIC_STREAM_FORMAT_SELECTOR.contains("/best"));
     }
 
     #[test]
@@ -2202,6 +2252,74 @@ mod tests {
             command_args(&command),
             vec!["--merge-output-format", "webm"]
         );
+    }
+
+    #[test]
+    fn explicit_mp4_container_controls_merge_and_expected_output() {
+        let mut request = subtitle_test_request(false, false);
+        request.merge_output_container = Some("mp4".to_owned());
+        request.video_ext = "mp4".to_owned();
+        request.audio_ext = "m4a".to_owned();
+        request.file_name = "video.mkv".to_owned();
+        let plan = build_directory_output_plan(&request, Path::new("output"));
+        assert!(
+            plan.final_output_path
+                .ends_with(Path::new("output").join("video.mp4"))
+        );
+
+        let mut command = Command::new("yt-dlp");
+        apply_merge_output_container_arg(
+            &mut command,
+            DownloadTargetKind::Normal,
+            request.merge_output_container.as_deref(),
+        );
+        assert_eq!(command_args(&command), vec!["--merge-output-format", "mp4"]);
+    }
+
+    #[test]
+    fn normal_download_ignores_legacy_file_name_extension() {
+        let mut request = subtitle_test_request(false, false);
+        request.video_ext = "mp4".to_owned();
+        request.file_name = "video.webm".to_owned();
+
+        let plan = build_directory_output_plan(&request, Path::new("output"));
+
+        assert!(
+            plan.final_output_path
+                .ends_with(Path::new("output").join("video.mp4"))
+        );
+        assert_eq!(plan.remux_extension, None);
+    }
+
+    #[test]
+    fn normal_download_preserves_non_container_dots_in_base_name() {
+        let mut request = subtitle_test_request(false, false);
+        request.video_ext = "mp4".to_owned();
+        request.file_name = "recording.mp3".to_owned();
+
+        let plan = build_directory_output_plan(&request, Path::new("output"));
+
+        assert!(
+            plan.final_output_path
+                .ends_with(Path::new("output").join("recording.mp3.mp4"))
+        );
+    }
+
+    #[test]
+    fn explicit_mov_output_extension_remuxes_without_using_file_name_as_state() {
+        let mut request = subtitle_test_request(false, false);
+        request.video_ext = "mp4".to_owned();
+        request.file_name = "custom name".to_owned();
+        request.output_extension_override = Some("mov".to_owned());
+
+        let plan = build_directory_output_plan(&request, Path::new("output"));
+
+        assert!(
+            plan.final_output_path
+                .ends_with(Path::new("output").join("custom name.mov"))
+        );
+        assert_eq!(plan.remux_extension.as_deref(), Some("mov"));
+        assert!(plan.output_argument.ends_with("custom name.%(ext)s"));
     }
 
     #[test]

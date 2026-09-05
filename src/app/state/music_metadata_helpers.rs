@@ -96,6 +96,25 @@ pub(super) fn music_stream_seed_from_json(
         .and_then(|value| json_str_field(value, "acodec"))
         .or_else(|| json_str_field(json, "acodec"))
         .unwrap_or_default();
+    let vcodec = requested
+        .and_then(|value| json_str_field(value, "vcodec"))
+        .or_else(|| json_str_field(json, "vcodec"))
+        .unwrap_or_default();
+    if !vcodec.eq_ignore_ascii_case("none") {
+        let selected = if format_id.trim().is_empty() {
+            "unknown format"
+        } else {
+            format_id.as_str()
+        };
+        return Err(format!(
+            "Audio Mode rejected {selected}: yt-dlp selected a format containing video (vcodec={}).",
+            if vcodec.trim().is_empty() {
+                "unknown"
+            } else {
+                vcodec.as_str()
+            }
+        ));
+    }
     let expected_bytes = requested
         .and_then(|value| json_u64_field(value, "filesize"))
         .or_else(|| requested.and_then(|value| json_u64_field(value, "filesize_approx")))
@@ -121,10 +140,88 @@ pub(super) fn music_stream_seed_from_json(
         ext,
         format_id,
         acodec,
+        used_cookies: false,
+        cookies_fallback: false,
         expected_bytes,
         cache_key,
         lyrics_track: primary_original_subtitle_track_from_json(json),
     })
+}
+
+pub(super) struct MusicStreamResolveAttempt {
+    pub(super) command_line: Option<String>,
+    pub(super) success: bool,
+}
+
+pub(super) struct MusicStreamResolveWorkerResult {
+    pub(super) result: Result<MusicStreamSeed, String>,
+    pub(super) attempts: Vec<MusicStreamResolveAttempt>,
+}
+
+pub(super) fn resolve_music_stream_seed_with_cookie_fallback(
+    tool_paths: &ToolPaths,
+    source: &str,
+    use_cookies: bool,
+) -> MusicStreamResolveWorkerResult {
+    let mut attempts = Vec::with_capacity(2);
+    match tool_paths.analyze_music_stream_url_detailed(source, use_cookies) {
+        Ok(output) => {
+            attempts.push(MusicStreamResolveAttempt {
+                command_line: Some(output.command_line.clone()),
+                success: true,
+            });
+            let result = music_stream_seed_from_json(&output.json, source).map(|mut seed| {
+                seed.used_cookies = use_cookies;
+                seed
+            });
+            MusicStreamResolveWorkerResult { result, attempts }
+        }
+        Err(error) => {
+            let retry_without_cookies =
+                use_cookies && music_stream_error_allows_cookie_free_retry(&error.message);
+            attempts.push(MusicStreamResolveAttempt {
+                command_line: error.command_line,
+                success: false,
+            });
+            if !retry_without_cookies {
+                return MusicStreamResolveWorkerResult {
+                    result: Err(error.message),
+                    attempts,
+                };
+            }
+
+            let result = match tool_paths.analyze_music_stream_url_detailed(source, false) {
+                Ok(output) => {
+                    attempts.push(MusicStreamResolveAttempt {
+                        command_line: Some(output.command_line.clone()),
+                        success: true,
+                    });
+                    music_stream_seed_from_json(&output.json, source).map(|mut seed| {
+                        seed.used_cookies = false;
+                        seed.cookies_fallback = true;
+                        seed
+                    })
+                }
+                Err(retry_error) => {
+                    attempts.push(MusicStreamResolveAttempt {
+                        command_line: retry_error.command_line,
+                        success: false,
+                    });
+                    Err(format!(
+                        "Cookies were rejected and the cookie-free retry also failed: {}",
+                        retry_error.message
+                    ))
+                }
+            };
+            MusicStreamResolveWorkerResult { result, attempts }
+        }
+    }
+}
+
+fn music_stream_error_allows_cookie_free_retry(error: &str) -> bool {
+    error
+        .to_ascii_lowercase()
+        .contains("the page needs to be reloaded")
 }
 
 pub(super) fn primary_original_subtitle_track_from_json(json: &Value) -> Option<SubtitleOption> {
@@ -303,6 +400,9 @@ pub(super) fn complete_music_cache_media_path_in_root(
         return None;
     }
     if !manifest.complete {
+        return None;
+    }
+    if !manifest.audio_only {
         return None;
     }
     let path = cache_dir.join(format!(
@@ -567,5 +667,66 @@ pub(super) fn format_duration_seconds(seconds: f64) -> String {
         format!("{hours}:{minutes:02}:{seconds:02}")
     } else {
         format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn stream_json(format_id: &str, vcodec: &str) -> Value {
+        json!({
+            "title": "Track",
+            "duration": 180.0,
+            "requested_downloads": [{
+                "url": "https://media.example.invalid/audio",
+                "ext": "webm",
+                "format_id": format_id,
+                "acodec": "opus",
+                "vcodec": vcodec,
+                "filesize": 3_000_000
+            }]
+        })
+    }
+
+    #[test]
+    fn audio_mode_accepts_audio_only_stream_metadata() {
+        let seed = music_stream_seed_from_json(
+            &stream_json("251", "none"),
+            "https://example.invalid/watch",
+        )
+        .expect("audio-only metadata should be accepted");
+
+        assert_eq!(seed.format_id, "251");
+        assert_eq!(seed.acodec, "opus");
+        assert_eq!(seed.expected_bytes, Some(3_000_000));
+    }
+
+    #[test]
+    fn audio_mode_rejects_muxed_stream_metadata() {
+        let error = match music_stream_seed_from_json(
+            &stream_json("96", "avc1.4d401f"),
+            "https://example.invalid/watch",
+        ) {
+            Ok(_) => panic!("muxed metadata must not enter the audio cache"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("Audio Mode rejected 96"));
+        assert!(error.contains("vcodec=avc1.4d401f"));
+    }
+
+    #[test]
+    fn cookie_free_retry_is_limited_to_stale_session_error() {
+        assert!(music_stream_error_allows_cookie_free_retry(
+            "ERROR: The page needs to be reloaded."
+        ));
+        assert!(!music_stream_error_allows_cookie_free_retry(
+            "ERROR: Sign in to confirm your age"
+        ));
+        assert!(!music_stream_error_allows_cookie_free_retry(
+            "ERROR: Private video"
+        ));
     }
 }

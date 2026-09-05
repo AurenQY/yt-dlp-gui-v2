@@ -263,6 +263,7 @@ fn render_header_center(ui: &mut Ui, state: &mut AppState) {
         });
         if state.format_picker.view_mode != previous_mode {
             format_picker_filters::sync_picker_mode(state);
+            state.remember_format_picker_view_mode(state.format_picker.view_mode);
         }
         return;
     }

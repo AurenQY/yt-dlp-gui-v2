@@ -1,88 +1,73 @@
-use eframe::egui;
 use egui_taffy::Tui;
 
 use crate::app::state::AppState;
 use crate::app::widgets::url_input::{AppTextBox, AppTextBoxSyntax};
 use crate::infrastructure::FileTimeMode;
 
-use super::common::{settings_taffy_form_row, settings_taffy_section};
 use super::semantic_ui_metrics;
+use super::settings_components::{
+    SettingsFormLayout, SettingsSelectOption, settings_flexible_form_row, settings_section,
+    settings_select_row, settings_toggle_row,
+};
 
-pub(super) fn render_aria2_section(tui: &mut Tui, state: &mut AppState, label_width: f32) {
-    settings_taffy_section(tui, "Aria2", |tui| {
-        settings_taffy_form_row(
+pub(super) fn render_aria2_section(tui: &mut Tui, state: &mut AppState, form: SettingsFormLayout) {
+    settings_section(tui, "Aria2", |tui| {
+        if let Some(enabled) = settings_toggle_row(
             tui,
-            label_width,
+            form,
             state.ui_i18n_text_for_key("advance.external_downloader"),
-            |ui| {
-                let mut use_aria2 = state.item_defaults.use_aria2;
-                if ui
-                    .checkbox(
-                        &mut use_aria2,
-                        state.ui_i18n_text_for_key("advance.use_aria2_for_faster_downloads"),
-                    )
-                    .changed()
-                {
-                    state.set_use_aria2(use_aria2);
-                }
-            },
-        );
+            state.item_defaults.use_aria2,
+            state.ui_i18n_text_for_key("advance.use_aria2_for_faster_downloads"),
+        ) {
+            state.set_use_aria2(enabled);
+        }
     });
 }
 pub(super) fn render_download_processing_section(
     tui: &mut Tui,
     state: &mut AppState,
-    label_width: f32,
+    form: SettingsFormLayout,
 ) {
-    settings_taffy_section(
+    settings_section(
         tui,
         state.ui_i18n_text_for_key("advance.download_control"),
         |tui| {
-            settings_taffy_form_row(
+            let selected = state.tool_paths.concurrent_fragments;
+            let fragment_options = state
+                .available_concurrent_fragment_values()
+                .into_iter()
+                .map(|value| {
+                    let label = if value == 1 {
+                        state.ui_i18n_text_for_key("advance.1_default").to_owned()
+                    } else {
+                        value.to_string()
+                    };
+                    SettingsSelectOption::new(value, label)
+                })
+                .collect::<Vec<_>>();
+            if let Some(value) = settings_select_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("advance.concurrent_fragments"),
-                |ui| {
-                    let selected = state.tool_paths.concurrent_fragments;
-                    egui::ComboBox::from_id_salt("concurrent-fragments")
-                        .selected_text(format!("{}", selected.max(1)))
-                        .show_ui(ui, |ui| {
-                            for value in state.available_concurrent_fragment_values() {
-                                let label = if value == 1 {
-                                    state.ui_i18n_text_for_key("advance.1_default").to_owned()
-                                } else {
-                                    value.to_string()
-                                };
-                                if ui.selectable_label(selected == value, label).clicked() {
-                                    state.set_concurrent_fragments(value);
-                                }
-                            }
-                        })
-                        .response;
-                },
-            );
-            settings_taffy_form_row(
+                "concurrent-fragments",
+                selected,
+                &selected.max(1).to_string(),
+                &fragment_options,
+            ) {
+                state.set_concurrent_fragments(value);
+            }
+            if let Some(enabled) = settings_toggle_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("advance.live_streams"),
-                |ui| {
-                    let mut live_from_start = state.config.live_from_start;
-                    if ui
-                        .checkbox(
-                            &mut live_from_start,
-                            state.ui_i18n_text_for_key(
-                                "advance.download_live_streams_from_start_experimental",
-                            ),
-                        )
-                        .changed()
-                    {
-                        state.set_live_from_start(live_from_start);
-                    }
-                },
-            );
-            settings_taffy_form_row(
+                state.config.live_from_start,
+                state.ui_i18n_text_for_key("advance.download_live_streams_from_start_experimental"),
+            ) {
+                state.set_live_from_start(enabled);
+            }
+            settings_flexible_form_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("advance.rate_limit"),
                 |ui| {
                     let mut limit_rate = state.tool_paths.limit_rate.clone();
@@ -98,70 +83,45 @@ pub(super) fn render_download_processing_section(
             }
                 },
             );
-            settings_taffy_form_row(
+            if let Some(enabled) = settings_toggle_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("advance.chapters"),
-                |ui| {
-                    let mut compatibility_mode = state.tool_paths.chapter_compatibility_mode;
-                    if ui
-                        .checkbox(
-                            &mut compatibility_mode,
-                            state.ui_i18n_text_for_key(
-                                "advance.chapter_download_compatibility_mode",
-                            ),
-                        )
-                        .changed()
-                    {
-                        state.set_chapter_compatibility_mode(compatibility_mode);
-                    }
-                },
-            );
-            settings_taffy_form_row(
+                state.tool_paths.chapter_compatibility_mode,
+                state.ui_i18n_text_for_key("advance.chapter_download_compatibility_mode"),
+            ) {
+                state.set_chapter_compatibility_mode(enabled);
+            }
+            if let Some(enabled) = settings_toggle_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("advance.download_range"),
-                |ui| {
-                    let mut always_show = state.config.always_show_download_range;
-                    if ui
-                        .checkbox(
-                            &mut always_show,
-                            state.ui_i18n_text_for_key("advance.always_show_download_range"),
-                        )
-                        .changed()
-                    {
-                        state.set_always_show_download_range(always_show);
-                    }
-                },
-            );
-            settings_taffy_form_row(
+                state.config.always_show_download_range,
+                state.ui_i18n_text_for_key("advance.always_show_download_range"),
+            ) {
+                state.set_always_show_download_range(enabled);
+            }
+
+            let file_time = state.tool_paths.file_time_mode;
+            let file_time_options = [
+                FileTimeMode::None,
+                FileTimeMode::UseUploadDate,
+                FileTimeMode::UseDownloadTime,
+            ]
+            .map(|mode| {
+                SettingsSelectOption::new(mode, state.ui_i18n_text_for_key(mode.label_key()))
+            });
+            if let Some(mode) = settings_select_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("advance.file_time"),
-                |ui| {
-                    let selected = state.tool_paths.file_time_mode;
-                    egui::ComboBox::from_id_salt("file-time-mode")
-                        .selected_text(state.ui_i18n_text_for_key(selected.label_key()))
-                        .show_ui(ui, |ui| {
-                            for mode in [
-                                FileTimeMode::None,
-                                FileTimeMode::UseUploadDate,
-                                FileTimeMode::UseDownloadTime,
-                            ] {
-                                if ui
-                                    .selectable_label(
-                                        selected == mode,
-                                        state.ui_i18n_text_for_key(mode.label_key()),
-                                    )
-                                    .clicked()
-                                {
-                                    state.set_file_time_mode(mode);
-                                }
-                            }
-                        })
-                        .response;
-                },
-            );
+                "file-time-mode",
+                file_time,
+                state.ui_i18n_text_for_key(file_time.label_key()),
+                &file_time_options,
+            ) {
+                state.set_file_time_mode(mode);
+            }
         },
     );
 }

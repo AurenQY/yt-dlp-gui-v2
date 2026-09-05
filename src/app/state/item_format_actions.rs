@@ -421,13 +421,12 @@ impl AppState {
         self.format_picker.open = true;
         self.format_picker.target_item_id = Some(target_item_id);
         self.format_picker.kind = Some(kind);
-        self.format_picker.view_mode = if self.app_mode == AppMode::Origin
-            && matches!(kind, FormatPickerKind::Video | FormatPickerKind::Audio)
-        {
-            FormatPickerViewMode::Table
-        } else {
-            FormatPickerViewMode::Filter
-        };
+        self.format_picker.view_mode =
+            if matches!(kind, FormatPickerKind::Video | FormatPickerKind::Audio) {
+                self.preferred_format_picker_view_mode()
+            } else {
+                FormatPickerViewMode::Filter
+            };
         self.format_picker.filter_text.clear();
         self.format_picker.filters.clear();
 
@@ -592,11 +591,16 @@ impl AppState {
         self.cancel_format_picker();
     }
     pub fn format_picker_options(&self, kind: FormatPickerKind) -> Vec<FormatOption> {
-        let mut options: Vec<FormatOption> = match kind {
+        let options: Vec<FormatOption> = match kind {
             FormatPickerKind::Video => self.video_formats().cloned().collect(),
             FormatPickerKind::Audio => self.audio_formats().cloned().collect(),
             FormatPickerKind::Subtitle | FormatPickerKind::Section => Vec::new(),
         };
+        let mut options =
+            crate::app::format_picker_visibility::apply_unknown_filesize_format_policy(
+                options,
+                self.config.unknown_filesize_format_policy,
+            );
 
         match kind {
             FormatPickerKind::Video => {
@@ -874,6 +878,7 @@ impl AppState {
             upload_date_text,
             thumbnail_hint,
             thumbnail_url,
+            thumbnail_candidates: crate::app::metadata::thumbnail_candidate_urls(&json),
             formats: formats.clone(),
             subtitle_tracks: subtitle_tracks.clone(),
             chapters: chapters.clone(),
@@ -895,15 +900,10 @@ impl AppState {
 
         let default_subtitle_source = SubtitleSource::None;
         let default_subtitle = String::new();
-        let default_file_name = extract_requested_filename(&json)
-            .or_else(|| {
-                json.get("_filename")
-                    .or_else(|| json.get("filename"))
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned)
-            })
-            .map(|filename| sanitize_file_name_for_windows(&display_file_stem(&filename)))
-            .unwrap_or_default();
+        // The GUI owns the user-facing default name. yt-dlp's requested filename
+        // commonly includes " [video_id]", which is useful for archival output
+        // templates but surprising as the normal desktop download name.
+        let default_file_name = default_file_name_from_title(&title);
 
         if let Some(item_id) = target_item_id {
             if let Some(item) = self.queue_item_mut_by_id(item_id) {

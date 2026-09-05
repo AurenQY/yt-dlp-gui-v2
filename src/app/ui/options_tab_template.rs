@@ -13,6 +13,7 @@ enum OptionsRootNode {
     Language,
     ToolPaths,
     Behavior,
+    FormatList,
     Tabs,
     Playlist,
     FileAction,
@@ -23,20 +24,18 @@ enum OptionsRootNode {
 type OptionsRootTemplate = TemplateNode<OptionsRootNode>;
 
 pub(super) fn render_options_root_page(ui: &mut Ui, state: &mut AppState) {
-    ScrollArea::vertical()
+    let restored_offset = state.options_root_scroll_offset();
+    let output = ScrollArea::vertical()
         .id_salt("options-tab-scroll")
+        .vertical_scroll_offset(restored_offset)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let metrics = OptionsLayoutMetrics::new(ui, state);
             settings_taffy_scroll_content(ui, "options-root-settings-taffy", |tui| {
-                show_options_root_template(
-                    options_root_template(),
-                    tui,
-                    state,
-                    metrics.label_width,
-                );
+                show_options_root_template(options_root_template(), tui, state, metrics);
             });
         });
+    state.remember_options_root_scroll_offset(output.state.offset.y);
 }
 
 fn options_root_template() -> OptionsRootTemplate {
@@ -44,6 +43,7 @@ fn options_root_template() -> OptionsRootTemplate {
         OptionsRootNode::Language,
         OptionsRootNode::ToolPaths,
         OptionsRootNode::Behavior,
+        OptionsRootNode::FormatList,
         OptionsRootNode::Tabs,
         OptionsRootNode::Playlist,
         OptionsRootNode::FileAction,
@@ -56,10 +56,10 @@ fn show_options_root_template(
     template: OptionsRootTemplate,
     tui: &mut Tui,
     state: &mut AppState,
-    label_width: f32,
+    metrics: OptionsLayoutMetrics,
 ) {
     let mut show_block = |node, tui: &mut Tui| {
-        show_options_root_block(node, tui, state, label_width);
+        show_options_root_block(node, tui, state, metrics);
     };
     show_auto_height_tui_template(template, tui, &mut show_block);
 }
@@ -68,30 +68,31 @@ fn show_options_root_block(
     node: OptionsRootNode,
     tui: &mut Tui,
     state: &mut AppState,
-    label_width: f32,
+    metrics: OptionsLayoutMetrics,
 ) {
+    let label_width = metrics.label_width;
+    let form = metrics.form;
     match node {
         OptionsRootNode::Language => {
-            super::options_language::render_language_group(tui, state, label_width)
+            super::options_language::render_language_group(tui, state, form)
         }
         OptionsRootNode::ToolPaths => {
             super::options_tool_paths::render_tool_paths_group(tui, state, label_width)
         }
         OptionsRootNode::Behavior => {
-            super::options_behavior::render_behavior_group(tui, state, label_width)
+            super::options_behavior::render_behavior_group(tui, state, form)
         }
-        OptionsRootNode::Tabs => {
-            super::options_behavior::render_tabs_group(tui, state, label_width)
+        OptionsRootNode::FormatList => {
+            super::options_formats::render_format_list_group(tui, state, form)
         }
+        OptionsRootNode::Tabs => super::options_behavior::render_tabs_group(tui, state, form),
         OptionsRootNode::Playlist => {
-            super::options_behavior::render_playlist_group(tui, state, label_width)
+            super::options_behavior::render_playlist_group(tui, state, form)
         }
         OptionsRootNode::FileAction => {
-            super::options_behavior::render_file_action_group(tui, state, label_width)
+            super::options_behavior::render_file_action_group(tui, state, form)
         }
         OptionsRootNode::Cache => super::options_cache::render_cache_group(tui, state, label_width),
-        OptionsRootNode::Window => {
-            super::options_window::render_window_group(tui, state, label_width)
-        }
+        OptionsRootNode::Window => super::options_window::render_window_group(tui, state, form),
     }
 }

@@ -143,7 +143,11 @@ pub enum ThumbnailRenderSource {
 pub(super) enum ThumbnailCacheEntry {
     Loading,
     Ready(eframe::egui::TextureHandle),
-    Failed(String),
+    Failed {
+        error: String,
+        attempt: u8,
+        retry_at: Option<std::time::Instant>,
+    },
 }
 
 pub struct YoutubePlaylistPrompt {

@@ -128,6 +128,7 @@ pub struct ResolvedMusicStream {
     pub expected_bytes: Option<u64>,
     pub cache_root: PathBuf,
     pub cache_command: Option<Command>,
+    pub cache_cookie_free_retry_command: Option<Command>,
     pub volume: f32,
 }
 
@@ -140,6 +141,7 @@ pub enum MusicPlaybackEvent {
         action: String,
         command_line: String,
         success: bool,
+        cookie_free_fallback: bool,
     },
     Started {
         item_id: u64,
@@ -165,6 +167,7 @@ pub enum MusicPlaybackEvent {
         action: String,
         command_line: String,
         success: bool,
+        cookie_free_fallback: bool,
     },
     PrefetchFinished {
         item_id: u64,
@@ -1272,6 +1275,8 @@ struct MusicCacheManifest {
     format_id: String,
     acodec: String,
     #[serde(default)]
+    audio_only: bool,
+    #[serde(default)]
     thumbnail_url: String,
     #[serde(default)]
     cover_file: String,
@@ -1390,25 +1395,27 @@ fn run_music_stream_prefetch(
     cache_state.seed_ranges(manifest_ranges_for_existing_cache(&paths, existing_bytes));
 
     if let Some(command) = stream.cache_command.take() {
-        let command_line = format_process_command_line(&command);
         let manifest_info = MusicCacheManifestInfo::from_stream(stream);
-        let result = run_yt_dlp_cache_downloader(
+        let outcome = run_yt_dlp_cache_downloader_with_cookie_fallback(
             command,
+            stream.cache_cookie_free_retry_command.take(),
             paths,
             cache_state,
             manifest_info,
             Some(cancel_requested.clone()),
         );
-        let success = result.is_ok();
-        let _ = event_tx.send(MusicPlaybackEvent::PrefetchToolCommandFinished {
-            item_id: stream.item_id,
-            session_id: stream.session_id,
-            tool: "yt-dlp".to_owned(),
-            action: "prefetch cache".to_owned(),
-            command_line,
-            success,
-        });
-        return result;
+        for attempt in outcome.attempts {
+            let _ = event_tx.send(MusicPlaybackEvent::PrefetchToolCommandFinished {
+                item_id: stream.item_id,
+                session_id: stream.session_id,
+                tool: "yt-dlp".to_owned(),
+                action: "prefetch cache".to_owned(),
+                command_line: attempt.command_line,
+                success: attempt.success,
+                cookie_free_fallback: attempt.cookie_free_fallback,
+            });
+        }
+        return outcome.result;
     }
 
     let fallback_stream = MusicHttpCacheDownloadInfo::from_stream(stream);
@@ -1460,7 +1467,7 @@ fn run_stream_playback(
         );
         schedule_music_analysis_for_stream(&paths, &stream);
     } else if let Some(command) = stream.cache_command.take() {
-        let command_line = format_process_command_line(&command);
+        let cookie_free_retry_command = stream.cache_cookie_free_retry_command.take();
         let downloader_paths = paths.clone();
         let downloader_state = cache_state.clone();
         let manifest_info = MusicCacheManifestInfo::from_stream(&stream);
@@ -1468,22 +1475,26 @@ fn run_stream_playback(
         let log_item_id = stream.item_id;
         let log_session_id = stream.session_id;
         thread::spawn(move || {
-            let result = run_yt_dlp_cache_downloader(
+            let outcome = run_yt_dlp_cache_downloader_with_cookie_fallback(
                 command,
+                cookie_free_retry_command,
                 downloader_paths,
                 downloader_state.clone(),
                 manifest_info,
                 None,
             );
-            let _ = log_tx.send(MusicPlaybackEvent::ToolCommandFinished {
-                item_id: log_item_id,
-                session_id: log_session_id,
-                tool: "yt-dlp".to_owned(),
-                action: "playback cache".to_owned(),
-                command_line,
-                success: result.is_ok(),
-            });
-            if let Err(error) = result {
+            for attempt in outcome.attempts {
+                let _ = log_tx.send(MusicPlaybackEvent::ToolCommandFinished {
+                    item_id: log_item_id,
+                    session_id: log_session_id,
+                    tool: "yt-dlp".to_owned(),
+                    action: "playback cache".to_owned(),
+                    command_line: attempt.command_line,
+                    success: attempt.success,
+                    cookie_free_fallback: attempt.cookie_free_fallback,
+                });
+            }
+            if let Err(error) = outcome.result {
                 eprintln!("[music-stream] yt-dlp cache download failed: {error}");
                 downloader_state.set_error(error);
             }
@@ -1926,6 +1937,7 @@ fn cached_media_is_complete(
                 .is_some_and(|range| range.start == 0 && range.end >= expected)
         });
     manifest.complete
+        && manifest.audio_only
         && manifest.source_url == stream.source_url
         && manifest.ext == stream.ext
         && manifest
@@ -2054,6 +2066,85 @@ fn run_yt_dlp_cache_downloader(
             None => thread::sleep(CACHE_WAIT_STEP),
         }
     }
+}
+
+struct MusicCacheCommandAttempt {
+    command_line: String,
+    success: bool,
+    cookie_free_fallback: bool,
+}
+
+struct MusicCacheDownloadOutcome {
+    result: Result<(), String>,
+    attempts: Vec<MusicCacheCommandAttempt>,
+}
+
+fn run_yt_dlp_cache_downloader_with_cookie_fallback(
+    command: Command,
+    cookie_free_retry_command: Option<Command>,
+    paths: MusicCachePaths,
+    cache_state: Arc<CacheTransferState>,
+    manifest_info: MusicCacheManifestInfo,
+    cancel_requested: Option<Arc<AtomicBool>>,
+) -> MusicCacheDownloadOutcome {
+    let command_line = format_process_command_line(&command);
+    let first_result = run_yt_dlp_cache_downloader(
+        command,
+        paths.clone(),
+        cache_state.clone(),
+        manifest_info.clone(),
+        cancel_requested.clone(),
+    );
+    let mut attempts = vec![MusicCacheCommandAttempt {
+        command_line,
+        success: first_result.is_ok(),
+        cookie_free_fallback: false,
+    }];
+    let Some(retry_command) = cookie_free_retry_command else {
+        return MusicCacheDownloadOutcome {
+            result: first_result,
+            attempts,
+        };
+    };
+    let should_retry = first_result
+        .as_ref()
+        .err()
+        .is_some_and(|error| music_cache_error_allows_cookie_free_retry(error));
+    if !should_retry {
+        return MusicCacheDownloadOutcome {
+            result: first_result,
+            attempts,
+        };
+    }
+
+    eprintln!(
+        "[music-stream] cookies cache request was rejected; retrying without cookies item={}",
+        manifest_info.item_id
+    );
+    let command_line = format_process_command_line(&retry_command);
+    let retry_result = run_yt_dlp_cache_downloader(
+        retry_command,
+        paths,
+        cache_state,
+        manifest_info,
+        cancel_requested,
+    );
+    attempts.push(MusicCacheCommandAttempt {
+        command_line,
+        success: retry_result.is_ok(),
+        cookie_free_fallback: true,
+    });
+    MusicCacheDownloadOutcome {
+        result: retry_result,
+        attempts,
+    }
+}
+
+fn music_cache_error_allows_cookie_free_retry(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("http error 403")
+        || normalized.contains("403 forbidden")
+        || normalized.contains("the page needs to be reloaded")
 }
 
 fn update_cache_progress_from_file(
@@ -2333,6 +2424,7 @@ fn write_cache_manifest(
         ext: info.ext.clone(),
         format_id: info.format_id.clone(),
         acodec: info.acodec.clone(),
+        audio_only: true,
         thumbnail_url: info.thumbnail_url.clone(),
         cover_file: "cover.img".to_owned(),
         expected_bytes,
@@ -6399,6 +6491,22 @@ fn output_has_buffered_audio(shared: &SharedPlaybackState) -> bool {
 #[cfg(test)]
 mod mix_execution_tests {
     use super::*;
+
+    #[test]
+    fn cache_cookie_free_retry_is_limited_to_rejected_media_requests() {
+        assert!(music_cache_error_allows_cookie_free_retry(
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+        ));
+        assert!(music_cache_error_allows_cookie_free_retry(
+            "ERROR: The page needs to be reloaded."
+        ));
+        assert!(!music_cache_error_allows_cookie_free_retry(
+            "ERROR: Private video"
+        ));
+        assert!(!music_cache_error_allows_cookie_free_retry(
+            "Could not create music stream cache: access denied"
+        ));
+    }
 
     #[test]
     fn device_channel_conversion_keeps_front_stereo_and_silences_extra_outputs() {

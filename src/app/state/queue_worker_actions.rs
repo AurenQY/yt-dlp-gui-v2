@@ -219,6 +219,9 @@ impl AppState {
             merge_output_container: self
                 .item_download_container_override(task_index)
                 .map(str::to_owned),
+            output_extension_override: self
+                .item_download_output_extension_override(task_index)
+                .map(str::to_owned),
             upload_date: item
                 .metadata()
                 .map(|metadata| metadata.upload_date_text.clone())
@@ -241,7 +244,7 @@ impl AppState {
             output_path: None,
             output_dir: item.selection.output_dir.clone(),
             file_name: if item.metadata_loaded() {
-                item.selection.file_name.clone()
+                normal_download_base_name(&item.selection.file_name)
             } else {
                 String::new()
             },
@@ -373,8 +376,26 @@ impl AppState {
                     .or_else(|| Some("m4a".to_owned()))
             }
             DownloadTargetKind::Subtitle => Some("srt".to_owned()),
-            DownloadTargetKind::Normal => None,
+            DownloadTargetKind::Normal => self.item_main_download_default_extension(item_index),
         }
+    }
+
+    pub fn item_main_download_default_extension(&self, item_index: usize) -> Option<String> {
+        let item = self.queue_items.get(item_index)?;
+        let metadata = item.metadata()?;
+        let (resolved_audio_selector, _) = self.resolve_download_format_selection(
+            &item.selection.video_selector,
+            &item.selection.audio_selector,
+            Some(metadata),
+        );
+        let video_ext = self.format_extension_by_id(&item.selection.video_selector, Some(metadata));
+        let audio_ext = self.format_extension_by_id(&resolved_audio_selector, Some(metadata));
+        Some(normal_download_default_extension(
+            self.item_download_container_override(item_index),
+            self.item_uses_muxed_video(item_index),
+            &video_ext,
+            &audio_ext,
+        ))
     }
 
     pub fn start_item_export(
@@ -492,6 +513,7 @@ impl AppState {
                 resolved_audio_ext
             },
             merge_output_container: None,
+            output_extension_override: None,
             upload_date: metadata.upload_date_text.clone(),
             subtitle_lang,
             subtitle_ext: if kind == DownloadTargetKind::Subtitle {

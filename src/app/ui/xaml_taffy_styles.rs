@@ -233,6 +233,54 @@ pub(super) struct XamlSingleLineRowLayout {
     column_gap: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct XamlAutoHeightRowLayout {
+    column_gap: f32,
+}
+
+impl XamlAutoHeightRowLayout {
+    pub(super) fn new() -> Self {
+        Self { column_gap: 0.0 }
+    }
+
+    pub(super) fn with_column_gap(mut self, column_gap: f32) -> Self {
+        self.column_gap = column_gap.max(0.0);
+        self
+    }
+
+    pub(super) fn show(self, tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
+        tui.style(xaml_auto_height_row_style(self.column_gap))
+            .add(add_contents);
+    }
+
+    pub(super) fn fixed_width_element_cell(
+        self,
+        element: UiElement,
+        width: f32,
+    ) -> XamlAutoHeightRowCell {
+        XamlAutoHeightRowCell {
+            style: xaml_fixed_width_auto_height_element_cell_style(element, width),
+        }
+    }
+
+    pub(super) fn star_width_element_cell(self, element: UiElement) -> XamlAutoHeightRowCell {
+        XamlAutoHeightRowCell {
+            style: xaml_star_width_auto_height_element_cell_style(element),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct XamlAutoHeightRowCell {
+    style: taffy::Style,
+}
+
+impl XamlAutoHeightRowCell {
+    pub(super) fn show(self, tui: &mut Tui, add_contents: impl FnOnce(&mut Ui)) {
+        tui.style(self.style).ui(add_contents);
+    }
+}
+
 impl XamlSingleLineRowLayout {
     pub(super) fn new(row: SingleLineControlRowContract) -> Self {
         Self {
@@ -741,8 +789,33 @@ pub(super) fn xaml_shrinkable_fixed_height_block_style(height: f32) -> taffy::St
 }
 
 #[cfg(test)]
-mod overlay_style_tests {
+mod xaml_taffy_style_tests {
     use super::*;
+
+    #[test]
+    fn auto_height_row_keeps_height_content_driven() {
+        let style = xaml_auto_height_row_style(8.0);
+
+        assert_eq!(style.display, taffy::Display::Flex);
+        assert_eq!(style.flex_direction, taffy::FlexDirection::Row);
+        assert_eq!(style.align_items, Some(taffy::AlignItems::Center));
+        assert_eq!(style.size.width, percent(1.0_f32));
+        assert_eq!(style.size.height, auto());
+        assert_eq!(style.gap, length(8.0_f32));
+    }
+
+    #[test]
+    fn auto_height_row_cells_do_not_inherit_a_fixed_row_height() {
+        let element = UiElement::auto_content_panel();
+        let fixed = xaml_fixed_width_auto_height_element_cell_style(element, 120.0);
+        let star = xaml_star_width_auto_height_element_cell_style(element);
+
+        assert_eq!(fixed.size.width, length(120.0_f32));
+        assert_eq!(fixed.size.height, auto());
+        assert_eq!(star.size.height, auto());
+        assert_eq!(star.flex_grow, 1.0);
+        assert_eq!(star.flex_shrink, 1.0);
+    }
 
     #[test]
     fn overlay_host_owns_relative_full_size_layout() {
@@ -998,6 +1071,79 @@ pub(super) fn xaml_fixed_width_stretch_height_gap_style(width: f32) -> taffy::St
         },
         flex_grow: 0.0,
         flex_shrink: 0.0,
+        padding: length(0.0_f32),
+        margin: length(0.0_f32),
+        ..Default::default()
+    }
+}
+
+pub(super) fn xaml_auto_height_row_style(gap: f32) -> taffy::Style {
+    taffy::Style {
+        display: taffy::Display::Flex,
+        flex_direction: taffy::FlexDirection::Row,
+        align_items: Some(taffy::AlignItems::Center),
+        size: taffy::Size {
+            width: percent(1.0_f32),
+            height: auto(),
+        },
+        min_size: taffy::Size {
+            width: length(0.0_f32),
+            height: length(0.0_f32),
+        },
+        gap: length(gap.max(0.0)),
+        padding: length(0.0_f32),
+        margin: length(0.0_f32),
+        ..Default::default()
+    }
+}
+
+pub(super) fn xaml_fixed_width_auto_height_element_cell_style(
+    element: UiElement,
+    width: f32,
+) -> taffy::Style {
+    debug_assert!(matches!(element.layout.height, LayoutLength::Auto));
+    let width = width.max(element.layout.min_width).max(0.0);
+    taffy::Style {
+        display: taffy::Display::Block,
+        size: taffy::Size {
+            width: length(width),
+            height: auto(),
+        },
+        min_size: taffy::Size {
+            width: length(width),
+            height: length(element.layout.min_height),
+        },
+        max_size: taffy::Size {
+            width: length(width),
+            height: auto(),
+        },
+        flex_grow: 0.0,
+        flex_shrink: 0.0,
+        padding: length(0.0_f32),
+        margin: length(0.0_f32),
+        ..Default::default()
+    }
+}
+
+pub(super) fn xaml_star_width_auto_height_element_cell_style(element: UiElement) -> taffy::Style {
+    debug_assert!(matches!(element.layout.height, LayoutLength::Auto));
+    taffy::Style {
+        display: taffy::Display::Block,
+        size: taffy::Size {
+            width: length(0.0_f32),
+            height: auto(),
+        },
+        min_size: taffy::Size {
+            width: length(element.layout.min_width),
+            height: length(element.layout.min_height),
+        },
+        max_size: taffy::Size {
+            width: percent(1.0_f32),
+            height: auto(),
+        },
+        flex_basis: length(0.0_f32),
+        flex_grow: 1.0,
+        flex_shrink: 1.0,
         padding: length(0.0_f32),
         margin: length(0.0_f32),
         ..Default::default()

@@ -11,6 +11,11 @@ use crate::app::widgets::url_input::{accent_blue_for_ui, accent_green_for_ui, ac
 
 use super::semantic_ui_metrics;
 
+const MUSIC_COMPACT_GLASS_COLOR: Color32 = Color32::from_rgb(12, 12, 14);
+const MUSIC_COMPACT_GLASS_ALPHA: u8 = 160;
+const LIGHT_MUSIC_COMPACT_GLASS_COLOR: Color32 = Color32::from_rgb(250, 252, 255);
+const LIGHT_MUSIC_COMPACT_GLASS_ALPHA: u8 = 198;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum CompactRowVisualState {
     Idle,
@@ -51,6 +56,7 @@ pub(super) struct CompactRowSpec<'a> {
     pub play_enabled: bool,
     pub cover_uses_mix_next: bool,
     pub remove_enabled: bool,
+    pub window_material_progress: f32,
 }
 
 pub(super) struct CompactRowOutput {
@@ -67,7 +73,7 @@ pub(super) fn render_music_compact_row(ui: &mut Ui, spec: CompactRowSpec<'_>) ->
         semantic_ui_metrics::music_compact_row_side_inset(),
         0.0,
     ));
-    let fill = compact_row_fill(ui, spec.visual_state);
+    let fill = compact_row_fill(ui, spec.visual_state, spec.window_material_progress);
     let stroke = Stroke::new(
         semantic_ui_metrics::music_compact_row_border_stroke_width(),
         ui.visuals().widgets.noninteractive.bg_stroke.color,
@@ -78,7 +84,7 @@ pub(super) fn render_music_compact_row(ui: &mut Ui, spec: CompactRowSpec<'_>) ->
         semantic_ui_metrics::music_compact_row_corner_radius(),
         fill,
         stroke,
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     if spec.activity_pulse.is_active() {
@@ -213,16 +219,37 @@ pub(super) fn render_music_compact_row(ui: &mut Ui, spec: CompactRowSpec<'_>) ->
     }
 }
 
-fn compact_row_fill(ui: &Ui, state: CompactRowVisualState) -> Color32 {
+fn compact_row_fill(ui: &Ui, state: CompactRowVisualState, material_progress: f32) -> Color32 {
+    let base = if ui.visuals().dark_mode && material_progress > 0.0 {
+        let alpha = lerp_u8(255, MUSIC_COMPACT_GLASS_ALPHA, material_progress);
+        Color32::from_rgba_unmultiplied(
+            MUSIC_COMPACT_GLASS_COLOR.r(),
+            MUSIC_COMPACT_GLASS_COLOR.g(),
+            MUSIC_COMPACT_GLASS_COLOR.b(),
+            alpha,
+        )
+    } else if material_progress > 0.0 {
+        let alpha = lerp_u8(255, LIGHT_MUSIC_COMPACT_GLASS_ALPHA, material_progress);
+        Color32::from_rgba_unmultiplied(
+            LIGHT_MUSIC_COMPACT_GLASS_COLOR.r(),
+            LIGHT_MUSIC_COMPACT_GLASS_COLOR.g(),
+            LIGHT_MUSIC_COMPACT_GLASS_COLOR.b(),
+            alpha,
+        )
+    } else {
+        ui.visuals().widgets.noninteractive.bg_fill
+    };
     match state {
-        CompactRowVisualState::Failed => subtle_tint(ui, Color32::from_rgb(170, 54, 54), 0.12),
-        CompactRowVisualState::Finished | CompactRowVisualState::Downloaded => {
-            ui.visuals().widgets.noninteractive.bg_fill
-        }
-        CompactRowVisualState::Playing { .. } => subtle_tint(ui, accent_blue_for_ui(ui), 0.06),
-        CompactRowVisualState::Paused { .. } => subtle_tint(ui, accent_blue_for_ui(ui), 0.04),
-        _ => ui.visuals().widgets.noninteractive.bg_fill,
+        CompactRowVisualState::Failed => tint_color(base, Color32::from_rgb(170, 54, 54), 0.12),
+        CompactRowVisualState::Finished | CompactRowVisualState::Downloaded => base,
+        CompactRowVisualState::Playing { .. } => tint_color(base, accent_blue_for_ui(ui), 0.06),
+        CompactRowVisualState::Paused { .. } => tint_color(base, accent_blue_for_ui(ui), 0.04),
+        _ => base,
     }
+}
+
+fn lerp_u8(from: u8, to: u8, progress: f32) -> u8 {
+    (f32::from(from) + (f32::from(to) - f32::from(from)) * progress.clamp(0.0, 1.0)).round() as u8
 }
 
 fn compact_progress_fill(ui: &Ui) -> Color32 {
@@ -289,8 +316,7 @@ fn render_activity_breathing_cover(ui: &Ui, rect: egui::Rect, activity: CompactR
     );
 }
 
-fn subtle_tint(ui: &Ui, color: Color32, strength: f32) -> Color32 {
-    let base = ui.visuals().widgets.noninteractive.bg_fill;
+fn tint_color(base: Color32, color: Color32, strength: f32) -> Color32 {
     let mix = |a: u8, b: u8| -> u8 {
         ((a as f32) * (1.0 - strength) + (b as f32) * strength)
             .round()

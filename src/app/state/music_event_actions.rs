@@ -112,6 +112,7 @@ impl AppState {
                 match result {
                     Ok(seed) => {
                         let lyrics_track = seed.lyrics_track.clone();
+                        let cookies_fallback = seed.cookies_fallback;
                         let mut updated_item = None;
                         if let Some(item) = self.queue_item_mut_by_id(item_id) {
                             item.source_url = seed.source_url;
@@ -134,6 +135,7 @@ impl AppState {
                             item.music_stream_ext = seed.ext;
                             item.music_stream_format_id = seed.format_id;
                             item.music_stream_acodec = seed.acodec;
+                            item.selection.use_cookies = seed.used_cookies;
                             item.music_stream_expected_bytes = seed.expected_bytes;
                             item.music_cache_key = seed.cache_key;
                             item.metadata_state = MetadataState::Idle;
@@ -148,6 +150,12 @@ impl AppState {
                         if let Some(item) = updated_item.as_ref() {
                             self.mark_font_content_changed();
                             self.cache_music_lyrics_for_item(item, lyrics_track.as_ref());
+                        }
+                        if cookies_fallback {
+                            self.push_runtime_log(
+                                "YouTube rejected the configured cookies; Audio Mode continued without cookies for this item. Refresh cookies for login-only media."
+                                    .to_owned(),
+                            );
                         }
                         if !play_after_resolve {
                             let is_current_prefetch_resolve =
@@ -337,6 +345,7 @@ impl AppState {
                 action,
                 command_line,
                 success,
+                cookie_free_fallback,
             } => {
                 if !self.is_current_music_session(item_id, session_id) {
                     return;
@@ -353,6 +362,16 @@ impl AppState {
                     action,
                     command_line,
                 );
+                if success && cookie_free_fallback {
+                    if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                        item.selection.use_cookies = false;
+                    }
+                    self.save_active_audio_playlist_if_needed();
+                    self.push_runtime_log(
+                        "YouTube rejected the cookies-based playback cache request; Audio Mode retried successfully without cookies for this item."
+                            .to_owned(),
+                    );
+                }
             }
             MusicPlaybackEvent::Started {
                 item_id,
@@ -465,6 +484,7 @@ impl AppState {
                 action,
                 command_line,
                 success,
+                cookie_free_fallback,
             } => {
                 if !self.prefetch_event_is_current(item_id, session_id) {
                     return;
@@ -476,6 +496,16 @@ impl AppState {
                     ToolLogStatus::Skipped
                 };
                 self.push_tool_log_step(action_id, status, tool, action, command_line);
+                if success && cookie_free_fallback {
+                    if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                        item.selection.use_cookies = false;
+                    }
+                    self.save_active_audio_playlist_if_needed();
+                    self.push_runtime_log(
+                        "YouTube rejected the cookies-based prefetch request; Audio Mode retried successfully without cookies for this item."
+                            .to_owned(),
+                    );
+                }
             }
             MusicPlaybackEvent::PrefetchFinished {
                 item_id,

@@ -639,8 +639,11 @@ impl AppState {
             "audio.{}",
             sanitize_music_cache_ext(&item.music_stream_ext)
         ));
-        let cache_command = if self.complete_music_cache_media_path(&item).is_some() {
-            None
+        let (cache_command, cache_cookie_free_retry_command) = if self
+            .complete_music_cache_media_path(&item)
+            .is_some()
+        {
+            (None, None)
         } else {
             match self.tool_paths.prepare_music_stream_cache_command(
                 &item.source_url,
@@ -648,7 +651,26 @@ impl AppState {
                 &item.music_stream_format_id,
                 item.selection.use_cookies,
             ) {
-                Ok(command) => Some(command),
+                Ok(command) => {
+                    let retry = item.selection.use_cookies.then(|| {
+                        self.tool_paths.prepare_music_stream_cache_command(
+                            &item.source_url,
+                            &cache_media_path,
+                            &item.music_stream_format_id,
+                            false,
+                        )
+                    });
+                    let retry = match retry.transpose() {
+                        Ok(command) => command,
+                        Err(error) => {
+                            eprintln!(
+                                "[music-stream] cookie-free cache retry preparation skipped: {error}"
+                            );
+                            None
+                        }
+                    };
+                    (Some(command), retry)
+                }
                 Err(error) => {
                     let message = i18n::format_fixed_english(
                         "Music cache preparation failed: {error}",
@@ -690,6 +712,7 @@ impl AppState {
             expected_bytes: item.music_stream_expected_bytes,
             cache_root,
             cache_command,
+            cache_cookie_free_retry_command,
             volume: self.music_chorus_initial_volume_for_item(item_id),
         };
         let control =

@@ -11,6 +11,60 @@ use crate::app::widgets::url_input::accent_blue_for_ui;
 use super::main_tab_music_aura_dynamics::MusicPlayerAuraDynamics;
 
 const AURA_TARGET_FRAME_INTERVAL: Duration = Duration::from_micros(33_333);
+const WINDOW_MATERIAL_TRANSITION_SECONDS: f32 = 0.72;
+const WINDOW_BACKDROP_DIM_MAX_ALPHA: u8 = 88;
+const LIGHT_WINDOW_PAPER_TINT: Color32 = Color32::from_rgb(220, 228, 238);
+const LIGHT_WINDOW_PAPER_TINT_ALPHA: u8 = 72;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MusicAuraPresentation {
+    PlayerOnly,
+    WindowAmbient,
+    WindowBackground,
+}
+
+impl Default for MusicAuraPresentation {
+    fn default() -> Self {
+        Self::WindowBackground
+    }
+}
+
+impl MusicAuraPresentation {
+    pub(super) fn toggled(self) -> Self {
+        match self {
+            Self::PlayerOnly => Self::WindowAmbient,
+            Self::WindowAmbient => Self::WindowBackground,
+            Self::WindowBackground => Self::PlayerOnly,
+        }
+    }
+
+    pub(super) fn window_layer_enabled(self) -> bool {
+        matches!(self, Self::WindowAmbient | Self::WindowBackground)
+    }
+
+    pub(super) fn player_layer_enabled(self) -> bool {
+        true
+    }
+
+    pub(super) fn background_glass_enabled(self) -> bool {
+        self == Self::WindowBackground
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MusicAuraLayer {
+    Player,
+    WindowAmbient,
+}
+
+impl MusicAuraLayer {
+    fn uniform_value(self) -> f32 {
+        match self {
+            Self::Player => 0.0,
+            Self::WindowAmbient => 1.0,
+        }
+    }
+}
 
 const AURA_VERTEX_SHADER: &str = r#"#version 140
 out vec2 v_uv;
@@ -193,8 +247,13 @@ vec3 analytic_track_color(vec4 a, vec4 b, vec4 c, float u, float dark_mode) {
         + sin(TAU * (2.0 * u + a.x)) * (0.030 + b.z * 0.025)
         + b.x * 0.015
     );
-    float saturation = clamp(0.76 + c.z * 0.16 + c.x * 0.05, 0.76, 0.98);
-    float value = mix(0.88, 1.0, dark_mode);
+    float saturation = clamp(
+        mix(0.88, 0.76, dark_mode) + c.z * 0.16 + c.x * 0.05,
+        mix(0.88, 0.76, dark_mode),
+        0.98
+    );
+    // Light mode gains definition from chroma, not from muddy low luminance.
+    float value = mix(0.92, 1.0, dark_mode);
     vec3 harmonic = hsv_to_rgb(vec3(hue, saturation, value));
     return mix(u_accent, harmonic, 0.74 + c.z * 0.18);
 }
@@ -220,6 +279,8 @@ void main() {
         0.50 + normalized_point.x * 0.18 + normalized_point.y * 0.13
     );
     float mix_progress = clamp(u_environment.x, 0.0, 1.0);
+    float window_ambient = clamp(u_environment.w, 0.0, 1.0);
+    float dark_mode = clamp(u_environment.z, 0.0, 1.0);
     float weight_a = cos(mix_progress * PI * 0.5);
     float weight_b = sin(mix_progress * PI * 0.5);
     vec2 wave_a = track_wave_field(
@@ -269,7 +330,6 @@ void main() {
     float ambient_field = sqrt(
         pow(weight_a * ambient_a, 2.0) + pow(weight_b * ambient_b, 2.0)
     );
-
     vec3 color_a = analytic_track_color(
         u_primary_a, u_primary_b, u_primary_c, color_coordinate, u_environment.z
     );
@@ -288,7 +348,7 @@ void main() {
     float neutral_alpha = inside * (
         neutral_outer_cut * 0.040
         + neutral_inner_cut * (0.052 + top_light * 0.042)
-    );
+    ) * mix(1.0, 0.08, window_ambient);
 
     // The neutral frame owns the first pixels. Beyond that moat, wave age and
     // anisotropic distance decide the shape; there is no fixed rectangular
@@ -297,8 +357,10 @@ void main() {
     float motion_presence = mix(0.66, 1.0, u_environment.y);
     float fluid_alpha = inside * material_gate * motion_presence * (
         ambient_field * 0.72 + wave_wake * 0.34
-    );
-    float crest_alpha = inside * material_gate * motion_presence * wave_crest * 0.46;
+    ) * mix(1.48, 1.0, dark_mode) * mix(1.0, 0.34, window_ambient);
+    float crest_alpha = inside * material_gate * motion_presence * wave_crest * 0.46
+        * mix(0.76, 1.0, dark_mode)
+        * mix(1.0, 0.20, window_ambient);
 
     float alpha = clamp(
         neutral_alpha + fluid_alpha + crest_alpha,
@@ -306,7 +368,7 @@ void main() {
         0.86
     );
     vec3 neutral_color = vec3(mix(0.52, 0.76, top_light));
-    vec3 crest_color = mix(color, vec3(1.0), 0.34);
+    vec3 crest_color = mix(color, vec3(1.0), mix(0.12, 0.34, dark_mode));
     vec3 premultiplied = (
         neutral_color * neutral_alpha
         + color * fluid_alpha
@@ -341,6 +403,82 @@ pub(super) fn render_music_player_aura_at(
     display: MusicPlayerAuraDisplay,
     corner_radius: f32,
 ) {
+    render_music_aura_at(
+        ui,
+        rect,
+        renderer,
+        display,
+        corner_radius,
+        MusicAuraLayer::Player,
+    );
+}
+
+pub(super) fn render_music_window_ambient_at(
+    ui: &Ui,
+    rect: egui::Rect,
+    renderer: Option<&MusicPlayerAuraRenderer>,
+    display: MusicPlayerAuraDisplay,
+    material_progress: f32,
+) {
+    render_music_window_backdrop_material(ui, rect, material_progress);
+    render_music_aura_at(
+        ui,
+        rect,
+        renderer,
+        display,
+        1.0,
+        MusicAuraLayer::WindowAmbient,
+    );
+}
+
+pub(super) fn music_window_material_progress(ui: &Ui, enabled: bool, playing: bool) -> f32 {
+    if !enabled {
+        return 0.0;
+    }
+    ui.ctx().animate_bool_with_time(
+        egui::Id::new("music-window-material-transition"),
+        playing,
+        WINDOW_MATERIAL_TRANSITION_SECONDS,
+    )
+}
+
+fn render_music_window_backdrop_material(ui: &Ui, rect: egui::Rect, progress: f32) {
+    if ui.visuals().dark_mode {
+        let alpha = window_backdrop_dim_alpha(progress);
+        if alpha > 0 {
+            ui.painter()
+                .rect_filled(rect, 0.0, Color32::from_black_alpha(alpha));
+        }
+    } else {
+        let alpha =
+            (f32::from(LIGHT_WINDOW_PAPER_TINT_ALPHA) * progress.clamp(0.0, 1.0)).round() as u8;
+        if alpha > 0 {
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(
+                    LIGHT_WINDOW_PAPER_TINT.r(),
+                    LIGHT_WINDOW_PAPER_TINT.g(),
+                    LIGHT_WINDOW_PAPER_TINT.b(),
+                    alpha,
+                ),
+            );
+        }
+    }
+}
+
+fn window_backdrop_dim_alpha(progress: f32) -> u8 {
+    (f32::from(WINDOW_BACKDROP_DIM_MAX_ALPHA) * progress.clamp(0.0, 1.0)).round() as u8
+}
+
+fn render_music_aura_at(
+    ui: &Ui,
+    rect: egui::Rect,
+    renderer: Option<&MusicPlayerAuraRenderer>,
+    display: MusicPlayerAuraDisplay,
+    corner_radius: f32,
+    layer: MusicAuraLayer,
+) {
     let (Some(renderer), Some(_)) = (renderer, display.primary) else {
         return;
     };
@@ -359,6 +497,7 @@ pub(super) fn render_music_player_aura_at(
             accent,
             dark_mode,
             display,
+            layer,
         );
     });
     ui.painter().add(egui::PaintCallback {
@@ -421,6 +560,7 @@ impl MusicPlayerAuraGlowRenderer {
         accent: [f32; 3],
         dark_mode: bool,
         display: MusicPlayerAuraDisplay,
+        layer: MusicAuraLayer,
     ) {
         let (Some(program), Some(vertex_array)) = (self.program, self.vertex_array) else {
             return;
@@ -451,7 +591,7 @@ impl MusicPlayerAuraGlowRenderer {
             mix_progress,
             f32::from(display.animating),
             f32::from(dark_mode),
-            0.0,
+            layer.uniform_value(),
         ];
         let viewport = info.viewport_in_pixels();
         let size_radius = [
@@ -824,7 +964,7 @@ mod tests {
         assert!(!AURA_FRAGMENT_SHADER.contains("circular_distance"));
         assert!(!AURA_FRAGMENT_SHADER.contains("analysis_pearl"));
         assert!(!AURA_FRAGMENT_SHADER.contains("u_primary_peak_low"));
-        assert!(AURA_FRAGMENT_SHADER.contains("0.76, 0.98"));
+        assert!(AURA_FRAGMENT_SHADER.contains("mix(0.88, 0.76, dark_mode)"));
         assert!(AURA_FRAGMENT_SHADER.contains("cos(mix_progress * PI * 0.5)"));
         assert!(AURA_FRAGMENT_SHADER.contains("sin(mix_progress * PI * 0.5)"));
     }
@@ -847,5 +987,50 @@ mod tests {
     fn aura_dynamics_refresh_immediately_for_new_track_identity() {
         assert!(aura_dynamics_should_advance(Duration::ZERO, false, true,));
         assert!(aura_dynamics_should_advance(Duration::ZERO, true, false,));
+    }
+
+    #[test]
+    fn window_background_is_the_reversible_experimental_default() {
+        let presentation = MusicAuraPresentation::default();
+        assert_eq!(presentation, MusicAuraPresentation::WindowBackground);
+        assert_eq!(presentation.toggled(), MusicAuraPresentation::PlayerOnly);
+        assert_eq!(
+            presentation.toggled().toggled(),
+            MusicAuraPresentation::WindowAmbient
+        );
+        assert_eq!(presentation.toggled().toggled().toggled(), presentation);
+        assert!(presentation.window_layer_enabled());
+        assert!(presentation.player_layer_enabled());
+        assert!(presentation.background_glass_enabled());
+    }
+
+    #[test]
+    fn shader_keeps_window_ambient_profile_separate_from_player_material() {
+        assert!(AURA_FRAGMENT_SHADER.contains("float window_ambient"));
+        assert!(AURA_FRAGMENT_SHADER.contains("mix(1.0, 0.08, window_ambient)"));
+        assert!(AURA_FRAGMENT_SHADER.contains("mix(1.0, 0.34, window_ambient)"));
+        assert!(AURA_FRAGMENT_SHADER.contains("mix(1.0, 0.20, window_ambient)"));
+    }
+
+    #[test]
+    fn dark_window_backdrop_dim_is_bounded_and_reversible() {
+        assert_eq!(WINDOW_MATERIAL_TRANSITION_SECONDS, 0.72);
+        assert_eq!(window_backdrop_dim_alpha(-1.0), 0);
+        assert_eq!(window_backdrop_dim_alpha(0.5), 44);
+        assert_eq!(window_backdrop_dim_alpha(1.0), 88);
+        assert_eq!(window_backdrop_dim_alpha(2.0), 88);
+    }
+
+    #[test]
+    fn light_window_profile_keeps_high_value_and_uses_chroma_for_definition() {
+        assert_eq!(LIGHT_WINDOW_PAPER_TINT, Color32::from_rgb(220, 228, 238));
+        assert_eq!(LIGHT_WINDOW_PAPER_TINT_ALPHA, 72);
+        assert!(AURA_FRAGMENT_SHADER.contains("float value = mix(0.92, 1.0, dark_mode)"));
+        assert!(!AURA_FRAGMENT_SHADER.contains("visible_ambient_field"));
+        assert!(AURA_FRAGMENT_SHADER.contains("mix(1.48, 1.0, dark_mode)"));
+        assert!(AURA_FRAGMENT_SHADER.contains("mix(0.12, 0.34, dark_mode)"));
+        assert!(
+            AURA_FRAGMENT_SHADER.contains("float dark_mode = clamp(u_environment.z, 0.0, 1.0)")
+        );
     }
 }

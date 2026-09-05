@@ -10,7 +10,7 @@ use super::{semantic_ui_metrics, xaml_taffy_styles};
 
 const APP_LOGO_BYTES: &[u8] = include_bytes!("../../../assets/logo.ico");
 
-pub(super) fn render_titlebar(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn render_titlebar(ui: &mut Ui, state: &mut AppState, transparent_background: bool) {
     let width = ui.available_width();
     let titlebar_height = semantic_ui_metrics::titlebar_height();
     let root_rect = Rect::from_min_size(
@@ -31,11 +31,13 @@ pub(super) fn render_titlebar(ui: &mut Ui, state: &mut AppState) {
         ui.ctx().pixels_per_point(),
     );
 
-    ui.painter().rect_filled(
-        root_rect,
-        semantic_ui_metrics::titlebar_background_corner_radius(),
-        titlebar_fill(ui),
-    );
+    if !transparent_background {
+        ui.painter().rect_filled(
+            root_rect,
+            semantic_ui_metrics::titlebar_background_corner_radius(),
+            titlebar_fill(ui),
+        );
+    }
     ui.painter().line_segment(
         [root_rect.left_bottom(), root_rect.right_bottom()],
         Stroke::new(

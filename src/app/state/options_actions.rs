@@ -113,6 +113,13 @@ impl AppState {
         }
         let _ = self.config.save();
     }
+    pub fn set_unknown_filesize_format_policy(&mut self, policy: UnknownFilesizeFormatPolicy) {
+        if self.config.unknown_filesize_format_policy == policy {
+            return;
+        }
+        self.config.unknown_filesize_format_policy = policy;
+        let _ = self.config.save();
+    }
     pub fn set_transcode_intent(
         &mut self,
         settings: crate::infrastructure::TranscodeIntentSettings,
@@ -167,6 +174,39 @@ impl AppState {
         self.config.set_download_dir(path);
         let _ = self.config.save();
         self.refresh_prepare_report();
+    }
+    pub fn set_origin_save_as_target(
+        &mut self,
+        path: PathBuf,
+        default_extension: &str,
+    ) -> Result<(), String> {
+        if self.app_mode != AppMode::Origin {
+            return Err("Save As is only available here in Origin Mode.".to_owned());
+        }
+        if self.output_dir_locked_by_config() {
+            return Err("The output path is controlled by the active yt-dlp config.".to_owned());
+        }
+        if self
+            .queue_items
+            .first()
+            .is_none_or(|item| !item.metadata_loaded())
+        {
+            return Err("Analyze the video before choosing its output file name.".to_owned());
+        }
+        if self.item_is_busy(0) {
+            return Err("The output file cannot be changed while this item is running.".to_owned());
+        }
+
+        let (output_dir, base_name, extension) =
+            normalized_origin_save_target(&path, default_extension)?;
+        let target_display = Path::new(&output_dir).join(format!("{base_name}.{extension}"));
+        self.set_output_dir(output_dir);
+        self.set_item_download_container_from_save_as(0, &extension)?;
+        if let Some(item) = self.queue_items.first_mut() {
+            item.selection.file_name = base_name;
+        }
+        self.last_action = format!("Download target: {}", target_display.display());
+        Ok(())
     }
     pub fn output_dir_locked_by_config(&self) -> bool {
         self.tool_paths.effective_config_owns_output()

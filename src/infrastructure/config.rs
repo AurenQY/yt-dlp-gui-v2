@@ -77,11 +77,18 @@ pub struct AppConfig {
     pub queue_display_mode: String,
     pub app_mode: String,
     pub show_log_tab: bool,
+    pub unknown_filesize_format_policy: UnknownFilesizeFormatPolicy,
     pub transcode_intent: TranscodeIntentSettings,
     pub language: LanguageSelection,
     pub theme_mode: ThemeMode,
     pub theme_accent_color: ThemeAccentColor,
     pub ui_scale_percent: u16,
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub options_scroll_offset: f32,
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub advance_scroll_offset: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format_picker_view_preference: Option<FormatPickerViewPreference>,
     #[serde(alias = "AlwaysOnTop")]
     pub keep_window_on_top: bool,
     pub remember_window_position: bool,
@@ -111,6 +118,36 @@ pub enum PostProcessMode {
     Download,
     #[serde(rename = "embed")]
     Embed,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum UnknownFilesizeFormatPolicy {
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "filter")]
+    Filter,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FormatPickerViewPreference {
+    #[serde(rename = "filter")]
+    Filter,
+    #[serde(rename = "table")]
+    Table,
+}
+
+impl UnknownFilesizeFormatPolicy {
+    pub fn variants() -> [Self; 2] {
+        [Self::Off, Self::Filter]
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::Off => "options.unknown_filesize_formats.off",
+            Self::Filter => "options.unknown_filesize_formats.filter",
+        }
+    }
 }
 
 impl Default for PostProcessMode {
@@ -874,11 +911,15 @@ impl Default for AppConfig {
             queue_display_mode: "normal".to_owned(),
             app_mode: "origin".to_owned(),
             show_log_tab: true,
+            unknown_filesize_format_policy: UnknownFilesizeFormatPolicy::Off,
             transcode_intent: TranscodeIntentSettings::default(),
             language: LanguageSelection::Auto,
             theme_mode: ThemeMode::System,
             theme_accent_color: ThemeAccentColor::Off,
             ui_scale_percent: 100,
+            options_scroll_offset: 0.0,
+            advance_scroll_offset: 0.0,
+            format_picker_view_preference: None,
             keep_window_on_top: false,
             remember_window_position: false,
             remember_window_size: false,
@@ -1063,6 +1104,8 @@ impl AppConfig {
         }
 
         self.ui_scale_percent = normalize_ui_scale_percent(self.ui_scale_percent);
+        self.options_scroll_offset = normalize_ui_scroll_offset(self.options_scroll_offset);
+        self.advance_scroll_offset = normalize_ui_scroll_offset(self.advance_scroll_offset);
         self.music_volume = self.music_volume.clamp(0.0, 1.0);
         self.music_playback_mode = match self
             .music_playback_mode
@@ -1092,16 +1135,48 @@ impl AppConfig {
     }
 }
 
+fn is_zero_f32(value: &f32) -> bool {
+    *value == 0.0
+}
+
+fn normalize_ui_scroll_offset(value: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, PostProcessMode, normalize_app_mode_value,
-        queue_display_mode_from_app_mode_value,
+        AppConfig, FormatPickerViewPreference, PostProcessMode, UnknownFilesizeFormatPolicy,
+        normalize_app_mode_value, queue_display_mode_from_app_mode_value,
     };
 
     #[test]
     fn app_config_defaults_to_origin_app_mode() {
         assert_eq!(AppConfig::default().app_mode, "origin");
+    }
+
+    #[test]
+    fn unknown_filesize_format_policy_defaults_off_and_round_trips_filter() {
+        let legacy = serde_yaml::from_str::<AppConfig>("{}").expect("deserialize legacy config");
+        assert_eq!(
+            legacy.unknown_filesize_format_policy,
+            UnknownFilesizeFormatPolicy::Off
+        );
+
+        let mut config = AppConfig::default();
+        config.unknown_filesize_format_policy = UnknownFilesizeFormatPolicy::Filter;
+        let yaml = serde_yaml::to_string(&config).expect("serialize policy");
+        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize policy");
+
+        assert!(yaml.contains("unknown_filesize_format_policy: filter"));
+        assert_eq!(
+            restored.unknown_filesize_format_policy,
+            UnknownFilesizeFormatPolicy::Filter
+        );
     }
 
     #[test]
@@ -1180,6 +1255,39 @@ mod tests {
 
         assert!(yaml.contains("always_show_download_range: true"));
         assert!(restored.always_show_download_range);
+    }
+
+    #[test]
+    fn options_and_advance_scroll_offsets_round_trip_only_when_nonzero() {
+        let defaults = serde_yaml::to_string(&AppConfig::default()).expect("serialize defaults");
+        assert!(!defaults.contains("options_scroll_offset"));
+        assert!(!defaults.contains("advance_scroll_offset"));
+
+        let mut config = AppConfig::default();
+        config.options_scroll_offset = 120.5;
+        config.advance_scroll_offset = 340.25;
+        let yaml = serde_yaml::to_string(&config).expect("serialize offsets");
+        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize offsets");
+
+        assert_eq!(restored.options_scroll_offset, 120.5);
+        assert_eq!(restored.advance_scroll_offset, 340.25);
+    }
+
+    #[test]
+    fn format_picker_view_preference_is_absent_until_user_selects_one() {
+        let defaults = serde_yaml::to_string(&AppConfig::default()).expect("serialize defaults");
+        assert!(!defaults.contains("format_picker_view_preference"));
+
+        let mut config = AppConfig::default();
+        config.format_picker_view_preference = Some(FormatPickerViewPreference::Table);
+        let yaml = serde_yaml::to_string(&config).expect("serialize preference");
+        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize preference");
+
+        assert!(yaml.contains("format_picker_view_preference: table"));
+        assert_eq!(
+            restored.format_picker_view_preference,
+            Some(FormatPickerViewPreference::Table)
+        );
     }
 }
 

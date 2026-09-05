@@ -103,7 +103,15 @@ impl AppState {
                     );
                     ThumbnailCacheEntry::Ready(texture)
                 }
-                Err(error) => ThumbnailCacheEntry::Failed(error),
+                Err(error) => ThumbnailCacheEntry::Failed {
+                    error,
+                    attempt: event.attempt,
+                    retry_at: event
+                        .retryable
+                        .then(|| crate::app::thumbnail_worker::thumbnail_retry_delay(event.attempt))
+                        .flatten()
+                        .map(|delay| Instant::now() + delay),
+                },
             };
             self.thumbnail_cache.insert(event.key, entry);
             ctx.request_repaint();
@@ -121,16 +129,7 @@ impl AppState {
         ctx: &eframe::egui::Context,
         url: &str,
     ) -> ThumbnailRenderSource {
-        let url = url.trim();
-        if url.is_empty() {
-            return ThumbnailRenderSource::None;
-        }
-
-        let Some(proxy_url) = self.tool_paths.effective_proxy_url().map(str::to_owned) else {
-            return ThumbnailRenderSource::DirectUrl;
-        };
-
-        self.thumbnail_render_source_with_proxy(ctx, url, proxy_url)
+        self.single_thumbnail_render_source_for_url(ctx, url)
     }
 
     pub fn single_thumbnail_render_source_for_url(
@@ -163,7 +162,30 @@ impl AppState {
 
         self.poll_thumbnail_work(ctx);
         let no_check_certificates = self.tool_paths.no_check_certificates;
-        let key = thumbnail_cache_key(url, &proxy_url, no_check_certificates);
+        let mut candidates = vec![url.to_owned()];
+        for metadata in self.queue_items.iter().filter_map(QueueItem::metadata) {
+            if metadata.thumbnail_url == url {
+                for candidate in &metadata.thumbnail_candidates {
+                    if !candidates.contains(candidate) {
+                        candidates.push(candidate.clone());
+                    }
+                }
+                break;
+            }
+        }
+        let key = thumbnail_cache_key(&candidates.join("\n"), &proxy_url, no_check_certificates);
+        let now = Instant::now();
+        let attempt = match self.thumbnail_cache.get(&key) {
+            Some(ThumbnailCacheEntry::Failed {
+                attempt,
+                retry_at: Some(at),
+                ..
+            }) if now >= *at => attempt + 1,
+            _ => 1,
+        };
+        if attempt > 1 {
+            self.thumbnail_cache.remove(&key);
+        }
         match self.thumbnail_cache.get(&key) {
             Some(ThumbnailCacheEntry::Ready(texture)) => {
                 ThumbnailRenderSource::Texture(texture.clone())
@@ -172,7 +194,12 @@ impl AppState {
                 ctx.request_repaint_after(Duration::from_millis(250));
                 ThumbnailRenderSource::Loading
             }
-            Some(ThumbnailCacheEntry::Failed(error)) => {
+            Some(ThumbnailCacheEntry::Failed {
+                error, retry_at, ..
+            }) => {
+                if let Some(at) = retry_at {
+                    ctx.request_repaint_after(at.saturating_duration_since(now));
+                }
                 ThumbnailRenderSource::Failed(error.clone())
             }
             None => {
@@ -180,9 +207,10 @@ impl AppState {
                     .insert(key.clone(), ThumbnailCacheEntry::Loading);
                 run_thumbnail_fetch_worker(
                     key,
-                    url.to_owned(),
+                    candidates,
                     proxy_url,
                     no_check_certificates,
+                    attempt,
                     self.thumbnail_result_tx.clone(),
                 );
                 ctx.request_repaint_after(Duration::from_millis(250));

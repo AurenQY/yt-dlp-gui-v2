@@ -1,13 +1,19 @@
 use eframe::egui::{self, Color32, Ui};
 use egui_taffy::Tui;
 
-use super::main_tab_music_aura::{MusicPlayerAuraRenderer, render_music_player_aura_at};
+use super::main_tab_music_aura::{
+    MusicAuraPresentation, MusicPlayerAuraRenderer, render_music_player_aura_at,
+};
 use super::main_tab_music_controls::row_music_player;
 use super::main_tab_music_lyrics::render_music_lyrics_at;
 use super::xaml_rect_template::{show_rect_template, show_ui_at_rect};
 use super::xaml_ui_nodes::{TemplateAxis, TemplateNode, auto, block, gap, rows};
 use super::{semantic_ui_metrics, xaml_taffy_styles};
 use crate::app::state::{AppState, MusicLyricsDisplayLine, MusicPlayerAuraDisplay};
+
+const MUSIC_PLAYER_BACKGROUND_GLASS_ALPHA: u8 = 216;
+const LIGHT_MUSIC_PLAYER_GLASS_COLOR: Color32 = Color32::from_rgb(250, 252, 255);
+const LIGHT_MUSIC_PLAYER_GLASS_ALPHA: u8 = 226;
 
 pub(super) struct MusicPlayerPanel {
     panel: xaml_taffy_styles::XamlTaffyElement,
@@ -16,6 +22,8 @@ pub(super) struct MusicPlayerPanel {
     lyrics_row_height: f32,
     player_row_height: f32,
     aura_renderer: Option<MusicPlayerAuraRenderer>,
+    aura_presentation: MusicAuraPresentation,
+    window_material_progress: f32,
 }
 
 impl MusicPlayerPanel {
@@ -24,6 +32,8 @@ impl MusicPlayerPanel {
         state: &mut AppState,
         player_row_height: f32,
         aura_renderer: Option<MusicPlayerAuraRenderer>,
+        aura_presentation: MusicAuraPresentation,
+        window_material_progress: f32,
     ) -> Option<Self> {
         if !state.music_player_visible() {
             return None;
@@ -56,6 +66,8 @@ impl MusicPlayerPanel {
             lyrics_row_height,
             player_row_height: player_panel_height,
             aura_renderer,
+            aura_presentation,
+            window_material_progress,
         })
     }
 
@@ -71,6 +83,8 @@ impl MusicPlayerPanel {
             lyrics_row_height,
             player_row_height,
             aura_renderer,
+            aura_presentation,
+            window_material_progress,
         } = self;
 
         panel.show_ui(tui, |ui| {
@@ -81,6 +95,8 @@ impl MusicPlayerPanel {
                 lyrics_row_height,
                 player_row_height,
                 aura_renderer.as_ref(),
+                aura_presentation,
+                window_material_progress,
             );
         });
     }
@@ -93,10 +109,18 @@ fn row_music_player_panel(
     lyrics_row_height: f32,
     player_row_height: f32,
     aura_renderer: Option<&MusicPlayerAuraRenderer>,
+    aura_presentation: MusicAuraPresentation,
+    window_material_progress: f32,
 ) {
     let panel_frame = MusicPlayerPanelFrame::allocate(ui);
     let aura_display = state.music_player_aura_display();
-    panel_frame.paint(ui, aura_renderer, aura_display);
+    panel_frame.paint(
+        ui,
+        aura_renderer,
+        aura_display,
+        aura_presentation,
+        window_material_progress,
+    );
 
     ui.scope_builder(
         egui::UiBuilder::new().max_rect(panel_frame.content_rect),
@@ -144,11 +168,18 @@ impl MusicPlayerPanelFrame {
         ui: &Ui,
         aura_renderer: Option<&MusicPlayerAuraRenderer>,
         aura_display: MusicPlayerAuraDisplay,
+        aura_presentation: MusicAuraPresentation,
+        window_material_progress: f32,
     ) {
         let rounding = semantic_ui_metrics::main_music_panel_corner_radius();
-        ui.painter()
-            .rect_filled(self.panel_rect, rounding, music_player_panel_fill(ui));
-        render_music_player_aura_at(ui, self.panel_rect, aura_renderer, aura_display, rounding);
+        ui.painter().rect_filled(
+            self.panel_rect,
+            rounding,
+            music_player_panel_fill(ui, aura_presentation, window_material_progress),
+        );
+        if aura_presentation.player_layer_enabled() {
+            render_music_player_aura_at(ui, self.panel_rect, aura_renderer, aura_display, rounding);
+        }
         ui.painter().rect_stroke(
             self.panel_rect,
             rounding,
@@ -169,7 +200,25 @@ fn music_player_cell_rect(ui: &Ui) -> egui::Rect {
     )
 }
 
-fn music_player_panel_fill(ui: &Ui) -> Color32 {
+fn music_player_panel_fill(
+    ui: &Ui,
+    aura_presentation: MusicAuraPresentation,
+    material_progress: f32,
+) -> Color32 {
+    if aura_presentation.background_glass_enabled() {
+        return if ui.visuals().dark_mode {
+            let alpha = lerp_u8(255, MUSIC_PLAYER_BACKGROUND_GLASS_ALPHA, material_progress);
+            Color32::from_rgba_unmultiplied(0, 0, 0, alpha)
+        } else {
+            let alpha = lerp_u8(255, LIGHT_MUSIC_PLAYER_GLASS_ALPHA, material_progress);
+            Color32::from_rgba_unmultiplied(
+                LIGHT_MUSIC_PLAYER_GLASS_COLOR.r(),
+                LIGHT_MUSIC_PLAYER_GLASS_COLOR.g(),
+                LIGHT_MUSIC_PLAYER_GLASS_COLOR.b(),
+                alpha,
+            )
+        };
+    }
     if ui.visuals().dark_mode {
         // True-black glass: the color stays neutral black while a restrained
         // amount of queue content remains visible through the floating panel.
@@ -178,6 +227,10 @@ fn music_player_panel_fill(ui: &Ui) -> Color32 {
         let base = ui.visuals().panel_fill;
         Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 208)
     }
+}
+
+fn lerp_u8(from: u8, to: u8, progress: f32) -> u8 {
+    (f32::from(from) + (f32::from(to) - f32::from(from)) * progress.clamp(0.0, 1.0)).round() as u8
 }
 
 type MusicPanelTemplate = TemplateNode<MusicPanelNode>;

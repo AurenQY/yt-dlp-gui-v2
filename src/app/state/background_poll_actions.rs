@@ -378,13 +378,6 @@ impl AppState {
                                         DownloadTargetKind::Normal => {
                                             item.progress.video = 100.0;
                                             item.progress.audio = 100.0;
-                                            if let Some(actual_file_name) = Path::new(output_path)
-                                                .file_name()
-                                                .and_then(|value| value.to_str())
-                                                .map(ToOwned::to_owned)
-                                            {
-                                                item.selection.file_name = actual_file_name;
-                                            }
                                             item.completed_selection = Some(
                                                 CompletedSelection::from_selection(&item.selection),
                                             );
@@ -537,13 +530,6 @@ impl AppState {
                                     run.output_path = Some(output_path.clone());
                                     item.progress.post_process = 100.0;
                                     item.last_output_path = Some(output_path.clone());
-                                    if let Some(actual_file_name) = Path::new(output_path)
-                                        .file_name()
-                                        .and_then(|value| value.to_str())
-                                        .map(ToOwned::to_owned)
-                                    {
-                                        item.selection.file_name = actual_file_name;
-                                    }
                                     item.completed_selection =
                                         Some(CompletedSelection::from_selection(&item.selection));
                                     item.last_error = None;

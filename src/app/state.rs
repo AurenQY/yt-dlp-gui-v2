@@ -31,11 +31,11 @@ pub use crate::app::format_picker_state::{
 use crate::app::media_probe::{ffprobe_companion_path_for_ffmpeg, probe_media_with_ffprobe};
 pub use crate::app::metadata::sanitize_file_name_for_windows;
 use crate::app::metadata::{
-    PlaylistEntrySeed, display_file_stem, extract_chapters, extract_formats,
-    extract_requested_filename, extract_requested_ids, extract_subtitle_tracks,
-    first_audio_format_id, human_size_bytes, infer_title, normalize_duration_badge_text,
-    playlist_entry_seed_from_json, requested_or_default_format_id, select_best_thumbnail_url,
-    select_largest_thumbnail_url, video_resolution_area,
+    PlaylistEntrySeed, default_file_name_from_title, extract_chapters, extract_formats,
+    extract_requested_ids, extract_subtitle_tracks, first_audio_format_id, human_size_bytes,
+    infer_title, normalize_duration_badge_text, playlist_entry_seed_from_json,
+    requested_or_default_format_id, select_best_thumbnail_url, select_largest_thumbnail_url,
+    video_resolution_area,
 };
 use crate::app::music_stream::{
     self, MusicPlaybackControl, MusicPlaybackEvent, ResolvedMusicStream,
@@ -58,7 +58,8 @@ use crate::domain::{
     DownloadOptions, DownloadRangeSelection, DownloadTimeRange, FormatOption, MediaKind,
     MetadataState, QualityPreset, QueueItem, QueueItemId, QueueItemViewKind, SubtitleOption,
     SubtitleSource, ToolKind, VideoMetadata, WorkflowKind, WorkflowRun, WorkflowRunId,
-    WorkflowState, codecs_support_webm_container, format_download_range_timestamp,
+    WorkflowState, codecs_support_mp4_container, codecs_support_webm_container,
+    format_download_range_timestamp,
 };
 use crate::infrastructure::cookie_site_index::{
     CookieSiteIndexEntry, read_cookie_site_index_or_default, write_cookie_site_index,
@@ -71,18 +72,18 @@ use crate::infrastructure::{
     FINAL_OUTPUT_PATH_PREFIX, FileTimeMode, ManagedComponentId, MediaSessionCommand,
     MediaSessionPlaybackStatus, MediaSessionTimeline, MediaSessionTrack, OutputFileActionMode,
     PostProcessMode, PrepareReport, PrepareRequirement, PrepareStatus, PreparedDownload,
-    SerializableCacheLocationMode, ThemeAccentColor, ThemeMode, ToolPaths, WindowPosition,
-    WindowSize, YoutubeLoginRescueEvent, YoutubeVideoPlaylistMode, available_yt_dlp_config_files,
-    classify_youtube_playlist, cleanup_applied_update, collect_dependency_presence_report,
-    collect_prepare_report, component_update_startup_snapshot, configure_background_command,
-    dependency_tool_exists, dependency_tool_is_available,
-    detect_default_youtube_login_rescue_browser, detect_dependency_tool, display_output_dir,
-    launch_pending_app_update, looks_like_playlist_url, normalize_cookie_rescue_target_url,
-    normalize_ui_scale_percent, register_app_instance, resolve_output_dir, resolve_tool_path,
-    run_tracked_command_output, run_youtube_login_rescue_cookie_export,
-    schedule_startup_transient_cleanup, send_download_failed_windows_toast,
-    send_download_finished_windows_toast, track_child_process, youtube_url_force_single_video,
-    youtube_url_has_video_and_playlist, yt_dlp_configs_dir_display,
+    SerializableCacheLocationMode, ThemeAccentColor, ThemeMode, ToolPaths,
+    UnknownFilesizeFormatPolicy, WindowPosition, WindowSize, YoutubeLoginRescueEvent,
+    YoutubeVideoPlaylistMode, available_yt_dlp_config_files, classify_youtube_playlist,
+    cleanup_applied_update, collect_dependency_presence_report, collect_prepare_report,
+    component_update_startup_snapshot, configure_background_command, dependency_tool_exists,
+    dependency_tool_is_available, detect_default_youtube_login_rescue_browser,
+    detect_dependency_tool, display_output_dir, launch_pending_app_update, looks_like_playlist_url,
+    normalize_cookie_rescue_target_url, normalize_ui_scale_percent, register_app_instance,
+    resolve_output_dir, resolve_tool_path, run_tracked_command_output,
+    run_youtube_login_rescue_cookie_export, schedule_startup_transient_cleanup,
+    send_download_failed_windows_toast, send_download_finished_windows_toast, track_child_process,
+    youtube_url_force_single_video, youtube_url_has_video_and_playlist, yt_dlp_configs_dir_display,
 };
 
 mod app_state;
@@ -123,6 +124,7 @@ mod state_helpers;
 #[cfg(test)]
 mod tests;
 mod ui_types;
+mod ui_view_state_actions;
 mod workflow_download_actions;
 mod workflow_runtime;
 

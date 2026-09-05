@@ -1,7 +1,8 @@
 use eframe::egui::{self, Color32, RichText, Ui};
 
 use crate::app::state::{
-    AppState, MusicDownloadMode, MusicOriginalPreference, YoutubePlaylistPromptKind,
+    AppState, MusicDownloadFormat, MusicDownloadMode, MusicOriginalPreference,
+    YoutubePlaylistPromptKind,
 };
 use crate::app::widgets::icon::{AppIcon, icon_image};
 use crate::app::widgets::url_input::{accent_green_for_ui, accent_red_for_ui};
@@ -52,15 +53,15 @@ fn render_music_download_preference_panel(ui: &mut Ui, state: &mut AppState, pro
 
 fn render_music_download_preference_chips(ui: &mut Ui, state: &mut AppState, prompt_width: f32) {
     let choice = state.music_download_prompt_choice();
-    let chip_items = MusicOriginalPreference::ALL
+    let chip_items = MusicDownloadPromptOption::ALL
         .into_iter()
-        .map(|preference| {
-            let label = music_download_preference_label(state, preference).to_owned();
+        .map(|option| {
+            let label = option.label(state).to_owned();
             let width =
                 semantic_ui_metrics::music_download_prompt_choice_chip_width_for_visible_label(
                     ui, &label,
                 );
-            (preference, label, width)
+            (option, label, width)
         })
         .collect::<Vec<_>>();
     let chip_spacing = semantic_ui_metrics::music_download_prompt_choice_chip_horizontal_spacing();
@@ -75,18 +76,9 @@ fn render_music_download_preference_chips(ui: &mut Ui, state: &mut AppState, pro
                 total_width,
             ),
         );
-        for (preference, label, width) in chip_items {
-            if music_prompt_choice_chip(
-                ui,
-                &label,
-                choice.mode == MusicDownloadMode::Original
-                    && choice.original_preference == preference,
-                width,
-            )
-            .clicked()
-            {
-                state.set_music_download_prompt_mode(MusicDownloadMode::Original);
-                state.set_music_download_original_preference(preference);
+        for (option, label, width) in chip_items {
+            if music_prompt_choice_chip(ui, &label, option.is_selected(choice), width).clicked() {
+                option.apply(state);
                 state.set_music_download_embed_cover(true);
                 state.set_music_download_write_tags(true);
             }
@@ -150,9 +142,9 @@ fn music_download_prompt_content_width(ctx: &egui::Context, ui: &Ui, state: &App
         ui,
         audio_label_text,
     );
-    let preference_labels = MusicOriginalPreference::ALL
+    let preference_labels = MusicDownloadPromptOption::ALL
         .into_iter()
-        .map(|preference| music_download_preference_label(state, preference).to_owned())
+        .map(|option| option.label(state).to_owned())
         .collect::<Vec<_>>();
     let chip_spacing = semantic_ui_metrics::music_download_prompt_choice_chip_horizontal_spacing();
     let chips_width = preference_labels
@@ -183,14 +175,49 @@ fn music_download_prompt_content_width(ctx: &egui::Context, ui: &Ui, state: &App
     )
 }
 
-fn music_download_preference_label(state: &AppState, preference: MusicOriginalPreference) -> &str {
-    match preference {
-        MusicOriginalPreference::Auto => {
-            state.ui_i18n_text_for_key("options.music_download_preference_best")
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MusicDownloadPromptOption {
+    OriginalBest,
+    Unified(MusicDownloadFormat),
+}
+
+impl MusicDownloadPromptOption {
+    const ALL: [Self; 4] = [
+        Self::OriginalBest,
+        Self::Unified(MusicDownloadFormat::Opus),
+        Self::Unified(MusicDownloadFormat::M4aAac),
+        Self::Unified(MusicDownloadFormat::Mp3),
+    ];
+
+    fn label(self, state: &AppState) -> &str {
+        match self {
+            Self::OriginalBest => {
+                state.ui_i18n_text_for_key("options.music_download_preference_best")
+            }
+            Self::Unified(format) => format.label(),
         }
-        MusicOriginalPreference::PreferOpus => "Opus",
-        MusicOriginalPreference::PreferAac => "AAC",
-        MusicOriginalPreference::PreferMp3 => "MP3",
+    }
+
+    fn is_selected(self, choice: crate::app::state::MusicDownloadChoice) -> bool {
+        match self {
+            Self::OriginalBest => choice.mode == MusicDownloadMode::Original,
+            Self::Unified(format) => {
+                choice.mode == MusicDownloadMode::Unified && choice.unified_format == format
+            }
+        }
+    }
+
+    fn apply(self, state: &mut AppState) {
+        match self {
+            Self::OriginalBest => {
+                state.set_music_download_prompt_mode(MusicDownloadMode::Original);
+                state.set_music_download_original_preference(MusicOriginalPreference::Auto);
+            }
+            Self::Unified(format) => {
+                state.set_music_download_prompt_mode(MusicDownloadMode::Unified);
+                state.set_music_download_unified_format(format);
+            }
+        }
     }
 }
 
@@ -499,4 +526,23 @@ fn prompt_action_button<'a>(
         RichText::new(label).size(size),
     )
     .min_size(egui::vec2(width, height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::state::MusicDownloadChoice;
+
+    #[test]
+    fn mp3_prompt_option_represents_a_unified_mp3_output() {
+        let option = MusicDownloadPromptOption::Unified(MusicDownloadFormat::Mp3);
+        let choice = MusicDownloadChoice {
+            mode: MusicDownloadMode::Unified,
+            unified_format: MusicDownloadFormat::Mp3,
+            ..MusicDownloadChoice::default()
+        };
+
+        assert!(option.is_selected(choice));
+        assert!(!MusicDownloadPromptOption::OriginalBest.is_selected(choice));
+    }
 }

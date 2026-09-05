@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde_json::Value;
 
 use crate::domain::{
@@ -418,26 +416,6 @@ pub(super) fn extract_requested_ids(json: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(super) fn extract_requested_filename(json: &Value) -> Option<String> {
-    json.get("requested_downloads")
-        .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(|item| {
-            item.get("filename")
-                .or_else(|| item.get("_filename"))
-                .and_then(Value::as_str)
-        })
-        .map(ToOwned::to_owned)
-}
-
-pub(super) fn display_file_stem(path_or_name: &str) -> String {
-    Path::new(path_or_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or(path_or_name)
-        .to_owned()
-}
-
 pub fn sanitize_file_name_for_windows(file_name: &str) -> String {
     file_name
         .chars()
@@ -449,6 +427,10 @@ pub fn sanitize_file_name_for_windows(file_name: &str) -> String {
             }
         })
         .collect()
+}
+
+pub(super) fn default_file_name_from_title(title: &str) -> String {
+    sanitize_file_name_for_windows(title.trim())
 }
 
 fn is_forbidden_file_name_char(ch: char) -> bool {
@@ -578,10 +560,14 @@ fn language_name_from_tracks(
 }
 
 pub(super) fn select_best_thumbnail_url(json: &Value) -> Option<String> {
-    let best_from_list = json
+    thumbnail_candidate_urls(json).into_iter().next()
+}
+
+pub(super) fn thumbnail_candidate_urls(json: &Value) -> Vec<String> {
+    let mut ranked = json
         .get("thumbnails")
         .and_then(Value::as_array)
-        .and_then(|items| {
+        .map(|items| {
             items
                 .iter()
                 .filter_map(|item| {
@@ -600,14 +586,10 @@ pub(super) fn select_best_thumbnail_url(json: &Value) -> Option<String> {
 
                     Some((preference, area, url.to_owned()))
                 })
-                .max_by(|left, right| {
-                    left.0
-                        .cmp(&right.0)
-                        .then_with(|| left.1.cmp(&right.1))
-                        .then_with(|| left.2.cmp(&right.2))
-                })
-                .map(|(_, _, url)| url)
-        });
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    ranked.sort_by(|left, right| right.cmp(left));
 
     let raw_thumbnail = json
         .get("thumbnail")
@@ -616,9 +598,18 @@ pub(super) fn select_best_thumbnail_url(json: &Value) -> Option<String> {
         .filter(|url| !url.is_empty())
         .map(ToOwned::to_owned);
 
-    best_from_list
-        .or_else(|| youtube_thumbnail_fallbacks(json).into_iter().next())
-        .or(raw_thumbnail)
+    let mut candidates = Vec::new();
+    for url in ranked
+        .into_iter()
+        .map(|(_, _, url)| url)
+        .chain(youtube_thumbnail_fallbacks(json))
+        .chain(raw_thumbnail)
+    {
+        if !candidates.contains(&url) {
+            candidates.push(url);
+        }
+    }
+    candidates
 }
 
 pub(super) fn select_largest_thumbnail_url(json: &Value) -> Option<String> {

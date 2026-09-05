@@ -14,6 +14,7 @@ pub(super) fn render_music_queue_item_row(
     ui: &mut Ui,
     state: &mut AppState,
     index: usize,
+    window_material_progress: f32,
 ) -> Option<QueueItemId> {
     let item = &state.queue_items[index];
     let item_id = item.id;
@@ -79,6 +80,7 @@ pub(super) fn render_music_queue_item_row(
             play_enabled: true,
             cover_uses_mix_next,
             remove_enabled: true,
+            window_material_progress,
         },
     );
 
@@ -211,7 +213,11 @@ fn compact_music_visual_state(
     }
 }
 
-pub(super) fn render_empty_music_compact_item(ui: &mut Ui, state: &AppState) {
+pub(super) fn render_empty_music_compact_item(
+    ui: &mut Ui,
+    state: &AppState,
+    window_material_progress: f32,
+) {
     let title = state.ui_i18n_text_for_key("item.add_an_audio_url");
     let output = render_music_compact_row(
         ui,
@@ -230,6 +236,7 @@ pub(super) fn render_empty_music_compact_item(ui: &mut Ui, state: &AppState) {
             play_enabled: false,
             cover_uses_mix_next: false,
             remove_enabled: false,
+            window_material_progress,
         },
     );
     let _ = output;

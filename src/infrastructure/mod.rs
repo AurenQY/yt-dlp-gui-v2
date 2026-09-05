@@ -26,11 +26,11 @@ pub use component_update::{
 };
 pub use config::{
     AppConfig, AudioPolicy, CompatibilityTarget, ConfigFileOption, ContainerPolicy,
-    FrameRatePolicy, OutputFileActionMode, PostProcessMode, ResolutionPolicy,
-    SerializableCacheLocationMode, SubtitlePolicy, ThemeAccentColor, ThemeMode,
-    TranscodeIntentMode, TranscodeIntentSettings, TranscodeSettingKey, VideoCodecPolicy,
-    WindowPosition, WindowSize, YoutubeVideoPlaylistMode, available_yt_dlp_config_files,
-    normalize_ui_scale_percent, yt_dlp_configs_dir_display,
+    FormatPickerViewPreference, FrameRatePolicy, OutputFileActionMode, PostProcessMode,
+    ResolutionPolicy, SerializableCacheLocationMode, SubtitlePolicy, ThemeAccentColor, ThemeMode,
+    TranscodeIntentMode, TranscodeIntentSettings, TranscodeSettingKey, UnknownFilesizeFormatPolicy,
+    VideoCodecPolicy, WindowPosition, WindowSize, YoutubeVideoPlaylistMode,
+    available_yt_dlp_config_files, normalize_ui_scale_percent, yt_dlp_configs_dir_display,
 };
 pub use edition::{
     load_current_runtime_edition, parse_edition_command, run_edition_command, runtime_window_title,

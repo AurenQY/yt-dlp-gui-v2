@@ -34,6 +34,9 @@ impl AppState {
             if !manifest.complete {
                 continue;
             }
+            if !manifest.audio_only {
+                continue;
+            }
             let manifest_source = manifest.source_url.trim().to_owned();
             if manifest_source.is_empty() {
                 continue;

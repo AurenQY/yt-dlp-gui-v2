@@ -7,6 +7,7 @@ mod custom_chrome;
 mod download_resilience;
 mod download_worker;
 mod format_picker_state;
+mod format_picker_visibility;
 mod media_probe;
 mod metadata;
 pub(crate) mod music_analysis;
@@ -456,6 +457,7 @@ impl eframe::App for NgDlpApp {
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        self.state.save_persisted_ui_view_state();
         self.ui_render_resources.destroy(gl);
     }
 }

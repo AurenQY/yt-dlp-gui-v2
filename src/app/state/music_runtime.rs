@@ -486,6 +486,8 @@ pub(super) struct MusicStreamSeed {
     pub(super) ext: String,
     pub(super) format_id: String,
     pub(super) acodec: String,
+    pub(super) used_cookies: bool,
+    pub(super) cookies_fallback: bool,
     pub(super) expected_bytes: Option<u64>,
     pub(super) cache_key: String,
     pub(super) lyrics_track: Option<SubtitleOption>,
@@ -554,6 +556,8 @@ pub(super) struct AudioCacheManifestSnapshot {
     pub(super) ext: String,
     pub(super) format_id: String,
     pub(super) acodec: String,
+    #[serde(default)]
+    pub(super) audio_only: bool,
     pub(super) thumbnail_url: String,
     pub(super) expected_bytes: Option<u64>,
     pub(super) downloaded_bytes: Option<u64>,

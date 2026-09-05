@@ -124,6 +124,85 @@ pub(super) fn normalized_export_extension(value: &str) -> Option<String> {
     }
 }
 
+pub(super) fn normal_download_base_name(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return String::new();
+    }
+
+    let path = Path::new(value);
+    let is_output_container = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(DownloadContainerPreference::from_extension)
+        .is_some();
+    if !is_output_container {
+        return value.to_owned();
+    }
+
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(value)
+        .to_owned()
+}
+
+pub(super) fn normal_download_default_extension(
+    merge_container: Option<&str>,
+    is_muxed_video: bool,
+    video_ext: &str,
+    audio_ext: &str,
+) -> String {
+    if let Some(extension) = merge_container.and_then(normalized_export_extension) {
+        return extension;
+    }
+    if is_muxed_video {
+        return normalized_export_extension(video_ext).unwrap_or_else(|| "mkv".to_owned());
+    }
+
+    let video_ext = normalized_export_extension(video_ext);
+    let audio_ext = normalized_export_extension(audio_ext);
+    match (video_ext.as_deref(), audio_ext.as_deref()) {
+        (Some("webm"), Some("webm")) => "webm".to_owned(),
+        (Some("mp4"), Some("m4a" | "aac")) => "mp4".to_owned(),
+        _ => "mkv".to_owned(),
+    }
+}
+
+pub(super) fn normalized_origin_save_target(
+    path: &Path,
+    default_extension: &str,
+) -> Result<(String, String, String), String> {
+    let mut path = path.to_path_buf();
+    if path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        path.set_extension(default_extension.trim().trim_start_matches('.'));
+    }
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .ok_or_else(|| "The selected output file has no parent folder.".to_owned())?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(sanitize_file_name_for_windows)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "The selected output file name is empty.".to_owned())?;
+    let extension = Path::new(&file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .and_then(normalized_export_extension)
+        .ok_or_else(|| "The selected output file has no extension.".to_owned())?;
+    let base_name = normal_download_base_name(&file_name);
+    if base_name.trim().is_empty() {
+        return Err("The selected output file name is empty.".to_owned());
+    }
+
+    Ok((parent.display().to_string(), base_name, extension))
+}
+
 pub(super) fn validate_export_extension(
     kind: DownloadTargetKind,
     extension: &str,

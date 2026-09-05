@@ -4,7 +4,10 @@ use egui_taffy::Tui;
 use crate::app::state::AppState;
 use crate::infrastructure::{ThemeAccentColor, ThemeMode};
 
-use super::common::{settings_taffy_form_row, settings_taffy_section};
+use super::settings_components::{
+    SettingsFormLayout, SettingsSelectOption, settings_flexible_form_row, settings_section,
+    settings_select_row, settings_toggle_row,
+};
 
 fn theme_mode_label_key(mode: ThemeMode) -> &'static str {
     match mode {
@@ -27,80 +30,62 @@ fn theme_accent_color_label_key(color: ThemeAccentColor) -> &'static str {
     }
 }
 
-pub(super) fn render_window_group(tui: &mut Tui, state: &mut AppState, label_width: f32) {
-    settings_taffy_section(
+pub(super) fn render_window_group(tui: &mut Tui, state: &mut AppState, form: SettingsFormLayout) {
+    settings_section(
         tui,
         state.ui_i18n_text_for_key("options.appearance_window"),
         |tui| {
-            settings_taffy_form_row(
+            if let Some(enabled) = settings_toggle_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("options.notifications"),
-                |ui| {
-                    let mut enabled = state.config.windows_toast_enabled;
-                    if ui
-                        .checkbox(&mut enabled, state.ui_i18n_text_for_key("options.enable"))
-                        .changed()
-                    {
-                        state.set_windows_toast_enabled(enabled);
-                    }
-                },
-            );
-            settings_taffy_form_row(
+                state.config.windows_toast_enabled,
+                state.ui_i18n_text_for_key("options.enable"),
+            ) {
+                state.set_windows_toast_enabled(enabled);
+            }
+
+            let theme_mode = state.config.theme_mode;
+            let theme_options = ThemeMode::variants().map(|mode| {
+                SettingsSelectOption::new(
+                    mode,
+                    state.ui_i18n_text_for_key(theme_mode_label_key(mode)),
+                )
+            });
+            if let Some(mode) = settings_select_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("options.theme"),
-                |ui| {
-                    egui::ComboBox::from_id_salt("theme-mode")
-                        .selected_text(
-                            state.ui_i18n_text_for_key(theme_mode_label_key(
-                                state.config.theme_mode,
-                            )),
-                        )
-                        .show_ui(ui, |ui| {
-                            for mode in ThemeMode::variants() {
-                                if ui
-                                    .selectable_label(
-                                        state.config.theme_mode == mode,
-                                        state.ui_i18n_text_for_key(theme_mode_label_key(mode)),
-                                    )
-                                    .clicked()
-                                {
-                                    state.set_theme_mode(mode);
-                                }
-                            }
-                        });
-                },
-            );
-            settings_taffy_form_row(
+                "theme-mode",
+                theme_mode,
+                state.ui_i18n_text_for_key(theme_mode_label_key(theme_mode)),
+                &theme_options,
+            ) {
+                state.set_theme_mode(mode);
+            }
+
+            let accent_color = state.config.theme_accent_color;
+            let accent_options = ThemeAccentColor::variants().map(|color| {
+                SettingsSelectOption::new(
+                    color,
+                    state.ui_i18n_text_for_key(theme_accent_color_label_key(color)),
+                )
+            });
+            if let Some(color) = settings_select_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("options.theme_color"),
-                |ui| {
-                    egui::ComboBox::from_id_salt("theme-accent-color")
-                        .selected_text(state.ui_i18n_text_for_key(theme_accent_color_label_key(
-                            state.config.theme_accent_color,
-                        )))
-                        .show_ui(ui, |ui| {
-                            for color in ThemeAccentColor::variants() {
-                                if ui
-                                    .selectable_label(
-                                        state.config.theme_accent_color == color,
-                                        state.ui_i18n_text_for_key(theme_accent_color_label_key(
-                                            color,
-                                        )),
-                                    )
-                                    .clicked()
-                                {
-                                    state.set_theme_accent_color(color);
-                                }
-                            }
-                        });
-                },
-            );
-            settings_taffy_form_row(
+                "theme-accent-color",
+                accent_color,
+                state.ui_i18n_text_for_key(theme_accent_color_label_key(accent_color)),
+                &accent_options,
+            ) {
+                state.set_theme_accent_color(color);
+            }
+
+            settings_flexible_form_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("options.ui_scale"),
                 |ui| {
                     let mut pending = state.pending_ui_scale_percent();
@@ -132,48 +117,33 @@ pub(super) fn render_window_group(tui: &mut Tui, state: &mut AppState, label_wid
                     ));
                 },
             );
-            settings_taffy_form_row(
+            if let Some(enabled) = settings_toggle_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("options.always_on_top"),
-                |ui| {
-                    let mut enabled = state.config.keep_window_on_top;
-                    if ui
-                        .checkbox(&mut enabled, state.ui_i18n_text_for_key("options.enable"))
-                        .changed()
-                    {
-                        state.set_keep_window_on_top(enabled);
-                    }
-                },
-            );
-            settings_taffy_form_row(
+                state.config.keep_window_on_top,
+                state.ui_i18n_text_for_key("options.enable"),
+            ) {
+                state.set_keep_window_on_top(enabled);
+            }
+            if let Some(enabled) = settings_toggle_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("options.window_position"),
-                |ui| {
-                    let mut enabled = state.config.remember_window_position;
-                    if ui
-                        .checkbox(&mut enabled, state.ui_i18n_text_for_key("options.remember"))
-                        .changed()
-                    {
-                        state.set_remember_window_position(enabled);
-                    }
-                },
-            );
-            settings_taffy_form_row(
+                state.config.remember_window_position,
+                state.ui_i18n_text_for_key("options.remember"),
+            ) {
+                state.set_remember_window_position(enabled);
+            }
+            if let Some(enabled) = settings_toggle_row(
                 tui,
-                label_width,
+                form,
                 state.ui_i18n_text_for_key("options.window_size"),
-                |ui| {
-                    let mut enabled = state.config.remember_window_size;
-                    if ui
-                        .checkbox(&mut enabled, state.ui_i18n_text_for_key("options.remember"))
-                        .changed()
-                    {
-                        state.set_remember_window_size(enabled);
-                    }
-                },
-            );
+                state.config.remember_window_size,
+                state.ui_i18n_text_for_key("options.remember"),
+            ) {
+                state.set_remember_window_size(enabled);
+            }
         },
     );
 }

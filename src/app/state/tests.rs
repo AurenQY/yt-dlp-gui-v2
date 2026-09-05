@@ -122,10 +122,51 @@ fn requested_format_still_wins_over_quality_guess() {
 }
 
 #[test]
-fn display_file_stem_drops_extension_from_auto_name() {
+fn default_file_name_uses_sanitized_title_without_yt_dlp_id_suffix() {
     assert_eq!(
-        display_file_stem(r"download\sample title [abc123].webm"),
-        "sample title [abc123]"
+        default_file_name_from_title("  sample: title  "),
+        "sample_ title"
+    );
+}
+
+#[test]
+fn normal_download_extension_matches_native_container_rules() {
+    assert_eq!(
+        normal_download_default_extension(None, false, "mp4", "m4a"),
+        "mp4"
+    );
+    assert_eq!(
+        normal_download_default_extension(None, false, "webm", "webm"),
+        "webm"
+    );
+    assert_eq!(
+        normal_download_default_extension(None, false, "mp4", "webm"),
+        "mkv"
+    );
+    assert_eq!(
+        normal_download_default_extension(Some("mkv"), false, "webm", "webm"),
+        "mkv"
+    );
+}
+
+#[test]
+fn origin_save_target_separates_base_name_from_output_extension() {
+    let path = Path::new(r"D:\downloads\custom name");
+    let (directory, file_name, extension) =
+        normalized_origin_save_target(path, "webm").expect("valid target");
+
+    assert_eq!(directory, r"D:\downloads");
+    assert_eq!(file_name, "custom name");
+    assert_eq!(extension, "webm");
+}
+
+#[test]
+fn normal_download_base_name_removes_only_supported_video_container_suffixes() {
+    assert_eq!(normal_download_base_name("custom.name.mp4"), "custom.name");
+    assert_eq!(normal_download_base_name("custom.name.mov"), "custom.name");
+    assert_eq!(
+        normal_download_base_name("custom.name.mp3"),
+        "custom.name.mp3"
     );
 }
 

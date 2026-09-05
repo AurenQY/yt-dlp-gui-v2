@@ -3,15 +3,20 @@ use eframe::egui::Ui;
 use crate::app::state::AppState;
 
 use super::semantic_ui_metrics;
+use super::settings_components::SettingsFormLayout;
 
+#[derive(Clone, Copy)]
 pub(super) struct OptionsLayoutMetrics {
     pub(super) label_width: f32,
+    pub(super) form: SettingsFormLayout,
 }
 
 impl OptionsLayoutMetrics {
     pub(super) fn new(ui: &Ui, state: &AppState) -> Self {
+        let label_width = options_label_width(ui, state);
         Self {
-            label_width: options_label_width(ui, state),
+            label_width,
+            form: SettingsFormLayout::resolve(ui, label_width),
         }
     }
 }
@@ -20,6 +25,8 @@ fn options_label_width(ui: &Ui, state: &AppState) -> f32 {
     let add_action_text = state.ui_i18n_text_for_key("options.add_action");
     let clipboard_change_text = state.ui_i18n_text_for_key("options.clipboard_change");
     let log_tab_text = state.ui_i18n_text_for_key("options.log_tab");
+    let unknown_filesize_formats_text =
+        state.ui_i18n_text_for_key("options.unknown_filesize_formats");
     let with_playlist_text = state.ui_i18n_text_for_key("options.with_playlist");
     let high_risk_prompt_text = state.ui_i18n_text_for_key("options.high_risk_prompt");
     let playlist_count_text = state.ui_i18n_text_for_key("options.playlist_count");
@@ -47,6 +54,7 @@ fn options_label_width(ui: &Ui, state: &AppState) -> f32 {
             add_action_text,
             clipboard_change_text,
             log_tab_text,
+            unknown_filesize_formats_text,
             with_playlist_text,
             high_risk_prompt_text,
             playlist_count_text,

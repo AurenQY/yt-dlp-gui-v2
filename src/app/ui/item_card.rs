@@ -5,10 +5,7 @@ use eframe::egui::{
 use egui_extras::{Size, StripBuilder};
 use egui_taffy::{Tui, TuiBuilderLogic as _, taffy, tui};
 
-use crate::app::state::{
-    AppState, FormatPickerKind, ItemTitleVisualState, ThumbnailRenderSource,
-    sanitize_file_name_for_windows,
-};
+use crate::app::state::{AppState, FormatPickerKind, ItemTitleVisualState, ThumbnailRenderSource};
 use crate::app::widgets::icon::{AppIcon, icon_image, standard_icon_color};
 use crate::app::widgets::url_input::{accent_blue_for_ui, accent_green_for_ui, accent_red_for_ui};
 use crate::domain::DownloadContainerPreference;
@@ -87,7 +84,12 @@ fn item_card_layout_size_to_vec2(size: LayoutSize) -> egui::Vec2 {
     egui::vec2(size.width, size.height)
 }
 
-pub(super) fn render_batch_list(ui: &mut Ui, state: &mut AppState, bottom_safe_area: f32) {
+pub(super) fn render_batch_list(
+    ui: &mut Ui,
+    state: &mut AppState,
+    bottom_safe_area: f32,
+    music_window_material_progress: f32,
+) {
     render_queue_toolbar(ui, state);
     ui.add_space(ui.spacing().item_spacing.y);
     let mut pending_remove_item_id = None;
@@ -99,7 +101,7 @@ pub(super) fn render_batch_list(ui: &mut Ui, state: &mut AppState, bottom_safe_a
         .show(ui, |ui| {
             if state.queue_items.is_empty() {
                 if state.queue_display_mode_is_audio() {
-                    render_empty_music_compact_item(ui, state);
+                    render_empty_music_compact_item(ui, state, music_window_material_progress);
                 } else {
                     let empty_item_preview = state.empty_item_preview.clone();
                     render_empty_batch_item_card(ui, state, &empty_item_preview);
@@ -110,7 +112,12 @@ pub(super) fn render_batch_list(ui: &mut Ui, state: &mut AppState, bottom_safe_a
             for index in 0..state.queue_items.len() {
                 let item_id = state.queue_items[index].id;
                 if state.queue_display_mode_is_audio() {
-                    if let Some(item_id) = render_music_queue_item_row(ui, state, index) {
+                    if let Some(item_id) = render_music_queue_item_row(
+                        ui,
+                        state,
+                        index,
+                        music_window_material_progress,
+                    ) {
                         pending_remove_item_id = Some(item_id);
                     }
                     continue;
@@ -1253,8 +1260,11 @@ fn item_file_name_input_row(
     let output_action_mode = state.config.output_file_action_mode;
     let file_name_progress = state.item_file_name_progress(index);
     let show_file_name_progress = state.item_file_name_progress_visible(index);
-    let show_container_picker = enabled && state.item_supports_webm_download_container(index);
-    let selected_container = state.resolved_item_download_container(index);
+    let container_preference = state.queue_items[index].selection.container_preference;
+    let resolved_container = state.resolved_item_download_container_extension(index);
+    let container_picker_enabled = enabled && state.item_download_container_is_selectable(index);
+    let supports_mp4_container = state.item_supports_mp4_download_container(index);
+    let supports_webm_container = state.item_supports_webm_download_container(index);
     let item_id = state.queue_items[index].id;
     let mut pending_container = None;
 
@@ -1272,12 +1282,7 @@ fn item_file_name_input_row(
                         true,
                     );
                     if response.changed() {
-                        let sanitized = sanitize_file_name_for_windows(
-                            &state.queue_items[index].selection.file_name,
-                        );
-                        if state.queue_items[index].selection.file_name != sanitized {
-                            state.queue_items[index].selection.file_name = sanitized;
-                        }
+                        state.normalize_item_download_base_name(index);
                     }
                 } else {
                     let _ = draw_file_name_display(
@@ -1289,15 +1294,20 @@ fn item_file_name_input_row(
                     );
                 }
             });
-            if show_container_picker {
-                tui.style(item_fixed_cell_style(
-                    semantic_ui_metrics::item_card_output_container_picker_width(),
-                ))
-                .ui(|ui| {
-                    let selected = selected_container.unwrap_or(DownloadContainerPreference::Mkv);
-                    pending_container = draw_item_output_container_picker(ui, item_id, selected);
-                });
-            }
+            tui.style(item_fixed_cell_style(
+                semantic_ui_metrics::item_card_output_container_picker_width(),
+            ))
+            .ui(|ui| {
+                pending_container = draw_item_output_container_picker(
+                    ui,
+                    item_id,
+                    container_preference,
+                    resolved_container.as_deref(),
+                    container_picker_enabled,
+                    supports_mp4_container,
+                    supports_webm_container,
+                );
+            });
             tui.style(item_fixed_cell_style(action_width)).ui(|ui| {
                 ui.set_max_width(action_width);
                 if enabled {
@@ -1324,27 +1334,38 @@ fn item_file_name_input_row(
 pub(super) fn draw_item_output_container_picker(
     ui: &mut Ui,
     item_id: crate::domain::QueueItemId,
-    selected_container: DownloadContainerPreference,
+    preference: DownloadContainerPreference,
+    resolved_extension: Option<&str>,
+    enabled: bool,
+    supports_mp4: bool,
+    supports_webm: bool,
 ) -> Option<DownloadContainerPreference> {
     ui.push_id(("item-output-container", item_id), |ui| {
         let desired_size = ui.available_size_before_wrap();
-        let label = format!(".{}", selected_container.extension().unwrap_or("mkv"));
-        let response = ui.add_sized(desired_size, egui::Button::new(label));
+        let label = resolved_extension
+            .map(|extension| format!(".{}", extension.trim_start_matches('.')))
+            .unwrap_or_else(|| "Auto".to_owned());
+        let response = ui.add_enabled(enabled, egui::Button::new(label).min_size(desired_size));
         let mut pending = None;
 
         egui::Popup::menu(&response)
             .width(response.rect.width())
             .show(|ui| {
                 ui.set_min_width(response.rect.width());
-                for (container, label) in [
-                    (DownloadContainerPreference::Mkv, ".mkv"),
-                    (DownloadContainerPreference::Webm, ".webm"),
+                for (container, label, supported) in [
+                    (DownloadContainerPreference::Auto, "Auto", true),
+                    (DownloadContainerPreference::Mkv, ".mkv", true),
+                    (DownloadContainerPreference::Mp4, ".mp4", supports_mp4),
+                    (DownloadContainerPreference::Webm, ".webm", supports_webm),
                 ] {
-                    if ui
-                        .selectable_label(selected_container == container, label)
-                        .clicked()
-                    {
-                        pending = (container != selected_container).then_some(container);
+                    let clicked = ui
+                        .add_enabled_ui(supported, |ui| {
+                            ui.selectable_label(preference == container, label)
+                        })
+                        .inner
+                        .clicked();
+                    if clicked {
+                        pending = (container != preference).then_some(container);
                         ui.close();
                     }
                 }

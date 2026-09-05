@@ -1,33 +1,30 @@
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{self, Ui};
 use egui_taffy::Tui;
 
 use crate::app::state::{AppState, OptionsDetailPage};
-use crate::app::widgets::icon::AppIcon;
 use crate::i18n::LanguageSelection;
 
-use super::common::{
-    settings_section, settings_taffy_form_row, settings_taffy_section, text_trailing_icon_button,
-};
+use super::common::settings_section;
 use super::semantic_ui_metrics;
-use super::settings_detail_template::{SettingsDetailNode, render_settings_detail_page};
+use super::settings_components::{
+    SettingsFormLayout, settings_navigation_row, settings_section as settings_taffy_section,
+};
+use super::settings_detail_template::{
+    SettingsDetailNode, render_settings_detail_header, render_settings_detail_page,
+};
 use super::xaml_template_renderer::{TemplateBlockSlot, show_template_ui_block};
 
-pub(super) fn render_language_group(tui: &mut Tui, state: &mut AppState, label_width: f32) {
+pub(super) fn render_language_group(tui: &mut Tui, state: &mut AppState, form: SettingsFormLayout) {
     settings_taffy_section(tui, state.ui_i18n_text_for_key("options.language"), |tui| {
-        settings_taffy_form_row(
+        let label = language_choice_label(state, state.language_selection());
+        if settings_navigation_row(
             tui,
-            label_width,
+            form,
             state.ui_i18n_text_for_key("options.language"),
-            |ui| {
-                let label = language_choice_label(state, state.language_selection());
-                if ui
-                    .add(text_trailing_icon_button(ui, &label, AppIcon::MenuRight))
-                    .clicked()
-                {
-                    state.open_options_detail_page(OptionsDetailPage::Language);
-                }
-            },
-        );
+            &label,
+        ) {
+            state.open_options_detail_page(OptionsDetailPage::Language);
+        }
     });
 }
 
@@ -61,15 +58,12 @@ fn show_language_detail_block(
 }
 
 fn render_language_detail_header(ui: &mut Ui, state: &mut AppState) {
-    ui.horizontal(|ui| {
-        if ui
-            .button(format!("← {}", state.ui_i18n_text_for_key("options.back")))
-            .clicked()
-        {
-            state.close_options_detail_page();
-        }
-        ui.label(RichText::new(state.ui_i18n_text_for_key("options.language")).strong());
-    });
+    render_settings_detail_header(
+        ui,
+        state,
+        "options.language",
+        AppState::close_options_detail_page,
+    );
 }
 
 fn render_language_detail_body(ui: &mut Ui, state: &mut AppState) {
