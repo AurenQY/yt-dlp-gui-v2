@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Avançado",
+        "advance.browser_integration" => "Integração com o navegador",
+        "advance.browser_connection" => "Conexão com o navegador",
+        "advance.browser_connection_enabled" => "Ativada para {browsers}",
+        "advance.browser_connection_disabled" => "Conectar Chrome, Brave e Edge",
+        "advance.browser_connection_enabled_message" => "Conexão com o navegador ativada.",
+        "advance.browser_connection_disabled_message" => "Conexão com o navegador desativada.",
         "tab.about" => "About",
         "about.tools" => "Versões das ferramentas",
         "about.current_version" => "Atual",
@@ -393,6 +399,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Ativar",
         "options.theme" => "Tema",
         "options.theme_mode.system" => "Seguir o sistema",
+        "options.render_backend" => "Renderizador (após reiniciar)",
+        "options.wgpu_api" => "API gráfica (após reiniciar)",
         "options.theme_mode.light" => "Claro",
         "options.theme_mode.dark" => "Escuro",
         "options.theme_color" => "Cor do tema",
@@ -521,9 +529,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Falha no download",
         "notification.completed_file" => "Concluído: {file}",
         "notification.download_completed" => "Download concluído.",
+        "notification.no_chapters_saved_full_audio" => {
+            "Nenhum capítulo foi detectado. O áudio completo foi salvo."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "Saída de áudio",
         "options.music_download_preference_best" => "Melhor",
+        "options.music_download_save_label" => "Modo de salvamento",
+        "options.music_download_full_audio" => "Áudio completo",
+        "options.music_download_split_chapters" => "Dividir por capítulos",
         _ => key,
     }
 }

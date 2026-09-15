@@ -50,6 +50,8 @@ const MUSIC_DOWNLOAD_PROMPT_CHOICE_CHIP_HEIGHT: f32 = 24.0;
 const MUSIC_DOWNLOAD_PROMPT_CHOICE_CHIP_HORIZONTAL_PADDING: f32 = 8.0;
 const MUSIC_DOWNLOAD_PROMPT_CHOICE_CHIP_WIDTH_MINIMUM: f32 = 36.0;
 const MUSIC_DOWNLOAD_PROMPT_CHOICE_CHIP_WIDTH_MAXIMUM: f32 = 96.0;
+const MUSIC_DOWNLOAD_PROMPT_SAVE_CHIP_WIDTH_MINIMUM: f32 = 84.0;
+const MUSIC_DOWNLOAD_PROMPT_SAVE_CHIP_WIDTH_MAXIMUM: f32 = 160.0;
 const MUSIC_DOWNLOAD_PROMPT_CHOICE_CHIP_HORIZONTAL_SPACING: f32 = 6.0;
 const MUSIC_DOWNLOAD_PROMPT_ACTION_BUTTON_HORIZONTAL_SPACING: f32 = 8.0;
 
@@ -88,6 +90,8 @@ const FORMAT_PICKER_TABLE_FPS_COLUMN_WIDTH_MINIMUM: f32 = 36.0;
 const FORMAT_PICKER_TABLE_FPS_COLUMN_WIDTH_MAXIMUM: f32 = 72.0;
 const FORMAT_PICKER_TABLE_SAMPLE_RATE_COLUMN_WIDTH_MINIMUM: f32 = 76.0;
 const FORMAT_PICKER_TABLE_SAMPLE_RATE_COLUMN_WIDTH_MAXIMUM: f32 = 124.0;
+const FORMAT_PICKER_TABLE_LANGUAGE_COLUMN_WIDTH_MINIMUM: f32 = 56.0;
+const FORMAT_PICKER_TABLE_LANGUAGE_COLUMN_WIDTH_MAXIMUM: f32 = 112.0;
 const FORMAT_PICKER_TABLE_VIDEO_CODEC_COLUMN_WIDTH_MINIMUM: f32 = 84.0;
 const FORMAT_PICKER_TABLE_AUDIO_CODEC_COLUMN_WIDTH_MINIMUM: f32 = 96.0;
 const FORMAT_PICKER_TABLE_CODEC_COLUMN_WIDTH_MAXIMUM: f32 = 220.0;
@@ -1166,7 +1170,7 @@ pub(super) fn music_download_prompt_preference_panel_vertical_spacing() -> f32 {
     MUSIC_DOWNLOAD_PROMPT_PREFERENCE_PANEL_VERTICAL_SPACING
 }
 
-pub(super) fn music_download_prompt_title_width_for_audio_label(ui: &Ui, label: &str) -> f32 {
+pub(super) fn music_download_prompt_section_label_width(ui: &Ui, label: &str) -> f32 {
     measured_text_width(
         ui,
         std::iter::once(label),
@@ -1175,6 +1179,19 @@ pub(super) fn music_download_prompt_title_width_for_audio_label(ui: &Ui, label: 
         WidthRange::new(
             MUSIC_DOWNLOAD_PROMPT_TITLE_WIDTH_MINIMUM,
             MUSIC_DOWNLOAD_PROMPT_TITLE_WIDTH_MAXIMUM,
+        ),
+    )
+}
+
+pub(super) fn music_download_prompt_save_chip_width_for_visible_label(ui: &Ui, label: &str) -> f32 {
+    measured_text_width(
+        ui,
+        std::iter::once(label),
+        TextStyle::Button,
+        MUSIC_DOWNLOAD_PROMPT_CHOICE_CHIP_HORIZONTAL_PADDING * 2.0,
+        WidthRange::new(
+            MUSIC_DOWNLOAD_PROMPT_SAVE_CHIP_WIDTH_MINIMUM,
+            MUSIC_DOWNLOAD_PROMPT_SAVE_CHIP_WIDTH_MAXIMUM,
         ),
     )
 }
@@ -1626,6 +1643,20 @@ pub(super) fn format_picker_table_sample_rate_column_width_for_header_and_values
         values,
         FORMAT_PICKER_TABLE_SAMPLE_RATE_COLUMN_WIDTH_MINIMUM,
         FORMAT_PICKER_TABLE_SAMPLE_RATE_COLUMN_WIDTH_MAXIMUM,
+    )
+}
+
+pub(super) fn format_picker_table_language_column_width_for_header_and_values<'a>(
+    ui: &Ui,
+    header: &str,
+    values: impl IntoIterator<Item = &'a str>,
+) -> f32 {
+    format_picker_table_column_width_for_header_and_values(
+        ui,
+        header,
+        values,
+        FORMAT_PICKER_TABLE_LANGUAGE_COLUMN_WIDTH_MINIMUM,
+        FORMAT_PICKER_TABLE_LANGUAGE_COLUMN_WIDTH_MAXIMUM,
     )
 }
 

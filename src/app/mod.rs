@@ -149,7 +149,9 @@ impl NgDlpApp {
             .name("startup-font-read".to_owned())
             .spawn(move || load_windows_ui_fonts(startup_font_profile))
             .ok();
-        let state = AppState::from_runtime(config, tool_paths);
+        let mut state = AppState::from_runtime(config, tool_paths);
+        state.runtime_renderer =
+            Some(crate::infrastructure::wgpu_api::RuntimeRendererInfo::from_creation(cc));
         record_startup_checkpoint("app state built");
         let startup_fonts = font_worker
             .and_then(|worker| worker.join().ok())
@@ -164,7 +166,7 @@ impl NgDlpApp {
         });
         let initial_ui_scale_percent = state.config.ui_scale_percent;
         ctx.set_zoom_factor(ui_scale_factor(initial_ui_scale_percent));
-        let ui_render_resources = ui::UiRenderResources::new(cc.gl.as_deref());
+        let ui_render_resources = ui::UiRenderResources::new(cc);
 
         Self {
             state,
@@ -433,6 +435,8 @@ impl eframe::App for NgDlpApp {
         self.apply_theme_mode(ctx);
         self.apply_theme_accent(ctx);
         self.apply_custom_chrome();
+        #[cfg(all(windows, debug_assertions))]
+        custom_chrome::diagnostics::tick(ctx);
         self.apply_native_titlebar_accent(ctx);
         self.apply_window_icon_theme(ctx);
         self.apply_ui_scale(ctx);

@@ -145,6 +145,7 @@ impl AppState {
     pub fn request_main_download(&mut self) {
         if self.queue_mode_downloads_as_audio() {
             self.prepare_queue_items_for_audio_mode();
+            self.music.music_download_prompt_choice.save_mode = MusicDownloadSaveMode::FullAudio;
             self.music.music_download_prompt_choice.embed_cover = true;
             self.music.music_download_prompt_choice.write_tags = true;
             self.music.music_download_prompt_open = true;
@@ -167,6 +168,10 @@ impl AppState {
 
     pub fn set_music_download_unified_format(&mut self, format: MusicDownloadFormat) {
         self.music.music_download_prompt_choice.unified_format = format;
+    }
+
+    pub fn set_music_download_save_mode(&mut self, mode: MusicDownloadSaveMode) {
+        self.music.music_download_prompt_choice.save_mode = mode;
     }
 
     pub fn set_music_download_embed_cover(&mut self, enabled: bool) {
@@ -215,5 +220,21 @@ mod tests {
         assert_eq!(confirmed.target_format(), Some(MusicDownloadFormat::Mp3));
         assert!(confirmed.embed_cover);
         assert!(confirmed.write_tags);
+    }
+
+    #[test]
+    fn confirming_music_download_preserves_chapter_split_choice() {
+        let choice = MusicDownloadChoice {
+            save_mode: MusicDownloadSaveMode::SplitChapters,
+            ..MusicDownloadChoice::default()
+        };
+
+        let confirmed = confirmed_music_download_choice(choice);
+
+        assert_eq!(confirmed.save_mode, MusicDownloadSaveMode::SplitChapters);
+        assert!(music_download_requires_online_download(confirmed));
+        assert!(!music_download_requires_online_download(
+            MusicDownloadChoice::default()
+        ));
     }
 }

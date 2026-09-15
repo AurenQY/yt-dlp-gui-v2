@@ -15,6 +15,7 @@ pub struct AppState {
     pub(super) app_mode: AppMode,
     pub item_defaults: DownloadOptions,
     pub config: AppConfig,
+    pub runtime_renderer: Option<crate::infrastructure::wgpu_api::RuntimeRendererInfo>,
     pub(super) pending_ui_scale_percent: u16,
     pub options_detail_page: Option<OptionsDetailPage>,
     pub prepare_detail_page: Option<PrepareDetailPage>,
@@ -84,6 +85,7 @@ impl AppState {
         config.app_mode = app_mode.config_value().to_owned();
         config.queue_display_mode = queue_display_mode.config_value().to_owned();
         let mut state = Self {
+            runtime_renderer: None,
             active_tab: AppTab::Main,
             url_input: String::new(),
             batch_input: String::new(),

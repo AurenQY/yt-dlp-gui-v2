@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "詳細",
+        "advance.browser_integration" => "ブラウザー連携",
+        "advance.browser_connection" => "ブラウザー接続",
+        "advance.browser_connection_enabled" => "{browsers} で有効",
+        "advance.browser_connection_disabled" => "Chrome、Brave、Edge を接続",
+        "advance.browser_connection_enabled_message" => "ブラウザー接続を有効にしました。",
+        "advance.browser_connection_disabled_message" => "ブラウザー接続を無効にしました。",
         "tab.about" => "情報",
         "about.tools" => "ツール版本",
         "about.current_version" => "現在の版本",
@@ -387,6 +393,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "有効",
         "options.theme" => "テーマ",
         "options.theme_mode.system" => "システムに合わせる",
+        "options.render_backend" => "描画方式（再起動後）",
+        "options.wgpu_api" => "グラフィックス API（再起動後）",
         "options.theme_mode.light" => "ライト",
         "options.theme_mode.dark" => "ダーク",
         "options.theme_color" => "テーマ色",
@@ -517,9 +525,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "ダウンロード失敗",
         "notification.completed_file" => "完了：{file}",
         "notification.download_completed" => "ダウンロードが完了しました。",
+        "notification.no_chapters_saved_full_audio" => {
+            "チャプターが検出されなかったため、音声全体を保存しました。"
+        }
         "options.music_download_format" => "音声ダウンロード",
         "options.music_download_audio_label" => "音声出力",
         "options.music_download_preference_best" => "最適",
+        "options.music_download_save_label" => "保存方法",
+        "options.music_download_full_audio" => "音声全体",
+        "options.music_download_split_chapters" => "チャプターごとに分割",
         _ => key,
     }
 }

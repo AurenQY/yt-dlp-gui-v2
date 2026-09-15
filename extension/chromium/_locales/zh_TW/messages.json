@@ -1,0 +1,497 @@
+{
+  "extensionName": {
+    "message": "yt-dlp-gui"
+  },
+  "extensionDescription": {
+    "message": "從目前網頁呼叫 yt-dlp-gui 分析、選擇格式並下載。"
+  },
+  "unsupportedTitle": {
+    "message": "此頁面不支援 yt-dlp"
+  },
+  "supportedTitle": {
+    "message": "使用 yt-dlp-gui 下載此頁面"
+  },
+  "back": {
+    "message": "返回"
+  },
+  "recognizing": {
+    "message": "正在辨識"
+  },
+  "analyze": {
+    "message": "分析"
+  },
+  "stop": {
+    "message": "停止"
+  },
+  "stopping": {
+    "message": "停止中"
+  },
+  "downloadStopping": {
+    "message": "正在停止下載…"
+  },
+  "downloadStopped": {
+    "message": "下載已停止。"
+  },
+  "downloadNotRunning": {
+    "message": "目前沒有正在進行的下載。"
+  },
+  "downloadStopFailed": {
+    "message": "無法停止下載：{message}"
+  },
+  "downloadScope": {
+    "message": "下載範圍"
+  },
+  "currentVideo": {
+    "message": "目前影片"
+  },
+  "currentPage": {
+    "message": "目前頁面"
+  },
+  "fullPlaylist": {
+    "message": "完整清單"
+  },
+  "playlistLimit": {
+    "message": "清單分析上限"
+  },
+  "playlistLimitCompact": {
+    "message": "最多分析"
+  },
+  "itemsUnit": {
+    "message": "項"
+  },
+  "analyzingPage": {
+    "message": "正在分析頁面"
+  },
+  "readingMedia": {
+    "message": "讀取媒體資訊與可用格式"
+  },
+  "chooseFolder": {
+    "message": "選擇資料夾"
+  },
+  "downloadLocation": {
+    "message": "下載位置"
+  },
+  "openDownloadFolder": {
+    "message": "開啟下載資料夾"
+  },
+  "openFolderFailed": {
+    "message": "無法開啟下載資料夾：{message}"
+  },
+  "fromV2Settings": {
+    "message": "由 v2 設定"
+  },
+  "download": {
+    "message": "下載"
+  },
+  "downloadSelected": {
+    "message": "下載 {count} 項"
+  },
+  "downloadingProgress": {
+    "message": "下載中 {current} / {total}"
+  },
+  "selectItem": {
+    "message": "選取項目"
+  },
+  "selectNamedItem": {
+    "message": "選取 {title}"
+  },
+  "downloadContent": {
+    "message": "下載內容"
+  },
+  "fileName": {
+    "message": "檔名"
+  },
+  "fileNameBaseHint": {
+    "message": "副檔名由輸出格式決定。"
+  },
+  "downloadRange": {
+    "message": "下載範圍"
+  },
+  "chapterRange": {
+    "message": "章節範圍"
+  },
+  "chapterRangeHint": {
+    "message": "選擇要下載的章節。相鄰章節會合併為一個輸出。"
+  },
+  "selectedChapters": {
+    "message": "已選擇 {count} 個章節"
+  },
+  "selectAll": {
+    "message": "全選"
+  },
+  "clearSelection": {
+    "message": "清除選取"
+  },
+  "chapterNumber": {
+    "message": "章節 {number}"
+  },
+  "fullVideo": {
+    "message": "完整影片"
+  },
+  "rangeStart": {
+    "message": "開始"
+  },
+  "rangeEnd": {
+    "message": "結束"
+  },
+  "timeRangeHint": {
+    "message": "請使用 HH:MM:SS 或 MM:SS。指定範圍時會關閉章節分割。"
+  },
+  "timeRangeInvalid": {
+    "message": "請輸入有效的開始與結束時間。"
+  },
+  "timeRangeOrderInvalid": {
+    "message": "結束時間必須晚於開始時間。"
+  },
+  "timeRangeBeyondDuration": {
+    "message": "結束時間超過媒體長度。"
+  },
+  "confirm": {
+    "message": "確認"
+  },
+  "video": {
+    "message": "影片"
+  },
+  "audio": {
+    "message": "聲音"
+  },
+  "audioOnly": {
+    "message": "僅音訊"
+  },
+  "videoFormat": {
+    "message": "影片格式"
+  },
+  "audioFormat": {
+    "message": "聲音格式"
+  },
+  "output": {
+    "message": "輸出"
+  },
+  "thumbnailMode": {
+    "message": "縮圖"
+  },
+  "thumbnailOff": {
+    "message": "關閉"
+  },
+  "thumbnailDownload": {
+    "message": "下載縮圖"
+  },
+  "thumbnailEmbed": {
+    "message": "嵌入縮圖"
+  },
+  "subtitleMode": {
+    "message": "字幕處理"
+  },
+  "subtitleOff": {
+    "message": "關閉"
+  },
+  "subtitleDownload": {
+    "message": "下載字幕檔"
+  },
+  "subtitleEmbed": {
+    "message": "嵌入影片"
+  },
+  "chapterMode": {
+    "message": "章節處理"
+  },
+  "chapterOff": {
+    "message": "完整檔案"
+  },
+  "chapterDownload": {
+    "message": "分割章節"
+  },
+  "chapterEmbed": {
+    "message": "分割並嵌入章節"
+  },
+  "subtitles": {
+    "message": "字幕"
+  },
+  "chapters": {
+    "message": "章節"
+  },
+  "fullFile": {
+    "message": "完整檔案"
+  },
+  "splitChapters": {
+    "message": "依章節切割"
+  },
+  "remaining": {
+    "message": "剩餘 {eta}"
+  },
+  "completed": {
+    "message": "完成"
+  },
+  "ready": {
+    "message": "就緒"
+  },
+  "downloading": {
+    "message": "下載中"
+  },
+  "completedItems": {
+    "message": "完成：{count} 項"
+  },
+  "completedValue": {
+    "message": "完成：{value}"
+  },
+  "downloadComplete": {
+    "message": "下載完成"
+  },
+  "downloadFailed": {
+    "message": "下載失敗。"
+  },
+  "hostRejected": {
+    "message": "EXE 未接受要求。"
+  },
+  "unavailable": {
+    "message": "無法使用"
+  },
+  "supportedSite": {
+    "message": "支援網站"
+  },
+  "genericDownload": {
+    "message": "通用下載"
+  },
+  "generic": {
+    "message": "通用"
+  },
+  "audioSummary": {
+    "message": "音訊"
+  },
+  "noAudio": {
+    "message": "無音訊"
+  },
+  "audioUnknown": {
+    "message": "音訊未知"
+  },
+  "noSubtitles": {
+    "message": "不下載字幕"
+  },
+  "automatic": {
+    "message": "自動產生"
+  },
+  "showFirstItems": {
+    "message": "僅顯示前 {count} 項"
+  },
+  "mediaCountLimit": {
+    "message": "{count} 個媒體 · 上限 {limit}"
+  },
+  "analyzedCount": {
+    "message": "已分析 {count} / {limit} 項"
+  },
+  "stoppedCount": {
+    "message": "已停止 · {count} 項"
+  },
+  "permissionRequired": {
+    "message": "需要此網站的存取權限才能使用瀏覽器 Cookie。"
+  },
+  "analysisFailed": {
+    "message": "分析失敗：{message}"
+  },
+  "noDownloadableMedia": {
+    "message": "此頁面沒有可下載的影片或音訊。"
+  },
+  "analysisStopped": {
+    "message": "已停止分析，保留 {count} 項結果。"
+  },
+  "stopFailed": {
+    "message": "停止失敗：{message}"
+  },
+  "preparingDownloads": {
+    "message": "準備下載 {count} 項"
+  },
+  "preparingDownload": {
+    "message": "準備下載：{title}"
+  },
+  "noFormats": {
+    "message": "沒有可用格式"
+  },
+  "approximate": {
+    "message": "約 {value}"
+  },
+  "sampleRate": {
+    "message": "取樣率"
+  },
+  "language": {
+    "message": "語言"
+  },
+  "codec": {
+    "message": "編碼"
+  },
+  "bitrate": {
+    "message": "位元率"
+  },
+  "size": {
+    "message": "容量"
+  },
+  "resolution": {
+    "message": "解析度"
+  },
+  "fps": {
+    "message": "FPS"
+  },
+  "analyzingFormats": {
+    "message": "正在分析格式"
+  },
+  "formatsAnalyzed": {
+    "message": "格式分析完成"
+  },
+  "downloadCompleted": {
+    "message": "下載完成"
+  },
+  "operationFailed": {
+    "message": "操作失敗"
+  },
+  "downloadPreparing": {
+    "message": "準備下載"
+  },
+  "downloadListInvalid": {
+    "message": "下載清單無效。"
+  },
+  "downloadAlreadyRunning": {
+    "message": "目前已有一個下載正在進行。"
+  },
+  "nativeDownloadFailed": {
+    "message": "EXE 下載失敗。"
+  },
+  "nativeDisconnected": {
+    "message": "Native Host 連線已中斷。"
+  },
+  "nativeNoData": {
+    "message": "EXE 未回傳資料。"
+  },
+  "nativeConnectFailed": {
+    "message": "無法啟動 EXE 連線。"
+  },
+  "cookieReadFailed": {
+    "message": "無法讀取此網站的 Cookie，請確認網站存取權限。"
+  },
+  "selectAudioFormat": {
+    "message": "請選擇聲音格式。"
+  },
+  "selectVideoFormat": {
+    "message": "請選擇影片格式。"
+  },
+  "selectMergeAudioFormat": {
+    "message": "請選擇要與影片合併的聲音格式。"
+  },
+  "invalidUrlType": {
+    "message": "請輸入網址。"
+  },
+  "invalidUrlLength": {
+    "message": "網址包含空白或長度過長。"
+  },
+  "invalidUrlComplete": {
+    "message": "請輸入完整的 HTTP 或 HTTPS 網址。"
+  },
+  "invalidUrlProtocol": {
+    "message": "僅接受 HTTP 或 HTTPS 網址。"
+  },
+  "invalidUrlCredentials": {
+    "message": "不接受包含帳號或密碼的網址。"
+  },
+  "invalidUrlIndex": {
+    "message": "網址索引格式不符。"
+  },
+  "matcherIndexLoadFailed": {
+    "message": "無法載入網址索引。"
+  },
+  "sourceTabMissing": {
+    "message": "找不到來源分頁。"
+  },
+  "analysisAlreadyRunning": {
+    "message": "分析已在進行中。"
+  },
+  "analysisStarted": {
+    "message": "已開始分析。"
+  },
+  "nativeAnalysisFailed": {
+    "message": "EXE 無法分析此頁面。"
+  },
+  "analysisDisconnected": {
+    "message": "分析連線已中斷。"
+  },
+  "analysisNotRunning": {
+    "message": "沒有相符的分析工作正在進行。"
+  },
+  "analysisStoppedStatus": {
+    "message": "分析已停止。"
+  },
+  "analysisStopFailed": {
+    "message": "無法停止分析。"
+  },
+  "analysisStartFailed": {
+    "message": "無法開始分析。"
+  },
+  "downloadStarted": {
+    "message": "已開始下載。"
+  },
+  "analysisReadPlaylist": {
+    "message": "取得完整清單媒體資料"
+  },
+  "analysisReadMedia": {
+    "message": "取得目前頁面媒體資料"
+  },
+  "analysisCurrentPageDetail": {
+    "message": "目前頁面"
+  },
+  "analysisPrepareBrowser": {
+    "message": "準備瀏覽器資料"
+  },
+  "analysisLaunchYtDlp": {
+    "message": "啟動 yt-dlp"
+  },
+  "analysisPlaylistLimitDetail": {
+    "message": "上限 {count} 項"
+  },
+  "analysisConnectHost": {
+    "message": "連接 yt-dlp-gui"
+  },
+  "analysisValidateTools": {
+    "message": "檢查設定與工具"
+  },
+  "browserMediaMixed": {
+    "message": "影音"
+  },
+  "browserMediaVideo": {
+    "message": "影片"
+  },
+  "browserMediaAudio": {
+    "message": "音訊"
+  },
+  "genericTitle": {
+    "message": "以 yt-dlp 通用模式嘗試此頁面"
+  },
+  "nativeHostGitHub": {
+    "message": "GitHub Releases"
+  },
+  "nativeHostUnavailable": {
+    "message": "找不到 yt-dlp-gui 瀏覽器連接。請先安裝程式，並在「選項」啟用瀏覽器整合。"
+  },
+  "supportStatus": {
+    "message": "網址支援"
+  },
+  "supportCheckingTitle": {
+    "message": "可以開始分析"
+  },
+  "supportCheckingDetail": {
+    "message": "正在背景確認網站專用規則"
+  },
+  "supportCheckingBadge": {
+    "message": "可分析"
+  },
+  "supportReadyTitle": {
+    "message": "此網址受 yt-dlp 支援"
+  },
+  "supportReadyBadge": {
+    "message": "支援"
+  },
+  "supportGenericTitle": {
+    "message": "可以開始分析"
+  },
+  "supportGenericDetail": {
+    "message": "將使用 yt-dlp 通用解析"
+  },
+  "supportGenericBadge": {
+    "message": "通用"
+  }
+}

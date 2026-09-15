@@ -98,6 +98,7 @@ fn render_format_picker_table_inner(
             .sense(Sense::click())
             .cell_layout(Layout::left_to_right(Align::Center))
             .column(Column::exact(table_widths.marker))
+            .column(Column::exact(table_widths.language))
             .column(Column::exact(table_widths.sample_rate))
             .column(Column::exact(table_widths.codec))
             .column(Column::exact(table_widths.filesize))
@@ -107,10 +108,12 @@ fn render_format_picker_table_inner(
             .min_scrolled_height(semantic_ui_metrics::format_picker_table_minimum_scrolled_height())
             .max_scroll_height(max_height)
             .header(row_height, |mut header| {
+                let language_text = state.ui_i18n_text_for_key(UiText::HEADER_LANGUAGE);
                 let sample_rate_text = state.ui_i18n_text_for_key(UiText::HEADER_SAMPLE_RATE);
                 let codec_text = state.ui_i18n_text_for_key(UiText::HEADER_CODEC);
                 let filesize_text = state.ui_i18n_text_for_key(UiText::HEADER_FILESIZE);
                 header.col(|ui| cell_label_center(ui, ""));
+                header.col(|ui| cell_label_center(ui, language_text));
                 header.col(|ui| cell_label_center(ui, sample_rate_text));
                 header.col(|ui| cell_label_center(ui, codec_text));
                 header.col(|ui| cell_label_center(ui, filesize_text));
@@ -138,6 +141,16 @@ fn render_format_picker_table_inner(
                 }
                 FormatPickerKind::Audio => {
                     row.col(|ui| render_muxed_marker(ui, option.kind == MediaKind::Muxed));
+                    row.col(|ui| {
+                        cell_label(
+                            ui,
+                            if option.language.is_empty() {
+                                "—"
+                            } else {
+                                &option.language
+                            },
+                        )
+                    });
                     row.col(|ui| cell_label(ui, &option.sample_rate));
                     row.col(|ui| cell_label(ui, &option.codec));
                     row.col(|ui| cell_label(ui, &option.filesize));
@@ -181,6 +194,7 @@ struct FormatPickerTableWidths {
     codec: f32,
     filesize: f32,
     sample_rate: f32,
+    language: f32,
 }
 
 impl FormatPickerTableWidths {
@@ -194,7 +208,9 @@ impl FormatPickerTableWidths {
                     + self.codec
                     + self.filesize
             }
-            FormatPickerKind::Audio => self.marker + self.sample_rate + self.codec + self.filesize,
+            FormatPickerKind::Audio => {
+                self.marker + self.language + self.sample_rate + self.codec + self.filesize
+            }
             FormatPickerKind::Subtitle | FormatPickerKind::Section => 0.0,
         }
     }
@@ -211,6 +227,7 @@ fn measure_format_picker_table_widths(
     let range_text = state.ui_i18n_text_for_key(UiText::HEADER_RANGE);
     let fps_text = state.ui_i18n_text_for_key(UiText::HEADER_FPS);
     let sample_rate_text = state.ui_i18n_text_for_key(UiText::HEADER_SAMPLE_RATE);
+    let language_text = state.ui_i18n_text_for_key(UiText::HEADER_LANGUAGE);
     let codec_text = state.ui_i18n_text_for_key(UiText::HEADER_CODEC);
     let filesize_text = state.ui_i18n_text_for_key(UiText::HEADER_FILESIZE);
     let resolution =
@@ -235,6 +252,12 @@ fn measure_format_picker_table_widths(
             ui,
             sample_rate_text,
             options.iter().map(|option| option.sample_rate.as_str()),
+        );
+    let language =
+        semantic_ui_metrics::format_picker_table_language_column_width_for_header_and_values(
+            ui,
+            language_text,
+            options.iter().map(|option| option.language.as_str()),
         );
     let codec = match kind {
         FormatPickerKind::Audio => {
@@ -267,5 +290,6 @@ fn measure_format_picker_table_widths(
         codec,
         filesize,
         sample_rate,
+        language,
     }
 }

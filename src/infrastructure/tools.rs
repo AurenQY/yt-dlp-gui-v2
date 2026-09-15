@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "windows")]
@@ -8,12 +9,15 @@ use std::os::raw::c_void;
 use std::process::{Command, Stdio};
 #[cfg(target_os = "windows")]
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::cookie_site_index::read_cookie_site_index;
-use super::process_guard::run_tracked_command_output;
+use super::process_guard::{
+    force_cleanup_tracked_processes, run_tracked_command_output, track_child_process,
+};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -176,6 +180,7 @@ pub enum DownloadTargetKind {
 
 #[derive(Clone)]
 pub struct ToolPaths {
+    pub native_cookie_override: Option<PathBuf>,
     pub yt_dlp: String,
     pub yt_dlp_config: String,
     pub ffmpeg: String,
@@ -202,6 +207,7 @@ pub struct ToolPaths {
 impl Default for ToolPaths {
     fn default() -> Self {
         Self {
+            native_cookie_override: None,
             yt_dlp: ".\\tools\\yt-dlp\\yt-dlp.exe".to_owned(),
             yt_dlp_config: String::new(),
             ffmpeg: ".\\tools\\ffmpeg\\ffmpeg.exe".to_owned(),
@@ -225,6 +231,36 @@ impl Default for ToolPaths {
             file_time_mode: FileTimeMode::None,
         }
     }
+}
+
+fn apply_analyze_playlist_scope(command: &mut Command, playlist_item_limit: Option<usize>) {
+    if let Some(limit) = playlist_item_limit {
+        command
+            .arg("--yes-playlist")
+            .arg("--playlist-end")
+            .arg(limit.max(1).to_string());
+    } else {
+        command.arg("--no-playlist");
+    }
+}
+
+fn apply_analysis_selection_args(
+    command: &mut Command,
+    playlist_item_limit: Option<usize>,
+    format_selector: Option<&str>,
+) {
+    apply_analyze_playlist_scope(command, playlist_item_limit);
+    if let Some(selector) = format_selector.filter(|value| !value.trim().is_empty()) {
+        command.arg("-f").arg(selector);
+    }
+}
+
+fn apply_streaming_playlist_analysis_args(command: &mut Command, item_limit: usize) {
+    command
+        .arg("--dump-json")
+        .arg("--lazy-playlist")
+        .arg("--no-warnings");
+    apply_analysis_selection_args(command, Some(item_limit.max(1)), None);
 }
 
 impl ToolPaths {
@@ -278,6 +314,24 @@ impl ToolPaths {
         (self.proxy_enabled && !proxy_url.is_empty()).then_some(proxy_url)
     }
 
+    pub fn aria2_is_available(&self) -> bool {
+        resolve_tool_path(&self.aria2c).is_file()
+    }
+
+    pub fn append_aria2_downloader_args(&self, command: &mut Command) -> bool {
+        let aria2_path = resolve_tool_path(&self.aria2c);
+        if !aria2_path.is_file() {
+            return false;
+        }
+        command.arg("--downloader").arg(aria2_path);
+        if let Some(args) =
+            aria2_downloader_args(self.effective_proxy_url(), self.no_check_certificates)
+        {
+            command.arg("--downloader-args").arg(args);
+        }
+        true
+    }
+
     pub fn available_browser_cookie_sources(&self) -> Vec<BrowserCookieSourceOption> {
         let mut items = Vec::new();
         items.push(BrowserCookieSourceOption {
@@ -325,7 +379,7 @@ impl ToolPaths {
             .arg("--ignore-errors")
             .arg(url);
 
-        println!(
+        eprintln!(
             "[batch-add] command: {}",
             format_command_line(&tool_path, &command)
         );
@@ -354,7 +408,7 @@ impl ToolPaths {
             .arg("--ignore-errors")
             .arg(url);
 
-        println!(
+        eprintln!(
             "[music-flat-update] command: {}",
             format_command_line(&tool_path, &command)
         );
@@ -376,11 +430,120 @@ impl ToolPaths {
             .validate_yt_dlp_available()
             .map_err(|error| AnalyzeError::new(error, None))?;
 
-        if self.effective_config_owns_format() {
-            return self.run_analyze_command(&tool_path, url, use_cookies, None);
+        self.run_analyze_command(&tool_path, url, use_cookies, None, None)
+    }
+
+    pub fn analyze_playlist_url_detailed(
+        &self,
+        url: &str,
+        use_cookies: bool,
+        item_limit: usize,
+    ) -> Result<AnalyzeOutput, AnalyzeError> {
+        let tool_path = self
+            .validate_yt_dlp_available()
+            .map_err(|error| AnalyzeError::new(error, None))?;
+        self.run_analyze_command(&tool_path, url, use_cookies, None, Some(item_limit.max(1)))
+    }
+
+    pub fn analyze_playlist_url_streaming_detailed(
+        &self,
+        url: &str,
+        use_cookies: bool,
+        item_limit: usize,
+        cancelled: &AtomicBool,
+        mut on_item: impl FnMut(Value) -> Result<(), String>,
+    ) -> Result<usize, AnalyzeError> {
+        let tool_path = self
+            .validate_yt_dlp_available()
+            .map_err(|error| AnalyzeError::new(error, None))?;
+        let mut command = Command::new(&tool_path);
+        configure_background_command(&mut command);
+        self.apply_common_yt_dlp_args(&mut command);
+        apply_streaming_playlist_analysis_args(&mut command, item_limit);
+        self.apply_cookie_args(&mut command, use_cookies, Some(url))
+            .map_err(|error| AnalyzeError::new(error, None))?;
+        self.apply_youtube_extractor_args(&mut command);
+        command
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let command_line = format_command_line(&tool_path, &command);
+        eprintln!("[analyze-stream] command: {command_line}");
+        let mut child = command.spawn().map_err(|error| {
+            AnalyzeError::new(
+                format!("Could not start yt-dlp: {error}"),
+                Some(command_line.clone()),
+            )
+        })?;
+        let _guard = track_child_process(&child, "yt-dlp streaming analysis");
+        if cancelled.load(Ordering::Acquire) {
+            force_cleanup_tracked_processes();
+        }
+        let stdout = child.stdout.take().ok_or_else(|| {
+            AnalyzeError::new(
+                "Could not capture yt-dlp analysis output.",
+                Some(command_line.clone()),
+            )
+        })?;
+        let mut stderr = child.stderr.take().ok_or_else(|| {
+            AnalyzeError::new(
+                "Could not capture yt-dlp analysis errors.",
+                Some(command_line.clone()),
+            )
+        })?;
+        let stderr_reader = std::thread::spawn(move || {
+            let mut value = String::new();
+            let _ = stderr.read_to_string(&mut value);
+            value
+        });
+
+        let mut item_count = 0;
+        for line in BufReader::new(stdout).lines() {
+            let line = line.map_err(|error| {
+                AnalyzeError::new(
+                    format!("Could not read yt-dlp JSON: {error}"),
+                    Some(command_line.clone()),
+                )
+            })?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let item = serde_json::from_str::<Value>(&line).map_err(|error| {
+                AnalyzeError::new(
+                    format!("Could not parse yt-dlp JSON: {error}"),
+                    Some(command_line.clone()),
+                )
+            })?;
+            item_count += 1;
+            if let Err(error) = on_item(item) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stderr_reader.join();
+                return Err(AnalyzeError::new(error, Some(command_line)));
+            }
         }
 
-        self.run_analyze_command(&tool_path, url, use_cookies, Some(DEFAULT_FORMAT_SELECTOR))
+        let status = child.wait().map_err(|error| {
+            AnalyzeError::new(
+                format!("Could not wait for yt-dlp: {error}"),
+                Some(command_line.clone()),
+            )
+        })?;
+        let stderr = stderr_reader.join().unwrap_or_default();
+        if !status.success() {
+            let detail = if stderr.trim().is_empty() {
+                format!("exit code {:?}", status.code())
+            } else {
+                humanize_yt_dlp_error(stderr.trim())
+            };
+            return Err(AnalyzeError::new(
+                format!("yt-dlp analysis failed: {detail}"),
+                Some(command_line),
+            ));
+        }
+        Ok(item_count)
     }
 
     pub fn analyze_music_stream_url(
@@ -427,6 +590,7 @@ impl ToolPaths {
             url,
             use_cookies,
             Some(format_selector.trim()).filter(|value| !value.is_empty()),
+            None,
         )
     }
 
@@ -477,7 +641,7 @@ impl ToolPaths {
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
-        println!("[music-cache] command: {command_line}");
+        eprintln!("[music-cache] command: {command_line}");
         Ok(command)
     }
 
@@ -489,6 +653,7 @@ impl ToolPaths {
         format_selector: &str,
         embed_cover: bool,
         write_tags: bool,
+        chapter_output_dir: Option<&Path>,
         use_cookies: bool,
     ) -> Result<PreparedDownload, String> {
         let tool_path = self.validate_yt_dlp_available()?;
@@ -504,6 +669,11 @@ impl ToolPaths {
             .as_ref()
             .map(|format| output_dir.join(format!("%(artist)s - %(title)s.{format}")))
             .unwrap_or_else(|| output_dir.join("%(artist)s - %(title)s.%(ext)s"));
+
+        if let Some(chapter_output_dir) = chapter_output_dir {
+            fs::create_dir_all(chapter_output_dir)
+                .map_err(|error| format!("Could not create chapter output folder: {error}"))?;
+        }
 
         let mut command = Command::new(&tool_path);
         configure_background_command(&mut command);
@@ -548,6 +718,8 @@ impl ToolPaths {
                 .arg("--convert-thumbnails")
                 .arg("jpg");
         }
+
+        apply_music_chapter_split_args(&mut command, chapter_output_dir);
 
         command
             .arg("--print")
@@ -625,7 +797,7 @@ impl ToolPaths {
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
-        println!(
+        eprintln!(
             "[music-lyrics] command: {}",
             format_command_line(&tool_path, &command)
         );
@@ -778,15 +950,7 @@ impl ToolPaths {
         self.apply_youtube_extractor_args(&mut command);
 
         if !self.has_explicit_config() && request.use_aria2 {
-            let aria2_path = resolve_tool_path(&self.aria2c);
-            if aria2_path.is_file() {
-                command.arg("--external-downloader").arg(aria2_path);
-                if let Some(args) =
-                    aria2_downloader_args(self.effective_proxy_url(), self.no_check_certificates)
-                {
-                    command.arg("--external-downloader-args").arg(args);
-                }
-            }
+            self.append_aria2_downloader_args(&mut command);
         }
 
         let should_write_subtitles = request.target_kind == DownloadTargetKind::Subtitle
@@ -850,6 +1014,9 @@ impl ToolPaths {
     }
 
     pub fn validate_cookie_setup(&self, use_cookies: bool) -> Result<(), String> {
+        if self.native_cookie_override.is_some() {
+            return Ok(());
+        }
         if !use_cookies || self.has_explicit_config() {
             return Ok(());
         }
@@ -882,6 +1049,13 @@ impl ToolPaths {
         use_cookies: bool,
         url: Option<&str>,
     ) -> Result<(), String> {
+        if let Some(path) = &self.native_cookie_override {
+            command
+                .arg("--no-cookies-from-browser")
+                .arg("--cookies")
+                .arg(path);
+            return Ok(());
+        }
         self.validate_cookie_setup(use_cookies)?;
         if !use_cookies || self.has_explicit_config() {
             return Ok(());
@@ -1039,18 +1213,14 @@ impl ToolPaths {
         url: &str,
         use_cookies: bool,
         format_selector: Option<&str>,
+        playlist_item_limit: Option<usize>,
     ) -> Result<AnalyzeOutput, AnalyzeError> {
         let mut command = Command::new(tool_path);
         configure_background_command(&mut command);
         self.apply_common_yt_dlp_args(&mut command);
-        command
-            .arg("--dump-single-json")
-            .arg("--no-warnings")
-            .arg("--no-playlist");
+        command.arg("--dump-single-json").arg("--no-warnings");
 
-        if let Some(selector) = format_selector.filter(|value| !value.trim().is_empty()) {
-            command.arg("-f").arg(selector);
-        }
+        apply_analysis_selection_args(&mut command, playlist_item_limit, format_selector);
 
         self.apply_cookie_args(&mut command, use_cookies, Some(url))
             .map_err(|error| AnalyzeError::new(error, None))?;
@@ -1058,7 +1228,7 @@ impl ToolPaths {
         command.arg(url);
 
         let command_line = format_command_line(tool_path, &command);
-        println!("[analyze] command: {command_line}");
+        eprintln!("[analyze] command: {command_line}");
 
         let output =
             run_tracked_command_output(&mut command, "yt-dlp analyze").map_err(|error| {
@@ -1969,6 +2139,24 @@ fn chapter_output_argument(path: &Path) -> String {
     format!("chapter:{}", parent.join(template).display())
 }
 
+fn music_chapter_output_argument(output_dir: &Path) -> String {
+    format!(
+        "chapter:{}",
+        output_dir
+            .join("%(section_number)02d - %(section_title)s.%(ext)s")
+            .display()
+    )
+}
+
+fn apply_music_chapter_split_args(command: &mut Command, output_dir: Option<&Path>) {
+    if let Some(output_dir) = output_dir {
+        command
+            .arg("--split-chapters")
+            .arg("--output")
+            .arg(music_chapter_output_argument(output_dir));
+    }
+}
+
 fn output_argument_for_kind(kind: DownloadTargetKind, path: &Path) -> String {
     match kind {
         DownloadTargetKind::Subtitle => format!("subtitle:{}", path.display()),
@@ -2114,6 +2302,51 @@ fn normalized_normal_output_extension(extension: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analysis_playlist_scope_is_explicit_and_bounded() {
+        let mut current = Command::new("yt-dlp");
+        apply_analyze_playlist_scope(&mut current, None);
+        assert_eq!(command_args(&current), ["--no-playlist"]);
+
+        let mut playlist = Command::new("yt-dlp");
+        apply_analyze_playlist_scope(&mut playlist, Some(33));
+        assert_eq!(
+            command_args(&playlist),
+            ["--yes-playlist", "--playlist-end", "33"]
+        );
+    }
+
+    #[test]
+    fn streaming_playlist_analysis_is_lazy_and_bounded() {
+        let mut command = Command::new("yt-dlp");
+        apply_streaming_playlist_analysis_args(&mut command, 2);
+        assert_eq!(
+            command_args(&command),
+            [
+                "--dump-json",
+                "--lazy-playlist",
+                "--no-warnings",
+                "--yes-playlist",
+                "--playlist-end",
+                "2",
+            ]
+        );
+    }
+
+    #[test]
+    fn generic_analysis_does_not_apply_a_download_format_selector() {
+        let mut generic = Command::new("yt-dlp");
+        apply_analysis_selection_args(&mut generic, None, None);
+        assert_eq!(command_args(&generic), ["--no-playlist"]);
+
+        let mut music = Command::new("yt-dlp");
+        apply_analysis_selection_args(&mut music, None, Some(MUSIC_STREAM_FORMAT_SELECTOR));
+        assert_eq!(
+            command_args(&music),
+            ["--no-playlist", "-f", MUSIC_STREAM_FORMAT_SELECTOR]
+        );
+    }
 
     fn subtitle_test_request(write_auto_subs: bool, embed_subtitles: bool) -> DownloadRequest {
         DownloadRequest {
@@ -2381,6 +2614,33 @@ mod tests {
     }
 
     #[test]
+    fn music_chapter_output_uses_number_and_chapter_title() {
+        let output = music_chapter_output_argument(Path::new("album"));
+
+        assert!(output.starts_with("chapter:"));
+        assert!(output.contains("%(section_number)02d - %(section_title)s.%(ext)s"));
+    }
+
+    #[test]
+    fn music_chapter_split_args_are_only_added_for_split_output() {
+        let mut full_audio = Command::new("yt-dlp");
+        apply_music_chapter_split_args(&mut full_audio, None);
+        assert!(command_args(&full_audio).is_empty());
+
+        let mut split_audio = Command::new("yt-dlp");
+        apply_music_chapter_split_args(&mut split_audio, Some(Path::new("album")));
+        let chapter_output = music_chapter_output_argument(Path::new("album"));
+        assert_eq!(
+            command_args(&split_audio),
+            vec![
+                "--split-chapters".to_owned(),
+                "--output".to_owned(),
+                chapter_output,
+            ]
+        );
+    }
+
+    #[test]
     fn v2_cache_mode_keeps_yt_dlp_cache_and_temp_namespaced() {
         let cache_root = std::env::temp_dir().join(format!(
             "yt-dlp-gui-v2-cache-args-test-{}",
@@ -2448,15 +2708,7 @@ fn candidate_base_dirs() -> Vec<PathBuf> {
 }
 
 fn portable_root_dir() -> PathBuf {
-    #[cfg(debug_assertions)]
-    {
-        return std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    }
-
-    #[cfg(not(debug_assertions))]
-    current_executable_dir()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+    super::runtime_paths::application_root()
 }
 
 fn current_executable_dir() -> Option<PathBuf> {

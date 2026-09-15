@@ -12,6 +12,7 @@ use super::xaml_ui_nodes::{TemplateNode, auto_block_rows};
 enum OptionsRootNode {
     Language,
     ToolPaths,
+    BrowserIntegration,
     Behavior,
     FormatList,
     Tabs,
@@ -42,6 +43,7 @@ fn options_root_template() -> OptionsRootTemplate {
     auto_block_rows([
         OptionsRootNode::Language,
         OptionsRootNode::ToolPaths,
+        OptionsRootNode::BrowserIntegration,
         OptionsRootNode::Behavior,
         OptionsRootNode::FormatList,
         OptionsRootNode::Tabs,
@@ -73,6 +75,9 @@ fn show_options_root_block(
     let label_width = metrics.label_width;
     let form = metrics.form;
     match node {
+        OptionsRootNode::BrowserIntegration => {
+            super::options_browser_integration::render_browser_integration_section(tui, state, form)
+        }
         OptionsRootNode::Language => {
             super::options_language::render_language_group(tui, state, form)
         }

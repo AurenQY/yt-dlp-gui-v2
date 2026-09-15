@@ -146,8 +146,8 @@ use self::music_runtime::{
 };
 use self::music_types::music_online_target_format_selector;
 pub use self::music_types::{
-    MusicDownloadChoice, MusicDownloadFormat, MusicDownloadMode, MusicDownloadSourceKind,
-    MusicMixMode, MusicOriginalPreference, MusicPlaybackMode,
+    MusicDownloadChoice, MusicDownloadFormat, MusicDownloadMode, MusicDownloadSaveMode,
+    MusicDownloadSourceKind, MusicMixMode, MusicOriginalPreference, MusicPlaybackMode,
 };
 use self::music_worker_helpers::*;
 use self::prepare_visibility_helpers::*;

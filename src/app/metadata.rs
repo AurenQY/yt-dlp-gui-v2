@@ -152,6 +152,11 @@ fn build_format_label(format: &Value, kind: MediaKind) -> String {
 }
 
 fn build_format_option(format_id: &str, format: &Value, kind: MediaKind) -> FormatOption {
+    let language = format
+        .get("language")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
     match kind {
         MediaKind::Video | MediaKind::Muxed => {
             let resolution = video_resolution_text(format);
@@ -192,6 +197,7 @@ fn build_format_option(format_id: &str, format: &Value, kind: MediaKind) -> Form
                 &codec,
                 &filesize,
             )
+            .with_language(language)
         }
         MediaKind::Audio => {
             let sample_rate = format
@@ -212,7 +218,7 @@ fn build_format_option(format_id: &str, format: &Value, kind: MediaKind) -> Form
                     .unwrap_or_default(),
             );
             let filesize = format_filesize(format);
-            let label = join_label_parts(&[&sample_rate, &ext, &codec, &filesize]);
+            let label = join_label_parts(&[language, &sample_rate, &ext, &codec, &filesize]);
 
             FormatOption::audio(
                 format_id,
@@ -223,6 +229,7 @@ fn build_format_option(format_id: &str, format: &Value, kind: MediaKind) -> Form
                 &codec,
                 &filesize,
             )
+            .with_language(language)
         }
         MediaKind::Subtitle | MediaKind::Other => {
             let label = build_format_label(format, kind);
@@ -317,11 +324,12 @@ fn value_as_number_text(value: &Value) -> Option<String> {
 }
 
 fn normalize_video_codec(value: &str) -> String {
-    if value.starts_with("vp9") {
+    let normalized = value.to_ascii_lowercase();
+    if normalized.starts_with("vp9") || normalized.starts_with("vp09") {
         "VP9".to_owned()
-    } else if value.starts_with("av01") {
+    } else if normalized.starts_with("av01") {
         "AV1".to_owned()
-    } else if value.starts_with("avc") {
+    } else if normalized.starts_with("avc") {
         "H.264".to_owned()
     } else {
         value.to_owned()
@@ -845,5 +853,17 @@ pub(super) fn normalize_duration_badge_text(text: &str) -> String {
             }
         }
         _ => trimmed.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn youtube_vp09_profiles_share_the_vp9_codec_label() {
+        assert_eq!(normalize_video_codec("vp9"), "VP9");
+        assert_eq!(normalize_video_codec("vp09.00.40.08"), "VP9");
+        assert_eq!(normalize_video_codec("VP09.00.31.08"), "VP9");
     }
 }

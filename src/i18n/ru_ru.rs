@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Расширенные",
+        "advance.browser_integration" => "Интеграция с браузером",
+        "advance.browser_connection" => "Подключение браузера",
+        "advance.browser_connection_enabled" => "Включено для {browsers}",
+        "advance.browser_connection_disabled" => "Подключить Chrome, Brave и Edge",
+        "advance.browser_connection_enabled_message" => "Подключение браузера включено.",
+        "advance.browser_connection_disabled_message" => "Подключение браузера выключено.",
         "tab.about" => "About",
         "about.tools" => "Версии инструментов",
         "about.current_version" => "Текущая",
@@ -393,6 +399,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Включить",
         "options.theme" => "Тема",
         "options.theme_mode.system" => "Как в системе",
+        "options.render_backend" => "Рендерер (после перезапуска)",
+        "options.wgpu_api" => "Графический API (после перезапуска)",
         "options.theme_mode.light" => "Светлая",
         "options.theme_mode.dark" => "Тёмная",
         "options.theme_color" => "Цвет темы",
@@ -517,9 +525,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Ошибка загрузки",
         "notification.completed_file" => "Завершено: {file}",
         "notification.download_completed" => "Загрузка завершена.",
+        "notification.no_chapters_saved_full_audio" => {
+            "Главы не обнаружены. Сохранено полное аудио."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "Вывод аудио",
         "options.music_download_preference_best" => "Лучшее",
+        "options.music_download_save_label" => "Способ сохранения",
+        "options.music_download_full_audio" => "Полное аудио",
+        "options.music_download_split_chapters" => "Разделить по главам",
         _ => key,
     }
 }

@@ -1,0 +1,497 @@
+{
+  "extensionName": {
+    "message": "yt-dlp-gui"
+  },
+  "extensionDescription": {
+    "message": "从当前网页调用 yt-dlp-gui 分析、选择格式并下载。"
+  },
+  "unsupportedTitle": {
+    "message": "此页面不支持 yt-dlp"
+  },
+  "supportedTitle": {
+    "message": "使用 yt-dlp-gui 下载此页面"
+  },
+  "back": {
+    "message": "返回"
+  },
+  "recognizing": {
+    "message": "正在识别"
+  },
+  "analyze": {
+    "message": "分析"
+  },
+  "stop": {
+    "message": "停止"
+  },
+  "stopping": {
+    "message": "停止中"
+  },
+  "downloadStopping": {
+    "message": "正在停止下载…"
+  },
+  "downloadStopped": {
+    "message": "下载已停止。"
+  },
+  "downloadNotRunning": {
+    "message": "目前没有正在进行的下载。"
+  },
+  "downloadStopFailed": {
+    "message": "无法停止下载：{message}"
+  },
+  "downloadScope": {
+    "message": "下载范围"
+  },
+  "currentVideo": {
+    "message": "当前视频"
+  },
+  "currentPage": {
+    "message": "当前页面"
+  },
+  "fullPlaylist": {
+    "message": "完整列表"
+  },
+  "playlistLimit": {
+    "message": "列表分析上限"
+  },
+  "playlistLimitCompact": {
+    "message": "最多分析"
+  },
+  "itemsUnit": {
+    "message": "项"
+  },
+  "analyzingPage": {
+    "message": "正在分析页面"
+  },
+  "readingMedia": {
+    "message": "读取媒体信息与可用格式"
+  },
+  "chooseFolder": {
+    "message": "选择文件夹"
+  },
+  "downloadLocation": {
+    "message": "下载位置"
+  },
+  "openDownloadFolder": {
+    "message": "打开下载文件夹"
+  },
+  "openFolderFailed": {
+    "message": "无法打开下载文件夹：{message}"
+  },
+  "fromV2Settings": {
+    "message": "由 v2 设置"
+  },
+  "download": {
+    "message": "下载"
+  },
+  "downloadSelected": {
+    "message": "下载 {count} 项"
+  },
+  "downloadingProgress": {
+    "message": "下载中 {current} / {total}"
+  },
+  "selectItem": {
+    "message": "选择项目"
+  },
+  "selectNamedItem": {
+    "message": "选择 {title}"
+  },
+  "downloadContent": {
+    "message": "下载内容"
+  },
+  "fileName": {
+    "message": "文件名"
+  },
+  "fileNameBaseHint": {
+    "message": "扩展名由输出格式决定。"
+  },
+  "downloadRange": {
+    "message": "下载范围"
+  },
+  "chapterRange": {
+    "message": "章节范围"
+  },
+  "chapterRangeHint": {
+    "message": "选择要下载的章节。相邻章节会合并为一个输出。"
+  },
+  "selectedChapters": {
+    "message": "已选择 {count} 个章节"
+  },
+  "selectAll": {
+    "message": "全选"
+  },
+  "clearSelection": {
+    "message": "清除选择"
+  },
+  "chapterNumber": {
+    "message": "章节 {number}"
+  },
+  "fullVideo": {
+    "message": "完整视频"
+  },
+  "rangeStart": {
+    "message": "开始"
+  },
+  "rangeEnd": {
+    "message": "结束"
+  },
+  "timeRangeHint": {
+    "message": "请使用 HH:MM:SS 或 MM:SS。指定范围时会关闭章节分割。"
+  },
+  "timeRangeInvalid": {
+    "message": "请输入有效的开始与结束时间。"
+  },
+  "timeRangeOrderInvalid": {
+    "message": "结束时间必须晚于开始时间。"
+  },
+  "timeRangeBeyondDuration": {
+    "message": "结束时间超过媒体时长。"
+  },
+  "confirm": {
+    "message": "确认"
+  },
+  "video": {
+    "message": "视频"
+  },
+  "audio": {
+    "message": "音频"
+  },
+  "audioOnly": {
+    "message": "仅音频"
+  },
+  "videoFormat": {
+    "message": "视频格式"
+  },
+  "audioFormat": {
+    "message": "音频格式"
+  },
+  "output": {
+    "message": "输出"
+  },
+  "thumbnailMode": {
+    "message": "缩略图"
+  },
+  "thumbnailOff": {
+    "message": "关闭"
+  },
+  "thumbnailDownload": {
+    "message": "下载缩略图"
+  },
+  "thumbnailEmbed": {
+    "message": "嵌入缩略图"
+  },
+  "subtitleMode": {
+    "message": "字幕处理"
+  },
+  "subtitleOff": {
+    "message": "关闭"
+  },
+  "subtitleDownload": {
+    "message": "下载字幕文件"
+  },
+  "subtitleEmbed": {
+    "message": "嵌入视频"
+  },
+  "chapterMode": {
+    "message": "章节处理"
+  },
+  "chapterOff": {
+    "message": "完整文件"
+  },
+  "chapterDownload": {
+    "message": "分割章节"
+  },
+  "chapterEmbed": {
+    "message": "分割并嵌入章节"
+  },
+  "subtitles": {
+    "message": "字幕"
+  },
+  "chapters": {
+    "message": "章节"
+  },
+  "fullFile": {
+    "message": "完整文件"
+  },
+  "splitChapters": {
+    "message": "按章节分割"
+  },
+  "remaining": {
+    "message": "剩余 {eta}"
+  },
+  "completed": {
+    "message": "完成"
+  },
+  "ready": {
+    "message": "就绪"
+  },
+  "downloading": {
+    "message": "下载中"
+  },
+  "completedItems": {
+    "message": "完成：{count} 项"
+  },
+  "completedValue": {
+    "message": "完成：{value}"
+  },
+  "downloadComplete": {
+    "message": "下载完成"
+  },
+  "downloadFailed": {
+    "message": "下载失败。"
+  },
+  "hostRejected": {
+    "message": "EXE 未接受请求。"
+  },
+  "unavailable": {
+    "message": "无法使用"
+  },
+  "supportedSite": {
+    "message": "支持的网站"
+  },
+  "genericDownload": {
+    "message": "通用下载"
+  },
+  "generic": {
+    "message": "通用"
+  },
+  "audioSummary": {
+    "message": "音频"
+  },
+  "noAudio": {
+    "message": "无音频"
+  },
+  "audioUnknown": {
+    "message": "音频未知"
+  },
+  "noSubtitles": {
+    "message": "不下载字幕"
+  },
+  "automatic": {
+    "message": "自动生成"
+  },
+  "showFirstItems": {
+    "message": "仅显示前 {count} 项"
+  },
+  "mediaCountLimit": {
+    "message": "{count} 个媒体 · 上限 {limit}"
+  },
+  "analyzedCount": {
+    "message": "已分析 {count} / {limit} 项"
+  },
+  "stoppedCount": {
+    "message": "已停止 · {count} 项"
+  },
+  "permissionRequired": {
+    "message": "需要此网站的访问权限才能使用浏览器 Cookie。"
+  },
+  "analysisFailed": {
+    "message": "分析失败：{message}"
+  },
+  "noDownloadableMedia": {
+    "message": "此页面没有可下载的视频或音频。"
+  },
+  "analysisStopped": {
+    "message": "已停止分析，保留 {count} 项结果。"
+  },
+  "stopFailed": {
+    "message": "停止失败：{message}"
+  },
+  "preparingDownloads": {
+    "message": "准备下载 {count} 项"
+  },
+  "preparingDownload": {
+    "message": "准备下载：{title}"
+  },
+  "noFormats": {
+    "message": "没有可用格式"
+  },
+  "approximate": {
+    "message": "约 {value}"
+  },
+  "sampleRate": {
+    "message": "采样率"
+  },
+  "language": {
+    "message": "语言"
+  },
+  "codec": {
+    "message": "编码"
+  },
+  "bitrate": {
+    "message": "比特率"
+  },
+  "size": {
+    "message": "大小"
+  },
+  "resolution": {
+    "message": "分辨率"
+  },
+  "fps": {
+    "message": "FPS"
+  },
+  "analyzingFormats": {
+    "message": "正在分析格式"
+  },
+  "formatsAnalyzed": {
+    "message": "格式分析完成"
+  },
+  "downloadCompleted": {
+    "message": "下载完成"
+  },
+  "operationFailed": {
+    "message": "操作失败"
+  },
+  "downloadPreparing": {
+    "message": "准备下载"
+  },
+  "downloadListInvalid": {
+    "message": "下载列表无效。"
+  },
+  "downloadAlreadyRunning": {
+    "message": "当前已有下载正在进行。"
+  },
+  "nativeDownloadFailed": {
+    "message": "EXE 下载失败。"
+  },
+  "nativeDisconnected": {
+    "message": "Native Host 连接已中断。"
+  },
+  "nativeNoData": {
+    "message": "EXE 未返回数据。"
+  },
+  "nativeConnectFailed": {
+    "message": "无法启动 EXE 连接。"
+  },
+  "cookieReadFailed": {
+    "message": "无法读取此网站的 Cookie，请检查网站访问权限。"
+  },
+  "selectAudioFormat": {
+    "message": "请选择音频格式。"
+  },
+  "selectVideoFormat": {
+    "message": "请选择视频格式。"
+  },
+  "selectMergeAudioFormat": {
+    "message": "请选择要与视频合并的音频格式。"
+  },
+  "invalidUrlType": {
+    "message": "请输入网址。"
+  },
+  "invalidUrlLength": {
+    "message": "网址包含空格或长度过长。"
+  },
+  "invalidUrlComplete": {
+    "message": "请输入完整的 HTTP 或 HTTPS 网址。"
+  },
+  "invalidUrlProtocol": {
+    "message": "仅接受 HTTP 或 HTTPS 网址。"
+  },
+  "invalidUrlCredentials": {
+    "message": "不接受包含用户名或密码的网址。"
+  },
+  "invalidUrlIndex": {
+    "message": "网址索引格式不匹配。"
+  },
+  "matcherIndexLoadFailed": {
+    "message": "无法加载网址索引。"
+  },
+  "sourceTabMissing": {
+    "message": "找不到来源标签页。"
+  },
+  "analysisAlreadyRunning": {
+    "message": "分析已在进行中。"
+  },
+  "analysisStarted": {
+    "message": "已开始分析。"
+  },
+  "nativeAnalysisFailed": {
+    "message": "EXE 无法分析此页面。"
+  },
+  "analysisDisconnected": {
+    "message": "分析连接已中断。"
+  },
+  "analysisNotRunning": {
+    "message": "没有匹配的分析任务正在进行。"
+  },
+  "analysisStoppedStatus": {
+    "message": "分析已停止。"
+  },
+  "analysisStopFailed": {
+    "message": "无法停止分析。"
+  },
+  "analysisStartFailed": {
+    "message": "无法开始分析。"
+  },
+  "downloadStarted": {
+    "message": "已开始下载。"
+  },
+  "analysisReadPlaylist": {
+    "message": "获取完整列表媒体信息"
+  },
+  "analysisReadMedia": {
+    "message": "获取当前页面媒体信息"
+  },
+  "analysisCurrentPageDetail": {
+    "message": "当前页面"
+  },
+  "analysisPrepareBrowser": {
+    "message": "准备浏览器数据"
+  },
+  "analysisLaunchYtDlp": {
+    "message": "启动 yt-dlp"
+  },
+  "analysisPlaylistLimitDetail": {
+    "message": "上限 {count} 项"
+  },
+  "analysisConnectHost": {
+    "message": "连接 yt-dlp-gui"
+  },
+  "analysisValidateTools": {
+    "message": "检查设置与工具"
+  },
+  "browserMediaMixed": {
+    "message": "影音"
+  },
+  "browserMediaVideo": {
+    "message": "视频"
+  },
+  "browserMediaAudio": {
+    "message": "音频"
+  },
+  "genericTitle": {
+    "message": "使用 yt-dlp 通用模式尝试此页面"
+  },
+  "nativeHostGitHub": {
+    "message": "GitHub Releases"
+  },
+  "nativeHostUnavailable": {
+    "message": "找不到 yt-dlp-gui 浏览器连接。请先安装程序，并在“选项”中启用浏览器集成。"
+  },
+  "supportStatus": {
+    "message": "网址支持"
+  },
+  "supportCheckingTitle": {
+    "message": "可以开始分析"
+  },
+  "supportCheckingDetail": {
+    "message": "正在后台确认网站专用规则"
+  },
+  "supportCheckingBadge": {
+    "message": "可分析"
+  },
+  "supportReadyTitle": {
+    "message": "此网址受 yt-dlp 支持"
+  },
+  "supportReadyBadge": {
+    "message": "支持"
+  },
+  "supportGenericTitle": {
+    "message": "可以开始分析"
+  },
+  "supportGenericDetail": {
+    "message": "将使用 yt-dlp 通用解析"
+  },
+  "supportGenericBadge": {
+    "message": "通用"
+  }
+}

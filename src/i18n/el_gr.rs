@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Προχωρημένο",
+        "advance.browser_integration" => "Ενσωμάτωση προγράμματος περιήγησης",
+        "advance.browser_connection" => "Σύνδεση browser",
+        "advance.browser_connection_enabled" => "Ενεργό για {browsers}",
+        "advance.browser_connection_disabled" => "Σύνδεση Chrome, Brave και Edge",
+        "advance.browser_connection_enabled_message" => "Η σύνδεση browser ενεργοποιήθηκε.",
+        "advance.browser_connection_disabled_message" => "Η σύνδεση browser απενεργοποιήθηκε.",
         "tab.about" => "About",
         "about.tools" => "Εκδόσεις εργαλείων",
         "about.current_version" => "Τρέχουσα",
@@ -401,6 +407,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Ενεργοποίηση",
         "options.theme" => "Θέμα",
         "options.theme_mode.system" => "Ακολούθηση συστήματος",
+        "options.render_backend" => "Απόδοση (μετά την επανεκκίνηση)",
+        "options.wgpu_api" => "API γραφικών (μετά την επανεκκίνηση)",
         "options.theme_mode.light" => "Φωτεινό",
         "options.theme_mode.dark" => "Σκούρο",
         "options.theme_color" => "Χρώμα θέματος",
@@ -531,9 +539,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Η λήψη απέτυχε",
         "notification.completed_file" => "Ολοκληρώθηκε: {file}",
         "notification.download_completed" => "Η λήψη ολοκληρώθηκε.",
+        "notification.no_chapters_saved_full_audio" => {
+            "Δεν εντοπίστηκαν κεφάλαια. Αποθηκεύτηκε ο πλήρης ήχος."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "Έξοδος ήχου",
         "options.music_download_preference_best" => "Καλύτερο",
+        "options.music_download_save_label" => "Τρόπος αποθήκευσης",
+        "options.music_download_full_audio" => "Πλήρης ήχος",
+        "options.music_download_split_chapters" => "Διαχωρισμός ανά κεφάλαιο",
         _ => key,
     }
 }

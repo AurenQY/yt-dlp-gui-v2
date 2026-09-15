@@ -12,6 +12,7 @@ enum FilterField {
     Fps,
     Codec,
     SampleRate,
+    Language,
 }
 
 struct FilterChainStage {
@@ -78,6 +79,9 @@ pub(super) fn apply_filters_from_option(
             }
         }
         FormatPickerKind::Audio => {
+            if !option.language.is_empty() {
+                filters.language = Some(option.language.clone());
+            }
             if !option.sample_rate.is_empty() {
                 filters.sample_rate = Some(option.sample_rate.clone());
             }
@@ -120,6 +124,11 @@ fn option_matches_filters(option: &FormatOption, filters: &FormatPickerFilters) 
     }
     if let Some(sample_rate) = &filters.sample_rate {
         if &option.sample_rate != sample_rate {
+            return false;
+        }
+    }
+    if let Some(language) = &filters.language {
+        if &option.language != language {
             return false;
         }
     }
@@ -168,6 +177,15 @@ pub(super) fn render_format_picker_filters(
             },
         ],
         FormatPickerKind::Audio => vec![
+            FilterChainStage {
+                label: state
+                    .ui_i18n_text_for_key(UiText::FILTER_LANGUAGE)
+                    .to_owned(),
+                field: FilterField::Language,
+                values: all_language_values(options),
+                compatible_values: compatible_language_values(options, &filters_snapshot),
+                selected: filters_snapshot.language.clone(),
+            },
             FilterChainStage {
                 label: state
                     .ui_i18n_text_for_key(UiText::FILTER_SAMPLE_RATE)
@@ -286,6 +304,19 @@ fn compatible_sample_rate_values(
     let mut filters = filters.clone();
     filters.sample_rate = None;
     available_filter_values(options, &filters, |option| option.sample_rate.clone())
+}
+
+fn all_language_values(options: &[FormatOption]) -> Vec<String> {
+    distinct_values(options, |option| option.language.clone())
+}
+
+fn compatible_language_values(
+    options: &[FormatOption],
+    filters: &FormatPickerFilters,
+) -> Vec<String> {
+    let mut filters = filters.clone();
+    filters.language = None;
+    available_filter_values(options, &filters, |option| option.language.clone())
 }
 
 fn render_filter_chain(
@@ -553,6 +584,7 @@ fn set_filter_value(filters: &mut FormatPickerFilters, field: FilterField, value
         FilterField::Fps => filters.fps = value,
         FilterField::Codec => filters.codec = value,
         FilterField::SampleRate => filters.sample_rate = value,
+        FilterField::Language => filters.language = value,
     }
 }
 
@@ -590,6 +622,7 @@ fn current_for_field(filters: &FormatPickerFilters, field: FilterField) -> Optio
         FilterField::Fps => filters.fps.clone(),
         FilterField::Codec => filters.codec.clone(),
         FilterField::SampleRate => filters.sample_rate.clone(),
+        FilterField::Language => filters.language.clone(),
     }
 }
 
@@ -623,7 +656,11 @@ fn filter_fields_for_kind(kind: FormatPickerKind) -> &'static [FilterField] {
             FilterField::Codec,
             FilterField::DynamicRange,
         ],
-        FormatPickerKind::Audio => &[FilterField::SampleRate, FilterField::Codec],
+        FormatPickerKind::Audio => &[
+            FilterField::Language,
+            FilterField::SampleRate,
+            FilterField::Codec,
+        ],
         FormatPickerKind::Subtitle | FormatPickerKind::Section => &[],
     }
 }
@@ -660,7 +697,7 @@ fn score_field_value(field: FilterField, previous_value: &str, candidate_value: 
             number_from_text(previous_value),
             number_from_text(candidate_value),
         ),
-        FilterField::DynamicRange | FilterField::Codec => 0,
+        FilterField::DynamicRange | FilterField::Codec | FilterField::Language => 0,
     }
 }
 
@@ -690,6 +727,7 @@ fn value_for_field(option: &FormatOption, field: FilterField) -> &str {
         FilterField::Fps => &option.fps,
         FilterField::Codec => &option.codec,
         FilterField::SampleRate => &option.sample_rate,
+        FilterField::Language => &option.language,
     }
 }
 
@@ -755,6 +793,7 @@ mod tests {
             ext: Some("mp4".to_owned()),
             codec: Some("h264".to_owned()),
             sample_rate: None,
+            language: None,
         };
 
         let selected_row = force_pick_filter_value(
@@ -811,6 +850,7 @@ mod tests {
             ext: Some("m4a".to_owned()),
             codec: Some("aac".to_owned()),
             sample_rate: Some("48000".to_owned()),
+            language: None,
         };
 
         let selected_row = force_pick_filter_value(

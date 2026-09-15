@@ -7,7 +7,10 @@ pub(super) fn run_music_download_worker(
     child_handle: Arc<Mutex<Option<Child>>>,
     cancel_requested: Arc<AtomicBool>,
 ) {
-    if job.choice.embed_cover && !job.cover_path.as_ref().is_some_and(|path| path.is_file()) {
+    if !job.choice.save_mode.splits_chapters()
+        && job.choice.embed_cover
+        && !job.cover_path.as_ref().is_some_and(|path| path.is_file())
+    {
         job.cover_path = ensure_music_download_cover_path(&job);
     }
     let has_cover =
@@ -17,13 +20,17 @@ pub(super) fn run_music_download_worker(
             !music_cache_source_matches_target(format, path, &job.source_acodec)
         }) && online_music_target_source_available(&tool_paths, &job, format)
     });
-    let source_kind = match job.cache_media_path.as_ref() {
-        Some(path) if music_cache_can_be_copied_for_choice(job.choice, path, has_cover) => {
-            MusicDownloadSourceKind::CacheCopy
+    let source_kind = if music_download_requires_online_download(job.choice) {
+        MusicDownloadSourceKind::YtDlpDownload
+    } else {
+        match job.cache_media_path.as_ref() {
+            Some(path) if music_cache_can_be_copied_for_choice(job.choice, path, has_cover) => {
+                MusicDownloadSourceKind::CacheCopy
+            }
+            Some(_) if online_target_available => MusicDownloadSourceKind::YtDlpOnlineTarget,
+            Some(_) => MusicDownloadSourceKind::CacheConvert,
+            None => MusicDownloadSourceKind::YtDlpDownload,
         }
-        Some(_) if online_target_available => MusicDownloadSourceKind::YtDlpOnlineTarget,
-        Some(_) => MusicDownloadSourceKind::CacheConvert,
-        None => MusicDownloadSourceKind::YtDlpDownload,
     };
 
     let result = match source_kind {
@@ -50,6 +57,9 @@ pub(super) fn run_music_download_worker(
     };
 
     let result = result.map(|path_text| {
+        if job.choice.save_mode.splits_chapters() {
+            return path_text;
+        }
         let output_path = PathBuf::from(&path_text);
         match ensure_music_download_album_metadata_written(
             &tool_paths,
@@ -66,10 +76,15 @@ pub(super) fn run_music_download_worker(
         }
     });
 
+    let chapters_split = result
+        .as_ref()
+        .is_ok_and(|path| job.choice.save_mode.splits_chapters() && Path::new(path).is_dir());
     let _ = tx.send(MusicDownloadEvent::Finished {
         item_id: job.item_id,
         workflow_id: job.workflow_id,
         source_kind,
+        split_chapters_requested: job.choice.save_mode.splits_chapters(),
+        chapters_split,
         result,
     });
 }
@@ -679,6 +694,11 @@ pub(super) fn download_music_output_with_yt_dlp(
     child_handle: &Arc<Mutex<Option<Child>>>,
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<String, String> {
+    let chapter_output_dir = job
+        .choice
+        .save_mode
+        .splits_chapters()
+        .then(|| unique_music_chapter_output_dir(&job.output_dir, &job.title));
     let prepared = tool_paths.prepare_music_audio_download_command(
         &job.source_url,
         &job.output_dir,
@@ -688,6 +708,7 @@ pub(super) fn download_music_output_with_yt_dlp(
         job.choice.format_selector(),
         job.choice.embed_cover,
         job.choice.write_tags,
+        chapter_output_dir.as_deref(),
         job.use_cookies,
     )?;
     println!(
@@ -748,6 +769,28 @@ pub(super) fn download_music_output_with_yt_dlp(
 
     match status {
         Some(Ok(status)) if status.success() => {
+            if let Some(chapter_output_dir) = chapter_output_dir.as_ref() {
+                if find_latest_music_download_output_for_choice(chapter_output_dir, job.choice)
+                    .is_some()
+                {
+                    let _ = tx.send(MusicDownloadEvent::ToolCommandFinished {
+                        item_id: job.item_id,
+                        workflow_id: job.workflow_id,
+                        source_kind,
+                        tool: "yt-dlp".to_owned(),
+                        action: "download".to_owned(),
+                        command_line: command_line.clone(),
+                        success: true,
+                    });
+                    let _ = tx.send(MusicDownloadEvent::Progress {
+                        item_id: job.item_id,
+                        workflow_id: job.workflow_id,
+                        percent: 100.0,
+                    });
+                    return Ok(chapter_output_dir.display().to_string());
+                }
+                let _ = fs::remove_dir(chapter_output_dir);
+            }
             let output_path = reported_music_final_output_path(&lines)
                 .or_else(|| {
                     find_latest_music_download_output_for_choice(&job.output_dir, job.choice)
@@ -1001,6 +1044,26 @@ pub(super) fn unique_music_output_path(output_dir: &Path, title: &str, extension
     ))
 }
 
+pub(super) fn unique_music_chapter_output_dir(output_dir: &Path, title: &str) -> PathBuf {
+    let stem = sanitize_file_name_for_windows(&music_output_stem_for_title(title));
+    let base = if stem.trim().is_empty() {
+        "chapters"
+    } else {
+        stem.trim()
+    };
+    let mut path = output_dir.join(base);
+    if !path.exists() {
+        return path;
+    }
+    for index in 2..10_000 {
+        path = output_dir.join(format!("{base} ({index})"));
+        if !path.exists() {
+            return path;
+        }
+    }
+    output_dir.join(format!("{base}.{}", unique_timestamp_suffix()))
+}
+
 pub(super) fn find_latest_music_download_output_for_choice(
     dir: &Path,
     choice: MusicDownloadChoice,
@@ -1091,6 +1154,10 @@ pub(super) fn music_download_tool_kind(source_kind: MusicDownloadSourceKind) -> 
             ToolKind::YtDlp
         }
     }
+}
+
+pub(super) fn music_download_requires_online_download(choice: MusicDownloadChoice) -> bool {
+    choice.save_mode.splits_chapters()
 }
 
 pub(super) fn music_cache_can_be_copied_for_choice(
@@ -1566,17 +1633,7 @@ pub(super) fn ensure_safe_app_cache_root(path: &Path) -> std::io::Result<()> {
 }
 
 pub(super) fn app_portable_root_path() -> PathBuf {
-    #[cfg(debug_assertions)]
-    {
-        return std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    }
-
-    #[cfg(not(debug_assertions))]
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+    crate::infrastructure::runtime_paths::application_root()
 }
 
 pub(super) fn normalized_path_for_safety(path: &Path) -> PathBuf {

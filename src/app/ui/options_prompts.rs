@@ -1,8 +1,8 @@
 use eframe::egui::{self, Color32, RichText, Ui};
 
 use crate::app::state::{
-    AppState, MusicDownloadFormat, MusicDownloadMode, MusicOriginalPreference,
-    YoutubePlaylistPromptKind,
+    AppState, MusicDownloadFormat, MusicDownloadMode, MusicDownloadSaveMode,
+    MusicOriginalPreference, YoutubePlaylistPromptKind,
 };
 use crate::app::widgets::icon::{AppIcon, icon_image};
 use crate::app::widgets::url_input::{accent_green_for_ui, accent_red_for_ui};
@@ -48,6 +48,12 @@ fn render_music_download_preference_panel(ui: &mut Ui, state: &mut AppState, pro
                 .size(semantic_ui_metrics::playlist_prompt_body_text_size()),
         );
         render_music_download_preference_chips(ui, state, prompt_width);
+        ui.label(
+            RichText::new(state.ui_i18n_text_for_key("options.music_download_save_label"))
+                .strong()
+                .size(semantic_ui_metrics::playlist_prompt_body_text_size()),
+        );
+        render_music_download_save_chips(ui, state, prompt_width);
     });
 }
 
@@ -84,6 +90,50 @@ fn render_music_download_preference_chips(ui: &mut Ui, state: &mut AppState, pro
             }
         }
     });
+}
+
+fn render_music_download_save_chips(ui: &mut Ui, state: &mut AppState, prompt_width: f32) {
+    let choice = state.music_download_prompt_choice();
+    let chip_items = MusicDownloadSaveMode::ALL
+        .into_iter()
+        .map(|mode| {
+            let label = music_download_save_mode_label(state, mode).to_owned();
+            let width =
+                semantic_ui_metrics::music_download_prompt_save_chip_width_for_visible_label(
+                    ui, &label,
+                );
+            (mode, label, width)
+        })
+        .collect::<Vec<_>>();
+    let chip_spacing = semantic_ui_metrics::music_download_prompt_choice_chip_horizontal_spacing();
+    let total_width = chip_items.iter().map(|(_, _, width)| *width).sum::<f32>()
+        + chip_spacing * chip_items.len().saturating_sub(1) as f32;
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = chip_spacing;
+        ui.add_space(
+            semantic_ui_metrics::remaining_width_before_centered_prompt_content(
+                prompt_width,
+                total_width,
+            ),
+        );
+        for (mode, label, width) in chip_items {
+            if music_prompt_choice_chip(ui, &label, choice.save_mode == mode, width).clicked() {
+                state.set_music_download_save_mode(mode);
+            }
+        }
+    });
+}
+
+fn music_download_save_mode_label(state: &AppState, mode: MusicDownloadSaveMode) -> &str {
+    match mode {
+        MusicDownloadSaveMode::FullAudio => {
+            state.ui_i18n_text_for_key("options.music_download_full_audio")
+        }
+        MusicDownloadSaveMode::SplitChapters => {
+            state.ui_i18n_text_for_key("options.music_download_split_chapters")
+        }
+    }
 }
 
 fn render_music_download_prompt_actions(ui: &mut Ui, state: &mut AppState, prompt_width: f32) {
@@ -138,10 +188,11 @@ fn render_music_download_prompt_actions(ui: &mut Ui, state: &mut AppState, promp
 
 fn music_download_prompt_content_width(ctx: &egui::Context, ui: &Ui, state: &AppState) -> f32 {
     let audio_label_text = state.ui_i18n_text_for_key("options.music_download_audio_label");
-    let title_width = semantic_ui_metrics::music_download_prompt_title_width_for_audio_label(
-        ui,
-        audio_label_text,
-    );
+    let save_label_text = state.ui_i18n_text_for_key("options.music_download_save_label");
+    let title_width = [audio_label_text, save_label_text]
+        .into_iter()
+        .map(|label| semantic_ui_metrics::music_download_prompt_section_label_width(ui, label))
+        .fold(0.0_f32, f32::max);
     let preference_labels = MusicDownloadPromptOption::ALL
         .into_iter()
         .map(|option| option.label(state).to_owned())
@@ -156,6 +207,16 @@ fn music_download_prompt_content_width(ctx: &egui::Context, ui: &Ui, state: &App
         })
         .sum::<f32>()
         + chip_spacing * preference_labels.len().saturating_sub(1) as f32;
+    let save_chips_width = MusicDownloadSaveMode::ALL
+        .into_iter()
+        .map(|mode| {
+            semantic_ui_metrics::music_download_prompt_save_chip_width_for_visible_label(
+                ui,
+                music_download_save_mode_label(state, mode),
+            )
+        })
+        .sum::<f32>()
+        + chip_spacing * MusicDownloadSaveMode::ALL.len().saturating_sub(1) as f32;
     let cancel_text = state.ui_i18n_text_for_key("options.cancel");
     let download_text = state.ui_i18n_text_for_key("action.download");
     let action_width =
@@ -165,7 +226,10 @@ fn music_download_prompt_content_width(ctx: &egui::Context, ui: &Ui, state: &App
                 download_text,
             )
             + semantic_ui_metrics::music_download_prompt_action_button_horizontal_spacing();
-    let content_width = title_width.max(chips_width).max(action_width);
+    let content_width = title_width
+        .max(chips_width)
+        .max(save_chips_width)
+        .max(action_width);
     let max_prompt_width = semantic_ui_metrics::music_download_prompt_maximum_width_for_viewport(
         ctx.content_rect().width(),
     );
@@ -544,5 +608,18 @@ mod tests {
 
         assert!(option.is_selected(choice));
         assert!(!MusicDownloadPromptOption::OriginalBest.is_selected(choice));
+    }
+
+    #[test]
+    fn chapter_split_is_an_independent_save_choice() {
+        let choice = MusicDownloadChoice {
+            mode: MusicDownloadMode::Unified,
+            unified_format: MusicDownloadFormat::Mp3,
+            save_mode: MusicDownloadSaveMode::SplitChapters,
+            ..MusicDownloadChoice::default()
+        };
+
+        assert!(MusicDownloadPromptOption::Unified(MusicDownloadFormat::Mp3).is_selected(choice));
+        assert_eq!(choice.save_mode, MusicDownloadSaveMode::SplitChapters);
     }
 }

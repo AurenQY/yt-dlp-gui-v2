@@ -82,6 +82,7 @@ mod advance_post_processing;
 mod advance_source;
 mod advance_tab;
 mod advance_tab_template;
+mod options_browser_integration;
 
 // XAML-like template layer.
 mod xaml_layout_contracts;
@@ -103,14 +104,17 @@ pub(crate) struct UiRenderResources {
 }
 
 impl UiRenderResources {
-    pub(crate) fn new(gl: Option<&eframe::glow::Context>) -> Self {
-        let music_player_aura = gl.and_then(|gl| {
-            main_tab_music_aura::MusicPlayerAuraRenderer::new(gl)
-                .map_err(|error| {
-                    eprintln!("[music-aura] GPU renderer unavailable: {error}");
-                })
-                .ok()
-        });
+    pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let music_player_aura = main_tab_music_aura::MusicPlayerAuraRenderer::new(cc)
+            .map_err(|error| {
+                crate::infrastructure::record_startup_error("music-aura", &error);
+                eprintln!("[music-aura] GPU renderer unavailable: {error}");
+            })
+            .ok();
+        crate::infrastructure::record_startup_event(
+            "music-aura",
+            format!("available={}", music_player_aura.is_some()),
+        );
         Self {
             music_player_aura,
             music_aura_presentation: Cell::new(Default::default()),
@@ -129,7 +133,8 @@ impl UiRenderResources {
     }
 
     fn music_window_ambient_enabled(&self) -> bool {
-        self.music_aura_presentation.get().window_layer_enabled()
+        self.music_player_aura.is_some()
+            && self.music_aura_presentation.get().window_layer_enabled()
     }
 
     fn music_aura_presentation(&self) -> main_tab_music_aura::MusicAuraPresentation {

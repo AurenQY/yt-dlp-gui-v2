@@ -190,6 +190,7 @@ pub struct FormatOption {
     pub ext: String,
     pub codec: String,
     pub sample_rate: String,
+    pub language: String,
     pub filesize: String,
 }
 
@@ -206,6 +207,7 @@ impl FormatOption {
             ext: String::new(),
             codec: String::new(),
             sample_rate: String::new(),
+            language: String::new(),
             filesize: String::new(),
         }
     }
@@ -232,6 +234,7 @@ impl FormatOption {
             ext: ext.to_owned(),
             codec: codec.to_owned(),
             sample_rate: String::new(),
+            language: String::new(),
             filesize: filesize.to_owned(),
         }
     }
@@ -256,8 +259,14 @@ impl FormatOption {
             ext: ext.to_owned(),
             codec: codec.to_owned(),
             sample_rate: sample_rate.to_owned(),
+            language: String::new(),
             filesize: filesize.to_owned(),
         }
+    }
+
+    pub fn with_language(mut self, language: &str) -> Self {
+        self.language = language.to_owned();
+        self
     }
 }
 

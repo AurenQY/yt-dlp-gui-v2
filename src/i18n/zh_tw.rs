@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "進階",
+        "advance.browser_integration" => "瀏覽器外掛",
+        "advance.browser_connection" => "Native Messaging",
+        "advance.browser_connection_enabled" => "已啟用：{browsers}",
+        "advance.browser_connection_disabled" => "允許 Chrome、Brave 與 Edge 連接",
+        "advance.browser_connection_enabled_message" => "已啟用瀏覽器外掛連接。",
+        "advance.browser_connection_disabled_message" => "已停用瀏覽器外掛連接。",
         "tab.about" => "關於",
         "about.tools" => "工具版本",
         "about.current_version" => "目前版本",
@@ -343,6 +349,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "啟用",
         "options.theme" => "主題",
         "options.theme_mode.system" => "跟隨系統",
+        "options.render_backend" => "繪製後端（重啟生效）",
+        "options.wgpu_api" => "圖形 API（重啟生效）",
         "options.theme_mode.light" => "淺色",
         "options.theme_mode.dark" => "深色",
         "options.theme_color" => "主題色",
@@ -463,9 +471,13 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "下載失敗",
         "notification.completed_file" => "已完成：{file}",
         "notification.download_completed" => "下載已完成。",
+        "notification.no_chapters_saved_full_audio" => "未偵測到章節，已改為儲存完整音訊。",
         "options.music_download_format" => "音訊下載",
         "options.music_download_audio_label" => "音訊輸出",
         "options.music_download_preference_best" => "最佳",
+        "options.music_download_save_label" => "儲存方式",
+        "options.music_download_full_audio" => "完整音訊",
+        "options.music_download_split_chapters" => "依章節分檔",
         _ => key,
     }
 }

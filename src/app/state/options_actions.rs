@@ -92,6 +92,33 @@ impl AppState {
         self.config.windows_toast_enabled = enabled;
         let _ = self.config.save();
     }
+    pub fn set_browser_integration_enabled(&mut self, enabled: bool) {
+        let previous = self.config.browser_integration_enabled;
+        if previous != enabled {
+            self.config.browser_integration_enabled = enabled;
+            if let Err(error) = self.config.save() {
+                self.config.browser_integration_enabled = previous;
+                self.set_last_action_message(format!(
+                    "Could not save browser integration preference: {error}"
+                ));
+                return;
+            }
+        }
+
+        let result =
+            crate::infrastructure::browser_native_messaging::synchronize_browser_integration(
+                enabled,
+            );
+        self.set_last_action_message(match result {
+            Ok(_) if enabled => self
+                .ui_i18n_text_for_key("advance.browser_connection_enabled_message")
+                .to_owned(),
+            Ok(_) => self
+                .ui_i18n_text_for_key("advance.browser_connection_disabled_message")
+                .to_owned(),
+            Err(error) => error,
+        });
+    }
     pub fn set_theme_mode(&mut self, mode: ThemeMode) {
         if self.config.theme_mode == mode {
             return;
@@ -99,12 +126,39 @@ impl AppState {
         self.config.theme_mode = mode;
         let _ = self.config.save();
     }
+    pub fn set_render_backend(
+        &mut self,
+        backend: crate::infrastructure::render_backend::RenderBackend,
+    ) {
+        let previous = self.config.render_backend;
+        if previous == backend {
+            return;
+        }
+        self.config.render_backend = backend;
+        if let Err(error) = self.config.save() {
+            self.config.render_backend = previous;
+            self.set_last_action_message(format!("Could not save renderer preference: {error}"));
+        }
+    }
     pub fn set_theme_accent_color(&mut self, color: ThemeAccentColor) {
         if self.config.theme_accent_color == color {
             return;
         }
         self.config.theme_accent_color = color;
         let _ = self.config.save();
+    }
+    pub fn set_wgpu_api(&mut self, api: crate::infrastructure::wgpu_api::WgpuApi) {
+        let previous = self.config.wgpu_api;
+        if previous == api {
+            return;
+        }
+        self.config.wgpu_api = api;
+        if let Err(error) = self.config.save() {
+            self.config.wgpu_api = previous;
+            self.set_last_action_message(format!(
+                "Could not save graphics API preference: {error}"
+            ));
+        }
     }
     pub fn set_show_log_tab(&mut self, enabled: bool) {
         self.config.show_log_tab = enabled;

@@ -255,6 +255,8 @@ impl AppState {
                 item_id,
                 workflow_id,
                 source_kind,
+                split_chapters_requested,
+                chapters_split,
                 result,
             } => {
                 self.unregister_active_workflow(workflow_id);
@@ -269,12 +271,14 @@ impl AppState {
                                 item.progress.audio = 100.0;
                                 item.progress.video = 100.0;
                                 item.last_output_path = Some(output_path.clone());
-                                if let Some(actual_file_name) = Path::new(output_path)
-                                    .file_name()
-                                    .and_then(|value| value.to_str())
-                                    .map(ToOwned::to_owned)
-                                {
-                                    item.selection.file_name = actual_file_name;
+                                if !chapters_split {
+                                    if let Some(actual_file_name) = Path::new(output_path)
+                                        .file_name()
+                                        .and_then(|value| value.to_str())
+                                        .map(ToOwned::to_owned)
+                                    {
+                                        item.selection.file_name = actual_file_name;
+                                    }
                                 }
                                 item.completed_selection =
                                     Some(CompletedSelection::from_selection(&item.selection));
@@ -306,7 +310,13 @@ impl AppState {
                         self.push_runtime_log(format!(
                             "Music download finished ({source_label}): {output_path}"
                         ));
-                        self.last_action.clear();
+                        if split_chapters_requested && !chapters_split {
+                            self.last_action = self
+                                .ui_i18n_text_for_key("notification.no_chapters_saved_full_audio")
+                                .to_owned();
+                        } else {
+                            self.last_action.clear();
+                        }
                     }
                     Err(error) if error == DOWNLOAD_CANCELLED_MESSAGE => {
                         self.push_runtime_log("Music download cancelled".to_owned());

@@ -14,6 +14,14 @@ use eframe::egui::{self, ViewportBuilder};
 use infrastructure::{AppConfig, ThemeMode, WindowPosition, WindowSize};
 
 fn main() -> eframe::Result<()> {
+    if infrastructure::browser_native_messaging::run_native_host_if_requested() {
+        return Ok(());
+    }
+
+    if let Err(error) = infrastructure::runtime_paths::set_application_current_dir() {
+        eprintln!("[runtime-paths] {error}");
+    }
+
     let startup_diagnostics_enabled = infrastructure::enable_startup_diagnostics_if_requested();
     infrastructure::record_startup_checkpoint("main entered");
     infrastructure::record_startup_event("build", env!("YT_DLP_GUI_BUILD_DATE"));
@@ -68,18 +76,69 @@ fn main() -> eframe::Result<()> {
         eprintln!("[app-identity] Windows process identity unavailable: {error}");
     }
 
-    let (config, tool_paths) = AppConfig::load_runtime();
+    let (mut config, tool_paths) = AppConfig::load_runtime();
     infrastructure::record_startup_checkpoint("config loaded");
+    #[cfg(target_os = "windows")]
+    match infrastructure::browser_native_messaging::synchronize_browser_integration(
+        config.browser_integration_enabled,
+    ) {
+        Ok(status) => infrastructure::record_startup_event(
+            "browser-integration",
+            format!("enabled={}", status.enabled),
+        ),
+        Err(error) => {
+            infrastructure::record_startup_error("browser-integration", &error);
+            eprintln!("[browser-integration] {error}");
+        }
+    }
+    let saved_backend = config.render_backend;
+    let saved_wgpu_api = config.wgpu_api;
+    let graphics = match infrastructure::render_backend::startup_graphics_selection(
+        config.render_backend,
+        config.wgpu_api,
+        std::env::args().skip(1),
+    ) {
+        Ok(graphics) => graphics,
+        Err(error) => {
+            infrastructure::record_startup_error("renderer", &error);
+            eprintln!("[renderer] {error}");
+            std::process::exit(2);
+        }
+    };
+    let preference_status =
+        if graphics.backend == saved_backend && graphics.wgpu_api == saved_wgpu_api {
+            "unchanged"
+        } else {
+            config.render_backend = graphics.backend;
+            config.wgpu_api = graphics.wgpu_api;
+            match config.save() {
+                Ok(()) => "updated",
+                Err(error) => {
+                    infrastructure::record_startup_error("graphics-preference", &error);
+                    eprintln!("[renderer] Could not save graphics preference: {error}");
+                    "save-failed"
+                }
+            }
+        };
+    infrastructure::record_startup_event(
+        "renderer",
+        format!(
+            "selected={:?}/{:?} previous_saved={saved_backend:?}/{saved_wgpu_api:?} preference={preference_status}",
+            graphics.backend, graphics.wgpu_api
+        ),
+    );
     let window_title = infrastructure::runtime_window_title();
     let window_options = StartupWindowOptions::from_config(&config, window_title.clone());
     let centered = window_options.window_position.is_none();
-    let native_options = eframe::NativeOptions {
+    let mut native_options = eframe::NativeOptions {
+        renderer: graphics.backend.renderer(),
         viewport: window_options.viewport_builder(),
         centered,
         persist_window: false,
         ..Default::default()
     };
     infrastructure::record_startup_checkpoint("native options built");
+    config.wgpu_api.configure(&mut native_options.wgpu_options);
     infrastructure::record_startup_checkpoint("before run_native");
 
     let result = eframe::run_native(
@@ -87,6 +146,14 @@ fn main() -> eframe::Result<()> {
         native_options,
         Box::new(move |cc| {
             infrastructure::record_startup_checkpoint("app creator entered");
+            infrastructure::record_startup_event(
+                "renderer-runtime",
+                format!(
+                    "glow_context={} wgpu_state={}",
+                    cc.gl.is_some(),
+                    cc.wgpu_render_state.is_some()
+                ),
+            );
             let app = NgDlpApp::new_with_runtime(cc, config.clone(), tool_paths.clone());
             infrastructure::record_startup_checkpoint("app creator finished");
             Ok(Box::new(app))

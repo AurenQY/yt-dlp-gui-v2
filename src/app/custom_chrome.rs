@@ -1,3 +1,7 @@
+#[cfg(all(windows, debug_assertions))]
+#[path = "custom_chrome_diagnostics.rs"]
+pub(crate) mod diagnostics;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CustomChromeResult {
     Applied,
@@ -120,12 +124,21 @@ mod windows {
             return CustomChromeResult::Applied;
         }
 
+        #[cfg(debug_assertions)]
+        super::diagnostics::record_geometry(hwnd, "before-subclass");
         if !subclass_window(hwnd) {
             return CustomChromeResult::Unsupported;
         }
 
         apply_rounded_corners(hwnd);
+        #[cfg(debug_assertions)]
+        if super::diagnostics::skip_initial_refresh() {
+            super::diagnostics::record_geometry(hwnd, "injected-skip-refresh");
+            return CustomChromeResult::Applied;
+        }
         refresh_non_client_frame(hwnd);
+        #[cfg(debug_assertions)]
+        super::diagnostics::record_geometry(hwnd, "after-refresh");
         CustomChromeResult::Applied
     }
 
@@ -167,7 +180,7 @@ mod windows {
         custom_window_proc as *const () as usize as isize
     }
 
-    fn refresh_non_client_frame(hwnd: HWND) {
+    pub(super) fn refresh_non_client_frame(hwnd: HWND) {
         unsafe {
             let _ = SetWindowPos(
                 hwnd,
@@ -202,6 +215,10 @@ mod windows {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        #[cfg(debug_assertions)]
+        if super::diagnostics::observe_message(hwnd, msg, lparam) {
+            return 0;
+        }
         match msg {
             WM_NCCALCSIZE => {
                 if wparam != 0 {
@@ -366,7 +383,7 @@ mod windows {
         hwnd: Option<HWND>,
     }
 
-    fn find_app_window() -> Option<HWND> {
+    pub(super) fn find_app_window() -> Option<HWND> {
         let mut search = WindowSearch {
             process_id: std::process::id(),
             title: crate::infrastructure::runtime_window_title(),

@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extensionName__",
+  "version": "0.1.0",
+  "default_locale": "en",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA41x+S7FQqHA5N4MKaxLaXBwNUFy6G2orp3FLBoe2h+ltzs1eYBXLX1dvtge0zQfU6T0Td8hXdtcbWKsVirmVwNQLuboQDoK3StROLTLnRQ6FNeZ/BTO5hL0b9ag3qyDcIv1MmsdlIbDhfNKsw9CRzofHNELi7xwVcyDx2aS2IJScGtGyvKGkBoADh8tSbuMSY+CYsk1k0Kw523i++DndHxHmXPSZlwCrzHPHLys4+ochgLTMhIE6xwFC9mFTNzcj+k71P0S2+jNY4N7dm7kKkU2dekyt9sDox+b0nSbUHZuq/Kp4IYV1sTmw7qQzkXt3wYPIa2ARUdwCPoaJJE1LGQIDAQAB",
+  "description": "__MSG_extensionDescription__",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "nativeMessaging",
+    "storage",
+    "cookies",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "build/background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/app-enabled-16.png",
+    "32": "icons/app-enabled-32.png",
+    "48": "icons/app-enabled-48.png",
+    "128": "icons/app-enabled-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "__MSG_unsupportedTitle__",
+    "default_icon": {
+      "16": "icons/app-disabled-16.png",
+      "32": "icons/app-disabled-32.png"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
+  }
+}

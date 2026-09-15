@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Avanzado",
+        "advance.browser_integration" => "Integración con el navegador",
+        "advance.browser_connection" => "Conexión del navegador",
+        "advance.browser_connection_enabled" => "Activada para {browsers}",
+        "advance.browser_connection_disabled" => "Conectar Chrome, Brave y Edge",
+        "advance.browser_connection_enabled_message" => "Conexión del navegador activada.",
+        "advance.browser_connection_disabled_message" => "Conexión del navegador desactivada.",
         "tab.about" => "About",
         "about.tools" => "Versiones de herramientas",
         "about.current_version" => "Actual",
@@ -403,6 +409,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Activar",
         "options.theme" => "Tema",
         "options.theme_mode.system" => "Seguir sistema",
+        "options.render_backend" => "Renderizador (tras reiniciar)",
+        "options.wgpu_api" => "API gráfica (tras reiniciar)",
         "options.theme_mode.light" => "Claro",
         "options.theme_mode.dark" => "Oscuro",
         "options.theme_color" => "Color del tema",
@@ -535,9 +543,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Descarga fallida",
         "notification.completed_file" => "Completado: {file}",
         "notification.download_completed" => "Descarga completada.",
+        "notification.no_chapters_saved_full_audio" => {
+            "No se detectaron capítulos. Se guardó el audio completo."
+        }
         "options.music_download_format" => "Formato de descarga de audio",
         "options.music_download_audio_label" => "Salida de audio",
         "options.music_download_preference_best" => "Mejor",
+        "options.music_download_save_label" => "Modo de guardado",
+        "options.music_download_full_audio" => "Audio completo",
+        "options.music_download_split_chapters" => "Dividir por capítulos",
         _ => key,
     }
 }

@@ -134,6 +134,7 @@ pub struct FormatPickerFilters {
     pub ext: Option<String>,
     pub codec: Option<String>,
     pub sample_rate: Option<String>,
+    pub language: Option<String>,
 }
 
 impl FormatPickerFilters {

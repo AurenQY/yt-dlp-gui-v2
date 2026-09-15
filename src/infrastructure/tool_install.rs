@@ -980,17 +980,7 @@ pub(crate) fn portable_temp_cache_dir() -> PathBuf {
 }
 
 pub(crate) fn portable_root_dir() -> PathBuf {
-    #[cfg(debug_assertions)]
-    {
-        return std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    }
-
-    #[cfg(not(debug_assertions))]
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+    super::runtime_paths::application_root()
 }
 
 pub(crate) fn resolve_support_path(path: &str) -> PathBuf {

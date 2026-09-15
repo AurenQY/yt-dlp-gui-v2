@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Zaawansowane",
+        "advance.browser_integration" => "Integracja z przeglądarką",
+        "advance.browser_connection" => "Połączenie z przeglądarką",
+        "advance.browser_connection_enabled" => "Włączone dla {browsers}",
+        "advance.browser_connection_disabled" => "Połącz Chrome, Brave i Edge",
+        "advance.browser_connection_enabled_message" => "Połączenie z przeglądarką włączone.",
+        "advance.browser_connection_disabled_message" => "Połączenie z przeglądarką wyłączone.",
         "tab.about" => "About",
         "about.tools" => "Wersje narzędzi",
         "about.current_version" => "Bieżąca",
@@ -387,6 +393,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Włącz",
         "options.theme" => "Motyw",
         "options.theme_mode.system" => "Zgodnie z systemem",
+        "options.render_backend" => "Renderer (po restarcie)",
+        "options.wgpu_api" => "API grafiki (po restarcie)",
         "options.theme_mode.light" => "Jasny",
         "options.theme_mode.dark" => "Ciemny",
         "options.theme_color" => "Kolor motywu",
@@ -511,9 +519,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Pobieranie nie powiodło się",
         "notification.completed_file" => "Ukończono: {file}",
         "notification.download_completed" => "Pobieranie ukończone.",
+        "notification.no_chapters_saved_full_audio" => {
+            "Nie wykryto rozdziałów. Zapisano pełne audio."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "Wyjście audio",
         "options.music_download_preference_best" => "Najlepsze",
+        "options.music_download_save_label" => "Sposób zapisu",
+        "options.music_download_full_audio" => "Pełne audio",
+        "options.music_download_split_chapters" => "Podziel według rozdziałów",
         _ => key,
     }
 }

@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Advanced",
+        "advance.browser_integration" => "Browser extension",
+        "advance.browser_connection" => "Native Messaging",
+        "advance.browser_connection_enabled" => "Enabled for {browsers}",
+        "advance.browser_connection_disabled" => "Allow Chrome, Brave and Edge to connect",
+        "advance.browser_connection_enabled_message" => "Browser extension connection enabled.",
+        "advance.browser_connection_disabled_message" => "Browser extension connection disabled.",
         "tab.about" => "About",
         "about.tools" => "Tool versions",
         "about.current_version" => "Current",
@@ -381,6 +387,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Enable",
         "options.theme" => "Theme",
         "options.theme_mode.system" => "Follow system",
+        "options.render_backend" => "Renderer (after restart)",
+        "options.wgpu_api" => "Graphics API (after restart)",
         "options.theme_mode.light" => "Light",
         "options.theme_mode.dark" => "Dark",
         "options.theme_color" => "Theme color",
@@ -511,9 +519,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Download failed",
         "notification.completed_file" => "Completed: {file}",
         "notification.download_completed" => "Download completed.",
+        "notification.no_chapters_saved_full_audio" => {
+            "No chapters were detected. The full audio was saved instead."
+        }
         "options.music_download_format" => "Music audio",
         "options.music_download_audio_label" => "Audio output",
         "options.music_download_preference_best" => "Best",
+        "options.music_download_save_label" => "Save as",
+        "options.music_download_full_audio" => "Full audio",
+        "options.music_download_split_chapters" => "Split by chapter",
         _ => key,
     }
 }

@@ -1,4 +1,6 @@
 pub(crate) mod app_identity;
+mod browser_native_cookies;
+pub(crate) mod browser_native_messaging;
 mod component_update;
 mod config;
 pub(crate) mod cookie_site_index;
@@ -9,10 +11,13 @@ mod output_actions;
 mod portable_cleanup;
 mod prepare_check;
 mod process_guard;
+pub(crate) mod render_backend;
+pub(crate) mod runtime_paths;
 mod sha256;
 pub(crate) mod startup_diagnostics;
 mod tool_install;
 mod tools;
+pub(crate) mod wgpu_api;
 pub(crate) mod yaml_store;
 mod youtube_login_rescue;
 

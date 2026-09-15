@@ -8,6 +8,9 @@ use crate::i18n::LanguageSelection;
 use super::tool_install::{DependencyTool, detect_dependency_tool};
 use super::tools::{CacheLocationMode, FileTimeMode, ToolPaths};
 
+#[path = "config_document.rs"]
+mod document;
+
 #[derive(Clone, Debug)]
 pub struct ConfigFileOption {
     pub name: String,
@@ -71,6 +74,7 @@ pub struct AppConfig {
     pub youtube_video_playlist_mode: YoutubeVideoPlaylistMode,
     pub youtube_high_risk_playlist_prompt: bool,
     pub windows_toast_enabled: bool,
+    pub browser_integration_enabled: bool,
     pub music_volume: f32,
     pub music_playback_mode: String,
     #[serde(skip_serializing)]
@@ -81,6 +85,8 @@ pub struct AppConfig {
     pub transcode_intent: TranscodeIntentSettings,
     pub language: LanguageSelection,
     pub theme_mode: ThemeMode,
+    pub render_backend: super::render_backend::RenderBackend,
+    pub wgpu_api: super::wgpu_api::WgpuApi,
     pub theme_accent_color: ThemeAccentColor,
     pub ui_scale_percent: u16,
     #[serde(default, skip_serializing_if = "is_zero_f32")]
@@ -906,6 +912,7 @@ impl Default for AppConfig {
             youtube_video_playlist_mode: YoutubeVideoPlaylistMode::Ask,
             youtube_high_risk_playlist_prompt: true,
             windows_toast_enabled: false,
+            browser_integration_enabled: true,
             music_volume: 0.80,
             music_playback_mode: "sequential".to_owned(),
             queue_display_mode: "normal".to_owned(),
@@ -915,6 +922,8 @@ impl Default for AppConfig {
             transcode_intent: TranscodeIntentSettings::default(),
             language: LanguageSelection::Auto,
             theme_mode: ThemeMode::System,
+            render_backend: Default::default(),
+            wgpu_api: Default::default(),
             theme_accent_color: ThemeAccentColor::Off,
             ui_scale_percent: 100,
             options_scroll_offset: 0.0,
@@ -931,20 +940,6 @@ impl Default for AppConfig {
             config_path: None,
         }
     }
-}
-
-fn explicit_app_mode_from_config_content(content: &str) -> Option<String> {
-    let value = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
-    let mapping = value.as_mapping()?;
-    for key in ["app_mode", "appMode", "AppMode", "app-mode"] {
-        if let Some(raw) = mapping
-            .get(&serde_yaml::Value::String(key.to_owned()))
-            .and_then(|value| value.as_str())
-        {
-            return Some(normalize_app_mode_value(raw));
-        }
-    }
-    None
 }
 
 fn normalize_app_mode_value(value: &str) -> String {
@@ -966,20 +961,17 @@ fn queue_display_mode_from_app_mode_value(value: &str) -> String {
 
 impl AppConfig {
     pub fn load_runtime() -> (Self, ToolPaths) {
-        let config_path = config_file_path();
+        Self::load_from_path(config_file_path())
+    }
+
+    fn load_from_path(config_path: PathBuf) -> (Self, ToolPaths) {
         let raw_content = fs::read_to_string(&config_path).ok();
-        let explicit_app_mode = raw_content
-            .as_deref()
-            .and_then(explicit_app_mode_from_config_content);
         let mut config = raw_content
             .as_deref()
-            .and_then(|content| serde_yaml::from_str::<Self>(content).ok())
+            .and_then(|content| document::decode(content).ok())
             .unwrap_or_default();
         config.config_path = Some(config_path);
         config.normalize();
-        if let Some(app_mode) = explicit_app_mode {
-            config.app_mode = app_mode;
-        }
         config.queue_display_mode = queue_display_mode_from_app_mode_value(&config.app_mode);
         let tool_paths = config.tool_paths();
         let _ = config.save();
@@ -996,7 +988,7 @@ impl AppConfig {
                 .map_err(|error| format!("Could not create config folder: {error}"))?;
         }
 
-        let content = serde_yaml::to_string(self)
+        let content = document::encode(self)
             .map_err(|error| format!("Could not serialize config file: {error}"))?;
         fs::write(path, content).map_err(|error| format!("Could not write config file: {error}"))
     }
@@ -1044,6 +1036,7 @@ impl AppConfig {
 
     fn tool_paths(&self) -> ToolPaths {
         ToolPaths {
+            native_cookie_override: None,
             yt_dlp: self.yt_dlp_path.clone(),
             yt_dlp_config: self.yt_dlp_config_path.clone(),
             ffmpeg: self.ffmpeg_path.clone(),
@@ -1400,18 +1393,8 @@ fn app_dir() -> PathBuf {
     portable_root_dir()
 }
 
-fn portable_root_dir() -> PathBuf {
-    #[cfg(debug_assertions)]
-    {
-        return std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    }
-
-    #[cfg(not(debug_assertions))]
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+pub(super) fn portable_root_dir() -> PathBuf {
+    super::runtime_paths::application_root()
 }
 
 fn executable_dir() -> PathBuf {

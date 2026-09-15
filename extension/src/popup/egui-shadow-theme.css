@@ -1,0 +1,94 @@
+:root {
+  --shadow-action-inset: 12px;
+  --egui-window: #1b1b1b;
+  --egui-extreme: #0a0a0a;
+  --egui-border: #3c3c3c;
+  --egui-widget: #3c3c3c;
+  --egui-widget-hover: #464646;
+  --egui-widget-active: #373737;
+  --egui-text: #d2d2d2;
+  --egui-text-muted: #8c8c8c;
+  --egui-button-text: #b4b4b4;
+  --egui-selection: #005c80;
+  --egui-selection-text: #c0deff;
+}
+
+.dark,
+.dark.md,
+.dark.ios {
+  --f7-page-bg-color: var(--egui-window);
+  --f7-navbar-bg-color: var(--egui-window);
+  --f7-toolbar-bg-color: var(--egui-window);
+  --f7-bars-bg-color: var(--egui-window);
+  --f7-list-bg-color: var(--egui-window);
+  --f7-list-strong-bg-color: var(--egui-window);
+  --f7-block-strong-bg-color: var(--egui-window);
+  --f7-text-color: var(--egui-text);
+  --f7-bars-text-color: var(--egui-text);
+  --f7-bars-link-color: var(--egui-text);
+  --f7-list-item-title-text-color: var(--egui-text);
+  --f7-list-item-text-text-color: var(--egui-text-muted);
+  --f7-list-item-after-text-color: var(--egui-button-text);
+  --f7-list-item-subtitle-text-color: var(--egui-button-text);
+  --f7-list-border-color: var(--egui-border);
+  --f7-list-outline-border-color: var(--egui-border);
+  --f7-list-divider-border-color: var(--egui-border);
+  --f7-navbar-border-color: var(--egui-border);
+  --f7-toolbar-border-color: var(--egui-border);
+  --f7-button-fill-bg-color: var(--egui-widget);
+  --f7-button-fill-text-color: var(--egui-button-text);
+  --f7-button-border-radius: 6px;
+  --f7-list-inset-border-radius: 6px;
+  --f7-theme-color: var(--egui-selection-text);
+  --f7-theme-color-rgb: 192, 222, 255;
+}
+
+.dark body,
+.dark .page,
+.dark .page-content,
+.dark .navbar,
+.dark .toolbar {
+  background-color: var(--egui-window);
+}
+
+.dark .list.inset ul {
+  background-color: var(--egui-window);
+  border-color: var(--egui-border);
+  border-radius: 6px;
+}
+
+.dark .button.button-fill:not(.color-red) {
+  color: var(--egui-button-text);
+  background-color: var(--egui-widget);
+}
+
+.dark .button.button-fill:not(.color-red):hover {
+  color: #f0f0f0;
+  background-color: var(--egui-widget-hover);
+}
+
+.dark .button.button-fill:not(.color-red):active {
+  color: #ffffff;
+  background-color: var(--egui-widget-active);
+}
+
+.dark .button.button-fill.disabled,
+.dark .button.button-fill:disabled {
+  opacity: 0.5;
+}
+
+.dark .badge:not(.color-red):not(.color-green) {
+  color: var(--egui-text);
+  background-color: var(--egui-widget);
+  border-radius: 6px;
+}
+
+.dark .badge.color-blue {
+  color: var(--egui-selection-text);
+  background-color: var(--egui-selection);
+}
+
+.dark .item-link:active,
+.dark .format-row:active {
+  background-color: var(--egui-widget-active);
+}

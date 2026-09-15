@@ -82,12 +82,18 @@ impl AppState {
         let cover_cache_dir = self.music_cache_cover_write_dir(&item);
         let has_cover_source =
             choice.embed_cover && (cover_path.is_some() || !item.thumbnail_url.trim().is_empty());
-        let source_kind = match cache_media_path.as_ref() {
-            Some(path) if music_cache_can_be_copied_for_choice(choice, path, has_cover_source) => {
-                MusicDownloadSourceKind::CacheCopy
+        let source_kind = if music_download_requires_online_download(choice) {
+            MusicDownloadSourceKind::YtDlpDownload
+        } else {
+            match cache_media_path.as_ref() {
+                Some(path)
+                    if music_cache_can_be_copied_for_choice(choice, path, has_cover_source) =>
+                {
+                    MusicDownloadSourceKind::CacheCopy
+                }
+                Some(_) => MusicDownloadSourceKind::CacheConvert,
+                None => MusicDownloadSourceKind::YtDlpDownload,
             }
-            Some(_) => MusicDownloadSourceKind::CacheConvert,
-            None => MusicDownloadSourceKind::YtDlpDownload,
         };
 
         if source_kind == MusicDownloadSourceKind::CacheConvert {

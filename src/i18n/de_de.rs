@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Erweitert",
+        "advance.browser_integration" => "Browser-Integration",
+        "advance.browser_connection" => "Browser-Verbindung",
+        "advance.browser_connection_enabled" => "Aktiv für {browsers}",
+        "advance.browser_connection_disabled" => "Chrome, Brave und Edge verbinden",
+        "advance.browser_connection_enabled_message" => "Browser-Verbindung aktiviert.",
+        "advance.browser_connection_disabled_message" => "Browser-Verbindung deaktiviert.",
         "tab.about" => "About",
         "about.tools" => "Tool-Versionen",
         "about.current_version" => "Aktuell",
@@ -403,6 +409,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Aktivieren",
         "options.theme" => "Design",
         "options.theme_mode.system" => "System folgen",
+        "options.render_backend" => "Renderer (nach Neustart)",
+        "options.wgpu_api" => "Grafik-API (nach Neustart)",
         "options.theme_mode.light" => "Hell",
         "options.theme_mode.dark" => "Dunkel",
         "options.theme_color" => "Designfarbe",
@@ -533,9 +541,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Download fehlgeschlagen",
         "notification.completed_file" => "Abgeschlossen: {file}",
         "notification.download_completed" => "Download abgeschlossen.",
+        "notification.no_chapters_saved_full_audio" => {
+            "Keine Kapitel erkannt. Stattdessen wurde das vollständige Audio gespeichert."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "Audioausgabe",
         "options.music_download_preference_best" => "Beste",
+        "options.music_download_save_label" => "Speicherart",
+        "options.music_download_full_audio" => "Vollständiges Audio",
+        "options.music_download_split_chapters" => "Nach Kapiteln aufteilen",
         _ => key,
     }
 }

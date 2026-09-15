@@ -1,0 +1,17 @@
+# Dependencies and tool caches.
+/node_modules/
+/.vite/
+/.svelte-kit/
+
+# Local QA, coverage, and runtime output.
+/qa-output*/
+/coverage/
+/cache/
+/yt-dlp-gui.yaml
+
+# Package-manager and local temporary files.
+npm-debug.log*
+pnpm-debug.log*
+*.tmp
+
+# chromium/ is the load-unpacked distribution and is intentionally tracked.

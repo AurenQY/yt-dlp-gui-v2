@@ -2,6 +2,8 @@ use eframe::egui;
 use egui_taffy::Tui;
 
 use crate::app::state::AppState;
+use crate::infrastructure::render_backend::RenderBackend;
+use crate::infrastructure::wgpu_api::WgpuApi;
 use crate::infrastructure::{ThemeAccentColor, ThemeMode};
 
 use super::settings_components::{
@@ -46,6 +48,71 @@ pub(super) fn render_window_group(tui: &mut Tui, state: &mut AppState, form: Set
             }
 
             let theme_mode = state.config.theme_mode;
+            let backend = state.config.render_backend;
+            let backend_options = [RenderBackend::Glow, RenderBackend::Wgpu]
+                .map(|backend| SettingsSelectOption::new(backend, backend.label()));
+            if let Some(backend) = settings_select_row(
+                tui,
+                form,
+                state.ui_i18n_text_for_key("options.render_backend"),
+                "render-backend",
+                backend,
+                backend.label(),
+                &backend_options,
+            ) {
+                state.set_render_backend(backend);
+            }
+
+            if state.config.render_backend == RenderBackend::Wgpu {
+                let api = state.config.wgpu_api;
+                let label = |api: WgpuApi| {
+                    if api == WgpuApi::Auto {
+                        state.ui_i18n_text_for_key("options.auto_detect")
+                    } else {
+                        api.label()
+                    }
+                };
+                let options = [
+                    WgpuApi::Auto,
+                    WgpuApi::Dx12,
+                    WgpuApi::Vulkan,
+                    WgpuApi::OpenGl,
+                ]
+                .map(|api| SettingsSelectOption::new(api, label(api)));
+                let selected = wgpu_api_selected_text(
+                    api,
+                    label(api),
+                    state.ui_i18n_text_for_key("options.current"),
+                    state.runtime_renderer.as_ref(),
+                );
+                if let Some(api) = settings_select_row(
+                    tui,
+                    form,
+                    state.ui_i18n_text_for_key("options.wgpu_api"),
+                    "wgpu-api",
+                    api,
+                    &selected,
+                    &options,
+                ) {
+                    state.set_wgpu_api(api);
+                }
+            }
+            if let Some(active) = &state.runtime_renderer {
+                settings_flexible_form_row(
+                    tui,
+                    form,
+                    state.ui_i18n_text_for_key("options.current"),
+                    |ui| {
+                        let text = if active.is_wgpu {
+                            format!("Wgpu / {}", active.api)
+                        } else {
+                            active.api.clone()
+                        };
+                        ui.label(text).on_hover_text(&active.gpu);
+                    },
+                );
+            }
+
             let theme_options = ThemeMode::variants().map(|mode| {
                 SettingsSelectOption::new(
                     mode,
@@ -146,4 +213,55 @@ pub(super) fn render_window_group(tui: &mut Tui, state: &mut AppState, form: Set
             }
         },
     );
+}
+
+fn wgpu_api_selected_text(
+    requested: WgpuApi,
+    label: &str,
+    current_label: &str,
+    active: Option<&crate::infrastructure::wgpu_api::RuntimeRendererInfo>,
+) -> String {
+    match active {
+        Some(active) if requested == WgpuApi::Auto && active.is_wgpu => {
+            format!("{label} ({current_label}: {})", active.api)
+        }
+        _ => label.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::wgpu_api::RuntimeRendererInfo;
+
+    #[test]
+    fn auto_displays_actual_api_and_pending_choice_does_not_change_runtime() {
+        let active = RuntimeRendererInfo {
+            api: "Vulkan".to_owned(),
+            gpu: "test".to_owned(),
+            is_wgpu: true,
+        };
+        assert_eq!(
+            wgpu_api_selected_text(WgpuApi::Auto, "Auto", "Current", Some(&active)),
+            "Auto (Current: Vulkan)"
+        );
+        assert_eq!(
+            wgpu_api_selected_text(WgpuApi::Dx12, "DirectX 12", "Current", Some(&active)),
+            "DirectX 12"
+        );
+        assert_eq!(active.api, "Vulkan");
+        let glow = RuntimeRendererInfo {
+            api: "OpenGL (Glow)".to_owned(),
+            gpu: String::new(),
+            is_wgpu: false,
+        };
+        assert_eq!(
+            wgpu_api_selected_text(WgpuApi::Auto, "Auto", "Current", Some(&glow)),
+            "Auto"
+        );
+        assert_eq!(
+            wgpu_api_selected_text(WgpuApi::Auto, "Auto", "Current", None),
+            "Auto"
+        );
+    }
 }

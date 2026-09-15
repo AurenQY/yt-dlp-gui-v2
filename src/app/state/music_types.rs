@@ -118,6 +118,21 @@ pub enum MusicDownloadMode {
     Unified,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MusicDownloadSaveMode {
+    #[default]
+    FullAudio,
+    SplitChapters,
+}
+
+impl MusicDownloadSaveMode {
+    pub const ALL: [Self; 2] = [Self::FullAudio, Self::SplitChapters];
+
+    pub(crate) fn splits_chapters(self) -> bool {
+        self == Self::SplitChapters
+    }
+}
+
 impl MusicDownloadMode {
     pub const ALL: [Self; 2] = [Self::Original, Self::Unified];
 
@@ -160,6 +175,7 @@ pub struct MusicDownloadChoice {
     pub mode: MusicDownloadMode,
     pub original_preference: MusicOriginalPreference,
     pub unified_format: MusicDownloadFormat,
+    pub save_mode: MusicDownloadSaveMode,
     pub embed_cover: bool,
     pub write_tags: bool,
 }
@@ -170,6 +186,7 @@ impl Default for MusicDownloadChoice {
             mode: MusicDownloadMode::Original,
             original_preference: MusicOriginalPreference::Auto,
             unified_format: MusicDownloadFormat::M4aAac,
+            save_mode: MusicDownloadSaveMode::FullAudio,
             embed_cover: true,
             write_tags: true,
         }

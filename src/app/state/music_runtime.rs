@@ -469,6 +469,8 @@ pub(super) enum MusicDownloadEvent {
         item_id: QueueItemId,
         workflow_id: WorkflowRunId,
         source_kind: MusicDownloadSourceKind,
+        split_chapters_requested: bool,
+        chapters_split: bool,
         result: Result<String, String>,
     },
 }

@@ -35,11 +35,13 @@ impl UiText {
     pub(super) const HEADER_CODEC: &'static str = "picker.header.codec";
     pub(super) const HEADER_FILESIZE: &'static str = "picker.header.size";
     pub(super) const HEADER_SAMPLE_RATE: &'static str = "picker.header.sample_rate";
+    pub(super) const HEADER_LANGUAGE: &'static str = "picker.language";
     pub(super) const FILTER_RESOLUTION: &'static str = "picker.filter.resolution";
     pub(super) const FILTER_RANGE: &'static str = "picker.filter.range";
     pub(super) const FILTER_FPS: &'static str = "picker.filter.fps";
     pub(super) const FILTER_CODEC: &'static str = "picker.filter.codec";
     pub(super) const FILTER_SAMPLE_RATE: &'static str = "picker.filter.sample_rate";
+    pub(super) const FILTER_LANGUAGE: &'static str = "picker.language";
 }
 
 pub(super) fn icon_text_button(ui: &Ui, icon: AppIcon, label: &str) -> egui::Button<'static> {

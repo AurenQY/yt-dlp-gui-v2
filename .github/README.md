@@ -29,6 +29,14 @@
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 - [FFmpeg](https://ffmpeg.org/)
 
+### Install the Browser Extension
+
+1. Start `yt-dlp-gui.exe` one time.
+2. Open `chrome://extensions` in Chrome or Brave. Open `edge://extensions` in Edge.
+3. Turn on **Developer mode**.
+4. Click **Load unpacked**.
+5. Select the `extension/chromium` folder.
+
 ### Tool Sources
 
 The built-in installer downloads optional tools from these release sources:

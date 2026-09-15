@@ -1,13 +1,13 @@
 # Rust build output.
 /target/
 
-# Local machine-first notes.
+# Private Codex workspace state and machine-first notes.
 /notes/
 /AGENTS.md
 /.agents/
 /.codex/
 
-# Local generated docs.
+# Local user-facing and generated documentation.
 /docs/
 
 # Local runtime data.
@@ -16,9 +16,11 @@
 /data/
 /download/
 
-# Local app config.
+# Local app configuration and secrets.
 /yt-dlp-gui.yaml
 /edition.example.yaml
+/.env
+/.env.*
 
 # Local bundled tools and generated tool dumps.
 /tools/
@@ -31,4 +33,10 @@
 # Common temporary files.
 *.tmp
 *.log
+*.bak
+*.orig
+*.rej
+*~
 .DS_Store
+Thumbs.db
+Desktop.ini

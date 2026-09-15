@@ -494,6 +494,9 @@ impl AppState {
                     }
                 }
                 FormatPickerKind::Audio => {
+                    if !option.language.is_empty() {
+                        self.format_picker.filters.language = Some(option.language.clone());
+                    }
                     if !option.sample_rate.is_empty() {
                         self.format_picker.filters.sample_rate = Some(option.sample_rate.clone());
                     }

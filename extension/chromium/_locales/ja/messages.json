@@ -1,0 +1,497 @@
+{
+  "extensionName": {
+    "message": "yt-dlp-gui"
+  },
+  "extensionDescription": {
+    "message": "現在のページを yt-dlp-gui で解析し、形式を選択してダウンロードします。"
+  },
+  "unsupportedTitle": {
+    "message": "このページは yt-dlp に対応していません"
+  },
+  "supportedTitle": {
+    "message": "yt-dlp-gui でこのページをダウンロード"
+  },
+  "back": {
+    "message": "戻る"
+  },
+  "recognizing": {
+    "message": "判定中"
+  },
+  "analyze": {
+    "message": "解析"
+  },
+  "stop": {
+    "message": "停止"
+  },
+  "stopping": {
+    "message": "停止中"
+  },
+  "downloadStopping": {
+    "message": "ダウンロードを停止しています…"
+  },
+  "downloadStopped": {
+    "message": "ダウンロードを停止しました。"
+  },
+  "downloadNotRunning": {
+    "message": "実行中のダウンロードはありません。"
+  },
+  "downloadStopFailed": {
+    "message": "ダウンロードを停止できませんでした：{message}"
+  },
+  "downloadScope": {
+    "message": "ダウンロード範囲"
+  },
+  "currentVideo": {
+    "message": "現在の動画"
+  },
+  "currentPage": {
+    "message": "現在のページ"
+  },
+  "fullPlaylist": {
+    "message": "再生リスト全体"
+  },
+  "playlistLimit": {
+    "message": "再生リスト解析上限"
+  },
+  "playlistLimitCompact": {
+    "message": "最大"
+  },
+  "itemsUnit": {
+    "message": "件"
+  },
+  "analyzingPage": {
+    "message": "ページを解析中"
+  },
+  "readingMedia": {
+    "message": "メディア情報と利用可能な形式を取得中"
+  },
+  "chooseFolder": {
+    "message": "フォルダーを選択"
+  },
+  "downloadLocation": {
+    "message": "保存先"
+  },
+  "openDownloadFolder": {
+    "message": "保存先フォルダーを開く"
+  },
+  "openFolderFailed": {
+    "message": "保存先フォルダーを開けませんでした：{message}"
+  },
+  "fromV2Settings": {
+    "message": "v2 の設定を使用"
+  },
+  "download": {
+    "message": "ダウンロード"
+  },
+  "downloadSelected": {
+    "message": "{count} 件をダウンロード"
+  },
+  "downloadingProgress": {
+    "message": "ダウンロード中 {current} / {total}"
+  },
+  "selectItem": {
+    "message": "項目を選択"
+  },
+  "selectNamedItem": {
+    "message": "{title} を選択"
+  },
+  "downloadContent": {
+    "message": "ダウンロード内容"
+  },
+  "fileName": {
+    "message": "ファイル名"
+  },
+  "fileNameBaseHint": {
+    "message": "拡張子は出力形式で決まります。"
+  },
+  "downloadRange": {
+    "message": "ダウンロード範囲"
+  },
+  "chapterRange": {
+    "message": "チャプター範囲"
+  },
+  "chapterRangeHint": {
+    "message": "ダウンロードするチャプターを選択します。連続するチャプターは1つの出力にまとめます。"
+  },
+  "selectedChapters": {
+    "message": "{count}チャプターを選択"
+  },
+  "selectAll": {
+    "message": "すべて選択"
+  },
+  "clearSelection": {
+    "message": "選択を解除"
+  },
+  "chapterNumber": {
+    "message": "チャプター {number}"
+  },
+  "fullVideo": {
+    "message": "動画全体"
+  },
+  "rangeStart": {
+    "message": "開始"
+  },
+  "rangeEnd": {
+    "message": "終了"
+  },
+  "timeRangeHint": {
+    "message": "HH:MM:SS または MM:SS で入力します。範囲指定時はチャプター分割を解除します。"
+  },
+  "timeRangeInvalid": {
+    "message": "有効な開始時刻と終了時刻を入力してください。"
+  },
+  "timeRangeOrderInvalid": {
+    "message": "終了時刻は開始時刻より後にしてください。"
+  },
+  "timeRangeBeyondDuration": {
+    "message": "終了時刻がメディアの長さを超えています。"
+  },
+  "confirm": {
+    "message": "確認"
+  },
+  "video": {
+    "message": "動画"
+  },
+  "audio": {
+    "message": "音声"
+  },
+  "audioOnly": {
+    "message": "音声のみ"
+  },
+  "videoFormat": {
+    "message": "動画形式"
+  },
+  "audioFormat": {
+    "message": "音声形式"
+  },
+  "output": {
+    "message": "出力"
+  },
+  "thumbnailMode": {
+    "message": "サムネイル"
+  },
+  "thumbnailOff": {
+    "message": "オフ"
+  },
+  "thumbnailDownload": {
+    "message": "サムネイルを保存"
+  },
+  "thumbnailEmbed": {
+    "message": "サムネイルを埋め込む"
+  },
+  "subtitleMode": {
+    "message": "字幕の処理"
+  },
+  "subtitleOff": {
+    "message": "オフ"
+  },
+  "subtitleDownload": {
+    "message": "字幕ファイルを保存"
+  },
+  "subtitleEmbed": {
+    "message": "字幕を埋め込む"
+  },
+  "chapterMode": {
+    "message": "チャプターの処理"
+  },
+  "chapterOff": {
+    "message": "ファイル全体"
+  },
+  "chapterDownload": {
+    "message": "チャプターを分割"
+  },
+  "chapterEmbed": {
+    "message": "分割してチャプターを埋め込む"
+  },
+  "subtitles": {
+    "message": "字幕"
+  },
+  "chapters": {
+    "message": "チャプター"
+  },
+  "fullFile": {
+    "message": "ファイル全体"
+  },
+  "splitChapters": {
+    "message": "チャプターごとに分割"
+  },
+  "remaining": {
+    "message": "残り {eta}"
+  },
+  "completed": {
+    "message": "完了"
+  },
+  "ready": {
+    "message": "準備完了"
+  },
+  "downloading": {
+    "message": "ダウンロード中"
+  },
+  "completedItems": {
+    "message": "完了：{count} 件"
+  },
+  "completedValue": {
+    "message": "完了：{value}"
+  },
+  "downloadComplete": {
+    "message": "ダウンロード完了"
+  },
+  "downloadFailed": {
+    "message": "ダウンロードに失敗しました。"
+  },
+  "hostRejected": {
+    "message": "アプリが要求を受け付けませんでした。"
+  },
+  "unavailable": {
+    "message": "利用できません"
+  },
+  "supportedSite": {
+    "message": "対応サイト"
+  },
+  "genericDownload": {
+    "message": "汎用ダウンロード"
+  },
+  "generic": {
+    "message": "汎用"
+  },
+  "audioSummary": {
+    "message": "音声"
+  },
+  "noAudio": {
+    "message": "音声なし"
+  },
+  "audioUnknown": {
+    "message": "音声不明"
+  },
+  "noSubtitles": {
+    "message": "字幕をダウンロードしない"
+  },
+  "automatic": {
+    "message": "自動生成"
+  },
+  "showFirstItems": {
+    "message": "先頭 {count} 件のみ表示"
+  },
+  "mediaCountLimit": {
+    "message": "{count} 件のメディア · 上限 {limit}"
+  },
+  "analyzedCount": {
+    "message": "{count} / {limit} 件を解析済み"
+  },
+  "stoppedCount": {
+    "message": "停止 · {count} 件"
+  },
+  "permissionRequired": {
+    "message": "ブラウザーの Cookie を使用するには、このサイトへのアクセス権が必要です。"
+  },
+  "analysisFailed": {
+    "message": "解析に失敗しました：{message}"
+  },
+  "noDownloadableMedia": {
+    "message": "このページにはダウンロードできる動画または音声がありません。"
+  },
+  "analysisStopped": {
+    "message": "解析を停止し、{count} 件の結果を保持しました。"
+  },
+  "stopFailed": {
+    "message": "停止できませんでした：{message}"
+  },
+  "preparingDownloads": {
+    "message": "{count} 件のダウンロードを準備中"
+  },
+  "preparingDownload": {
+    "message": "ダウンロードを準備中：{title}"
+  },
+  "noFormats": {
+    "message": "利用可能な形式がありません"
+  },
+  "approximate": {
+    "message": "約 {value}"
+  },
+  "sampleRate": {
+    "message": "サンプルレート"
+  },
+  "language": {
+    "message": "言語"
+  },
+  "codec": {
+    "message": "コーデック"
+  },
+  "bitrate": {
+    "message": "ビットレート"
+  },
+  "size": {
+    "message": "サイズ"
+  },
+  "resolution": {
+    "message": "解像度"
+  },
+  "fps": {
+    "message": "FPS"
+  },
+  "analyzingFormats": {
+    "message": "形式を解析中"
+  },
+  "formatsAnalyzed": {
+    "message": "形式の解析完了"
+  },
+  "downloadCompleted": {
+    "message": "ダウンロード完了"
+  },
+  "operationFailed": {
+    "message": "操作に失敗"
+  },
+  "downloadPreparing": {
+    "message": "ダウンロードを準備中"
+  },
+  "downloadListInvalid": {
+    "message": "ダウンロード一覧が無効です。"
+  },
+  "downloadAlreadyRunning": {
+    "message": "別のダウンロードが進行中です。"
+  },
+  "nativeDownloadFailed": {
+    "message": "アプリでダウンロードできませんでした。"
+  },
+  "nativeDisconnected": {
+    "message": "アプリとの接続が中断されました。"
+  },
+  "nativeNoData": {
+    "message": "アプリからデータが返されませんでした。"
+  },
+  "nativeConnectFailed": {
+    "message": "アプリに接続できませんでした。"
+  },
+  "cookieReadFailed": {
+    "message": "このサイトの Cookie を読み取れません。サイトのアクセス権を確認してください。"
+  },
+  "selectAudioFormat": {
+    "message": "音声形式を選択してください。"
+  },
+  "selectVideoFormat": {
+    "message": "動画形式を選択してください。"
+  },
+  "selectMergeAudioFormat": {
+    "message": "動画と結合する音声形式を選択してください。"
+  },
+  "invalidUrlType": {
+    "message": "URL を入力してください。"
+  },
+  "invalidUrlLength": {
+    "message": "URL に空白が含まれているか、長すぎます。"
+  },
+  "invalidUrlComplete": {
+    "message": "完全な HTTP または HTTPS URL を入力してください。"
+  },
+  "invalidUrlProtocol": {
+    "message": "HTTP または HTTPS URL のみ使用できます。"
+  },
+  "invalidUrlCredentials": {
+    "message": "ユーザー名またはパスワードを含む URL は使用できません。"
+  },
+  "invalidUrlIndex": {
+    "message": "URL インデックスの形式が正しくありません。"
+  },
+  "matcherIndexLoadFailed": {
+    "message": "URL インデックスを読み込めませんでした。"
+  },
+  "sourceTabMissing": {
+    "message": "元のタブが見つかりません。"
+  },
+  "analysisAlreadyRunning": {
+    "message": "解析はすでに進行中です。"
+  },
+  "analysisStarted": {
+    "message": "解析を開始しました。"
+  },
+  "nativeAnalysisFailed": {
+    "message": "アプリでこのページを解析できませんでした。"
+  },
+  "analysisDisconnected": {
+    "message": "解析中の接続が中断されました。"
+  },
+  "analysisNotRunning": {
+    "message": "該当する解析は実行されていません。"
+  },
+  "analysisStoppedStatus": {
+    "message": "解析を停止しました。"
+  },
+  "analysisStopFailed": {
+    "message": "解析を停止できませんでした。"
+  },
+  "analysisStartFailed": {
+    "message": "解析を開始できませんでした。"
+  },
+  "downloadStarted": {
+    "message": "ダウンロードを開始しました。"
+  },
+  "analysisReadPlaylist": {
+    "message": "再生リストのメディア情報を取得"
+  },
+  "analysisReadMedia": {
+    "message": "現在のページのメディア情報を取得"
+  },
+  "analysisCurrentPageDetail": {
+    "message": "現在のページ"
+  },
+  "analysisPrepareBrowser": {
+    "message": "ブラウザデータを準備"
+  },
+  "analysisLaunchYtDlp": {
+    "message": "yt-dlp を起動"
+  },
+  "analysisPlaylistLimitDetail": {
+    "message": "最大 {count} 件"
+  },
+  "analysisConnectHost": {
+    "message": "yt-dlp-gui に接続"
+  },
+  "analysisValidateTools": {
+    "message": "設定とツールを確認"
+  },
+  "browserMediaMixed": {
+    "message": "動画と音声"
+  },
+  "browserMediaVideo": {
+    "message": "動画"
+  },
+  "browserMediaAudio": {
+    "message": "音声"
+  },
+  "genericTitle": {
+    "message": "yt-dlp の汎用モードでこのページを試す"
+  },
+  "nativeHostGitHub": {
+    "message": "GitHub Releases"
+  },
+  "nativeHostUnavailable": {
+    "message": "yt-dlp-gui のブラウザー接続が見つかりません。アプリをインストールし、オプションでブラウザー連携を有効にしてください。"
+  },
+  "supportStatus": {
+    "message": "URL 対応状況"
+  },
+  "supportCheckingTitle": {
+    "message": "解析を開始できます"
+  },
+  "supportCheckingDetail": {
+    "message": "サイト専用ルールをバックグラウンドで確認しています"
+  },
+  "supportCheckingBadge": {
+    "message": "解析可能"
+  },
+  "supportReadyTitle": {
+    "message": "この URL は yt-dlp に対応しています"
+  },
+  "supportReadyBadge": {
+    "message": "対応"
+  },
+  "supportGenericTitle": {
+    "message": "解析を開始できます"
+  },
+  "supportGenericDetail": {
+    "message": "yt-dlp の汎用解析を使用します"
+  },
+  "supportGenericBadge": {
+    "message": "汎用"
+  }
+}

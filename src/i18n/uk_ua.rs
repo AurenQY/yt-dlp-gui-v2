@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Додатково",
+        "advance.browser_integration" => "Інтеграція з браузером",
+        "advance.browser_connection" => "Підключення браузера",
+        "advance.browser_connection_enabled" => "Увімкнено для {browsers}",
+        "advance.browser_connection_disabled" => "Підключити Chrome, Brave та Edge",
+        "advance.browser_connection_enabled_message" => "Підключення браузера увімкнено.",
+        "advance.browser_connection_disabled_message" => "Підключення браузера вимкнено.",
         "tab.about" => "About",
         "about.tools" => "Версії інструментів",
         "about.current_version" => "Поточна",
@@ -393,6 +399,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Увімкнути",
         "options.theme" => "Тема",
         "options.theme_mode.system" => "За системою",
+        "options.render_backend" => "Рендерер (після перезапуску)",
+        "options.wgpu_api" => "Графічний API (після перезапуску)",
         "options.theme_mode.light" => "Світла",
         "options.theme_mode.dark" => "Темна",
         "options.theme_color" => "Колір теми",
@@ -517,9 +525,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Помилка завантаження",
         "notification.completed_file" => "Завершено: {file}",
         "notification.download_completed" => "Завантаження завершено.",
+        "notification.no_chapters_saved_full_audio" => {
+            "Розділи не виявлено. Збережено повне аудіо."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "Аудіовихід",
         "options.music_download_preference_best" => "Найкраще",
+        "options.music_download_save_label" => "Спосіб збереження",
+        "options.music_download_full_audio" => "Повне аудіо",
+        "options.music_download_split_chapters" => "Розділити за розділами",
         _ => key,
     }
 }

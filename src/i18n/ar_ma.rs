@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "متقدم",
+        "advance.browser_integration" => "تكامل المتصفح",
+        "advance.browser_connection" => "اتصال المتصفح",
+        "advance.browser_connection_enabled" => "مفعّل لـ {browsers}",
+        "advance.browser_connection_disabled" => "السماح باتصال Chrome وBrave وEdge",
+        "advance.browser_connection_enabled_message" => "تم تفعيل اتصال المتصفح.",
+        "advance.browser_connection_disabled_message" => "تم تعطيل اتصال المتصفح.",
         "tab.about" => "About",
         "about.tools" => "إصدارات الأدوات",
         "about.current_version" => "الحالي",
@@ -375,6 +381,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "تمكين",
         "options.theme" => "السمة",
         "options.theme_mode.system" => "اتباع النظام",
+        "options.render_backend" => "محرك العرض (بعد إعادة التشغيل)",
+        "options.wgpu_api" => "واجهة الرسومات (بعد إعادة التشغيل)",
         "options.theme_mode.light" => "فاتح",
         "options.theme_mode.dark" => "داكن",
         "options.theme_color" => "لون السمة",
@@ -497,9 +505,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "فشل التنزيل",
         "notification.completed_file" => "اكتمل: {file}",
         "notification.download_completed" => "اكتمل التنزيل.",
+        "notification.no_chapters_saved_full_audio" => {
+            "لم يتم اكتشاف فصول. تم حفظ الصوت الكامل بدلاً من ذلك."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "إخراج الصوت",
         "options.music_download_preference_best" => "الأفضل",
+        "options.music_download_save_label" => "طريقة الحفظ",
+        "options.music_download_full_audio" => "الصوت الكامل",
+        "options.music_download_split_chapters" => "تقسيم حسب الفصول",
         _ => key,
     }
 }

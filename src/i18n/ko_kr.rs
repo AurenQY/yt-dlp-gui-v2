@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "고급",
+        "advance.browser_integration" => "브라우저 연동",
+        "advance.browser_connection" => "브라우저 연결",
+        "advance.browser_connection_enabled" => "{browsers}에서 사용 중",
+        "advance.browser_connection_disabled" => "Chrome, Brave 및 Edge 연결",
+        "advance.browser_connection_enabled_message" => "브라우저 연결을 활성화했습니다.",
+        "advance.browser_connection_disabled_message" => "브라우저 연결을 비활성화했습니다.",
         "tab.about" => "About",
         "about.tools" => "도구 버전",
         "about.current_version" => "현재",
@@ -379,6 +385,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "사용",
         "options.theme" => "테마",
         "options.theme_mode.system" => "시스템 설정 따르기",
+        "options.render_backend" => "렌더러 (재시작 후)",
+        "options.wgpu_api" => "그래픽 API (재시작 후)",
         "options.theme_mode.light" => "라이트",
         "options.theme_mode.dark" => "다크",
         "options.theme_color" => "테마 색상",
@@ -509,9 +517,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "다운로드 실패",
         "notification.completed_file" => "완료됨: {file}",
         "notification.download_completed" => "다운로드가 완료되었습니다.",
+        "notification.no_chapters_saved_full_audio" => {
+            "챕터가 감지되지 않아 전체 오디오를 저장했습니다."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "오디오 출력",
         "options.music_download_preference_best" => "최고",
+        "options.music_download_save_label" => "저장 방식",
+        "options.music_download_full_audio" => "전체 오디오",
+        "options.music_download_split_chapters" => "챕터별 분할",
         _ => key,
     }
 }

@@ -1,6 +1,12 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
         "tab.advanced" => "Avanzate",
+        "advance.browser_integration" => "Integrazione browser",
+        "advance.browser_connection" => "Connessione browser",
+        "advance.browser_connection_enabled" => "Attiva per {browsers}",
+        "advance.browser_connection_disabled" => "Connetti Chrome, Brave ed Edge",
+        "advance.browser_connection_enabled_message" => "Connessione browser attivata.",
+        "advance.browser_connection_disabled_message" => "Connessione browser disattivata.",
         "tab.about" => "About",
         "about.tools" => "Versioni strumenti",
         "about.current_version" => "Corrente",
@@ -395,6 +401,8 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.enable" => "Abilita",
         "options.theme" => "Tema",
         "options.theme_mode.system" => "Segui sistema",
+        "options.render_backend" => "Rendering (dopo il riavvio)",
+        "options.wgpu_api" => "API grafica (dopo il riavvio)",
         "options.theme_mode.light" => "Chiaro",
         "options.theme_mode.dark" => "Scuro",
         "options.theme_color" => "Colore tema",
@@ -525,9 +533,15 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "notification.download_failed" => "Download non riuscito",
         "notification.completed_file" => "Completato: {file}",
         "notification.download_completed" => "Download completato.",
+        "notification.no_chapters_saved_full_audio" => {
+            "Nessun capitolo rilevato. È stato salvato l’audio completo."
+        }
         "options.music_download_format" => "Music download format",
         "options.music_download_audio_label" => "Uscita audio",
         "options.music_download_preference_best" => "Migliore",
+        "options.music_download_save_label" => "Modalità di salvataggio",
+        "options.music_download_full_audio" => "Audio completo",
+        "options.music_download_split_chapters" => "Dividi per capitoli",
         _ => key,
     }
 }

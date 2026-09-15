@@ -109,6 +109,7 @@ pub(super) fn settings_select_row<T: Clone + Eq>(
     let mut selected = None;
     settings_flexible_form_row(tui, layout, label, |ui| {
         egui::ComboBox::from_id_salt(id_salt)
+            .wrap()
             .selected_text(selected_text)
             .show_ui(ui, |ui| {
                 for option in options {
@@ -169,6 +170,48 @@ fn show_settings_cell_content(ui: &mut Ui, element: UiElement, add_contents: imp
                 Layout::right_to_left(Align::Center),
                 add_contents,
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod renderer_layout_tests {
+    use super::*;
+
+    #[test]
+    fn long_auto_api_selection_stays_inside_settings_width() {
+        for width in [320.0, 480.0, 800.0] {
+            let ctx = egui::Context::default();
+            ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(2).unwrap());
+            for _ in 0..3 {
+                let output = ctx.run_ui(egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 600.0))),
+                    ..Default::default()
+                }, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let label = "Graphics API (after restart)";
+                        let label_width = semantic_ui_metrics::settings_form_label_column_width_for_visible_texts(ui, &[label]);
+                        let layout = SettingsFormLayout::resolve(ui, label_width);
+                        super::super::common::settings_taffy_scroll_content(ui, "renderer-test", |tui| {
+                            settings_select_row(tui, layout, label, "api-test", 0,
+                                "Auto detect (Current: DirectX 12)", &[SettingsSelectOption::new(0, "Auto detect")]);
+                        });
+                    });
+                });
+                for shape in output.shapes {
+                    if let egui::epaint::Shape::Text(text) = shape.shape {
+                        let bounds = text.visual_bounding_rect();
+                        assert!(
+                            bounds.min.x >= -1.0 && bounds.max.x <= width + 1.0,
+                            "settings text overflow at width {width}: {:?}, pos={:?}, size={:?}, clip={:?}",
+                            text.galley.job.text,
+                            text.pos,
+                            text.galley.size(),
+                            shape.clip_rect
+                        );
+                    }
+                }
+            }
         }
     }
 }

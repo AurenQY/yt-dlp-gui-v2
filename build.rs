@@ -1,6 +1,10 @@
 use std::time::{SystemTime as StdSystemTime, UNIX_EPOCH};
 
+#[path = "build_support/aura_shader.rs"]
+mod aura_shader;
+
 fn main() {
+    aura_shader::compile();
     let build_date = build_date_string();
     emit_build_date(&build_date);
 
@@ -64,7 +68,7 @@ fn current_utc_date_string() -> String {
 }
 
 fn civil_date_from_unix_days(days_since_epoch: i64) -> (i64, i64, i64) {
-    // Howard Hinnant's civil-from-days algorithm. This keeps build.rs dependency-free while
+    // Howard Hinnant's civil-from-days algorithm keeps date calculation independent of time crates while
     // still emitting a stable YYYY.MM.DD build date for the compiled binary.
     let z = days_since_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
