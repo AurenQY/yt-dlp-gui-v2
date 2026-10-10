@@ -129,6 +129,30 @@ pub(super) fn show_template_tui_block(
     }
 }
 
+/// A scroll viewport in the existing tree; never mounts a separate Tui root.
+pub(super) fn show_vertical_scroll_template<Content>(
+    slot: TemplateBlockSlot,
+    tui: &mut Tui,
+    template: TemplateNode<Content>,
+    show_block: &mut impl FnMut(TemplateBlockSlot, Content, &mut Tui),
+) {
+    let mut style = match slot {
+        TemplateBlockSlot::Child { style, .. } => style,
+        TemplateBlockSlot::Root => xaml_taffy_styles::xaml_vertical_grow_root_style(),
+    };
+    style.display = taffy::Display::Flex;
+    style.flex_direction = taffy::FlexDirection::Column;
+    style.overflow.y = taffy::Overflow::Scroll;
+    style.overflow.x = taffy::Overflow::Hidden;
+    tui.style(style).add(|tui| {
+        show_template_with_root_style(template, tui, show_block, |axis| {
+            let mut content = xaml_taffy_styles::xaml_template_auto_root_style(axis);
+            content.flex_shrink = 0.0;
+            content
+        });
+    });
+}
+
 fn show_template_with_root_style<Content>(
     template: TemplateNode<Content>,
     tui: &mut Tui,

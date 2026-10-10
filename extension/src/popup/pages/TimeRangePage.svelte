@@ -77,7 +77,7 @@
 
   <Block strong inset>{t('timeRangeHint')}</Block>
 
-  <List strong inset>
+  <List strong inset class="option-list">
     <ListInput
       label={t('rangeStart')}
       type="text"
@@ -117,20 +117,3 @@
     </div>
   </Toolbar>
 </Page>
-
-<style>
-  :global(.range-error) {
-    color: var(--f7-color-red);
-  }
-
-  :global(.range-toolbar .toolbar-inner) {
-    padding-inline: var(--shadow-action-inset);
-  }
-
-  .range-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px;
-    width: 100%;
-  }
-</style>

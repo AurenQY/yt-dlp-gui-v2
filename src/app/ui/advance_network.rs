@@ -15,6 +15,7 @@ pub(super) fn render_network_section(tui: &mut Tui, state: &mut AppState, label_
         |tui| {
             render_proxy_row(tui, state, label_width);
             render_certificate_row(tui, state, label_width);
+            render_impersonate_row(tui, state, label_width);
             render_cookie_usage_row(tui, state, label_width);
 
             match state.cookie_usage_mode() {
@@ -86,6 +87,20 @@ fn render_certificate_row(tui: &mut Tui, state: &mut AppState, label_width: f32)
             }
         },
     );
+}
+
+fn render_impersonate_row(tui: &mut Tui, state: &mut AppState, label_width: f32) {
+    settings_taffy_form_row(tui, label_width, "--impersonate", |ui| {
+        let mut target = state.tool_paths.impersonate.clone();
+        let response = AppTextBox::new(&mut target)
+            .hint_text("chrome")
+            .language(state.language())
+            .desired_width(semantic_ui_metrics::advance_form_standard_text_field_width())
+            .ui(ui);
+        if response.changed() {
+            state.set_impersonate(target);
+        }
+    });
 }
 
 fn render_cookie_usage_row(tui: &mut Tui, state: &mut AppState, label_width: f32) {

@@ -16,6 +16,7 @@ fn tracked_children() -> &'static Mutex<HashMap<u32, String>> {
 pub struct TrackedChildProcess {
     pid: u32,
     active: bool,
+    diagnostic: super::operation_diagnostics::OperationSpan,
 }
 
 impl Drop for TrackedChildProcess {
@@ -27,28 +28,60 @@ impl Drop for TrackedChildProcess {
             children.remove(&self.pid);
         }
         self.active = false;
+        self.diagnostic
+            .finish("released", serde_json::json!({"childPid": self.pid}));
     }
 }
 
 pub fn track_child_process(child: &Child, label: impl Into<String>) -> TrackedChildProcess {
     let pid = child.id();
+    let label = label.into();
+    let diagnostic = super::operation_diagnostics::OperationSpan::start(
+        "tool.process",
+        serde_json::json!({"toolStage": label, "childPid": pid}),
+    );
     if let Ok(mut children) = tracked_children().lock() {
         children.insert(pid, label.into());
     }
-    TrackedChildProcess { pid, active: true }
+    TrackedChildProcess {
+        pid,
+        active: true,
+        diagnostic,
+    }
 }
 
 pub fn run_tracked_command_output(
     command: &mut Command,
     label: impl Into<String>,
 ) -> io::Result<Output> {
+    let label = label.into();
+    let trace = super::operation_diagnostics::current_trace();
+    let _scope = super::operation_diagnostics::enter(&trace);
+    let mut diagnostic = super::operation_diagnostics::OperationSpan::start(
+        "tool.command",
+        serde_json::json!({"toolStage": label, "command": super::operation_diagnostics::command_context(command)}),
+    );
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let child = command.spawn()?;
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            diagnostic.finish(
+                "spawn-error",
+                serde_json::json!({"errorKind": format!("{:?}", error.kind())}),
+            );
+            return Err(error);
+        }
+    };
     let _guard = track_child_process(&child, label);
-    child.wait_with_output()
+    let result = child.wait_with_output();
+    match &result {
+        Ok(output) => diagnostic.finish(if output.status.success() { "success" } else { "failed" }, serde_json::json!({"exitCode": output.status.code(), "stdoutBytes": output.stdout.len(), "stderrBytes": output.stderr.len()})),
+        Err(error) => diagnostic.finish("io-error", serde_json::json!({"errorKind": format!("{:?}", error.kind())})),
+    }
+    result
 }
 
 pub fn force_cleanup_tracked_processes() {

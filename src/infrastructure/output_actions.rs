@@ -1,6 +1,45 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Open a web URL using the operating system's default browser.
+///
+/// The current eframe build disables its default features (including `links`),
+/// so `egui::Context::open_url` only records an output request; there is no
+/// enabled egui-winit browser handler to consume it. Reuse the existing native
+/// shell opener instead of adding another browser dependency or changing the
+/// locked Cargo dependency graph.
+pub fn open_external_url(url: &str) -> Result<(), String> {
+    let url = url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) || url.contains('\0') {
+        return Err("Only valid HTTP(S) URLs can be opened".to_owned());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return shell_execute_open(std::ffi::OsStr::new(url));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Command::new("open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open URL: {error}"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open URL: {error}"));
+    }
+    #[cfg(not(any(target_os = "windows", unix)))]
+    {
+        Err("Opening URLs is not supported on this platform".to_owned())
+    }
+}
+
 pub fn output_file_exists(path: &str) -> bool {
     output_path(path).is_file()
 }
@@ -46,13 +85,17 @@ fn output_parent_folder(path: &Path) -> Option<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn open_file_with_system(path: &Path) -> Result<(), String> {
+    shell_execute_open(path.as_os_str())
+}
+
+#[cfg(target_os = "windows")]
+fn shell_execute_open(target: &std::ffi::OsStr) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
 
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    let wide_path = path
-        .as_os_str()
+    let wide_path = target
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
@@ -70,7 +113,7 @@ fn open_file_with_system(path: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Could not open file with the Windows shell (ShellExecuteW error {result})."
+            "Could not open target with the Windows shell (ShellExecuteW error {result})."
         ))
     }
 }

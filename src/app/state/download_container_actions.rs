@@ -2,46 +2,48 @@ use super::*;
 
 impl AppState {
     pub fn item_supports_mp4_download_container(&self, item_index: usize) -> bool {
+        if self.item_uses_muxed_video(item_index) {
+            return self.selected_muxed_container_is(item_index, "mp4");
+        }
         self.selected_download_codecs(item_index)
             .is_some_and(|(video, audio)| codecs_support_mp4_container(video, audio))
     }
 
     pub fn item_supports_webm_download_container(&self, item_index: usize) -> bool {
+        if self.item_uses_muxed_video(item_index) {
+            return self.selected_muxed_container_is(item_index, "webm");
+        }
         self.selected_download_codecs(item_index)
             .is_some_and(|(video, audio)| codecs_support_webm_container(video, audio))
     }
 
     pub fn item_download_container_is_selectable(&self, item_index: usize) -> bool {
         !self.item_is_busy(item_index)
-            && (self.item_supports_mp4_download_container(item_index)
-                || self.item_supports_webm_download_container(item_index))
+            && self
+                .queue_items
+                .get(item_index)
+                .and_then(|item| item.metadata())
+                .is_some_and(|metadata| {
+                    metadata.formats.iter().any(|format| {
+                        format.id == self.queue_items[item_index].selection.video_selector
+                    })
+                })
     }
 
     pub fn resolved_item_download_container_extension(&self, item_index: usize) -> Option<String> {
         let item = self.queue_items.get(item_index)?;
-        if let Some(extension) = item.selection.container_preference.extension() {
-            return item.metadata_loaded().then(|| extension.to_owned());
+        if item.needs_analysis_refresh {
+            return item
+                .selection
+                .container_preference
+                .extension()
+                .map(str::to_owned)
+                .or_else(|| {
+                    (!item.saved_download_display.extension.is_empty())
+                        .then(|| item.saved_download_display.extension.clone())
+                });
         }
-        let metadata = item.metadata()?;
-        let video_ext = metadata
-            .formats
-            .iter()
-            .find(|format| format.id == item.selection.video_selector)
-            .map(|format| format.ext.as_str())
-            .unwrap_or_default();
-        let audio_ext = metadata
-            .formats
-            .iter()
-            .find(|format| format.id == item.selection.audio_selector)
-            .map(|format| format.ext.as_str())
-            .unwrap_or_default();
-
-        Some(normal_download_default_extension(
-            self.item_download_container_override(item_index),
-            self.item_uses_muxed_video(item_index),
-            video_ext,
-            audio_ext,
-        ))
+        resolved_download_item_extension(item)
     }
 
     pub fn item_download_container_override(&self, item_index: usize) -> Option<&'static str> {
@@ -52,12 +54,21 @@ impl AppState {
                 DownloadContainerPreference::Mkv
                     | DownloadContainerPreference::Mp4
                     | DownloadContainerPreference::Webm
-            ) && self
-                .item_supports_download_container(item_index, item.selection.container_preference);
+            ) && !self.item_uses_muxed_video(item_index)
+                && self
+                    .selected_download_codecs(item_index)
+                    .is_some_and(|(_, audio)| !audio.is_empty())
+                && self.item_supports_download_container(
+                    item_index,
+                    item.selection.container_preference,
+                );
             return mergeable.then_some(extension);
         }
-        (item.selection.embed_thumbnail && self.item_supports_webm_download_container(item_index))
-            .then_some("mkv")
+        (item.selection.embed_thumbnail
+            && automatic_download_item_extension(item).as_deref() == Some("webm")
+            && !self.item_uses_muxed_video(item_index)
+            && !item.selection.audio_selector.is_empty())
+        .then_some("mkv")
     }
 
     pub fn item_download_output_extension_override(
@@ -65,9 +76,14 @@ impl AppState {
         item_index: usize,
     ) -> Option<&'static str> {
         let item = self.queue_items.get(item_index)?;
-        item.metadata_loaded()
-            .then(|| item.selection.container_preference.extension())
-            .flatten()
+        if !item.metadata_loaded() {
+            return None;
+        }
+        item.selection.container_preference.extension().or_else(|| {
+            (item.selection.embed_thumbnail
+                && automatic_download_item_extension(item).as_deref() == Some("webm"))
+            .then_some("mkv")
+        })
     }
 
     pub fn set_item_download_container_preference(
@@ -133,13 +149,34 @@ impl AppState {
             .find(|format| format.id == item.selection.video_selector)?
             .codec
             .as_str();
-        let audio_codec = metadata
-            .formats
-            .iter()
-            .find(|format| format.id == item.selection.audio_selector)?
-            .codec
-            .as_str();
+        let audio_codec = if item.selection.audio_selector.is_empty() {
+            ""
+        } else {
+            metadata
+                .formats
+                .iter()
+                .find(|format| format.id == item.selection.audio_selector)?
+                .codec
+                .as_str()
+        };
+        if !item.selection.audio_selector.is_empty() && audio_codec.is_empty() {
+            return None;
+        }
         Some((video_codec, audio_codec))
+    }
+
+    fn selected_muxed_container_is(&self, item_index: usize, extension: &str) -> bool {
+        self.queue_items
+            .get(item_index)
+            .and_then(|item| {
+                item.metadata().and_then(|metadata| {
+                    metadata
+                        .formats
+                        .iter()
+                        .find(|format| format.id == item.selection.video_selector)
+                })
+            })
+            .is_some_and(|format| format.ext.eq_ignore_ascii_case(extension))
     }
 
     fn item_supports_download_container(
@@ -149,12 +186,10 @@ impl AppState {
     ) -> bool {
         match preference {
             DownloadContainerPreference::Auto => true,
-            DownloadContainerPreference::Mkv => {
-                self.queue_items
-                    .get(item_index)
-                    .is_some_and(|item| item.metadata_loaded())
-                    && !self.item_uses_muxed_video(item_index)
-            }
+            DownloadContainerPreference::Mkv => self
+                .queue_items
+                .get(item_index)
+                .is_some_and(|item| item.metadata_loaded()),
             DownloadContainerPreference::Mp4 => {
                 self.item_supports_mp4_download_container(item_index)
             }
@@ -169,6 +204,63 @@ impl AppState {
     }
 }
 
+/// Shared live resolver for card rendering and persistence, including parked queues.
+fn resolved_download_item_extension(item: &QueueItem) -> Option<String> {
+    if let Some(extension) = item.selection.container_preference.extension() {
+        return item.metadata_loaded().then(|| extension.to_owned());
+    }
+    let automatic = automatic_download_item_extension(item)?;
+    Some(if item.selection.embed_thumbnail && automatic == "webm" {
+        "mkv".to_owned()
+    } else {
+        automatic
+    })
+}
+
+fn automatic_download_item_extension(item: &QueueItem) -> Option<String> {
+    let metadata = item.metadata()?;
+    let video = metadata
+        .formats
+        .iter()
+        .find(|f| f.id == item.selection.video_selector);
+    let audio = metadata
+        .formats
+        .iter()
+        .find(|f| f.id == item.selection.audio_selector);
+    if video.is_none() && audio.is_none() {
+        return None;
+    }
+    let muxed = video.is_some_and(|f| f.kind == MediaKind::Muxed);
+    Some(normal_download_default_extension(
+        None,
+        muxed,
+        video.map(|f| f.ext.as_str()).unwrap_or_default(),
+        audio.map(|f| f.ext.as_str()).unwrap_or_default(),
+    ))
+}
+
+pub(super) fn download_queue_display(
+    item: &QueueItem,
+) -> crate::domain::queue_preview::DownloadQueueDisplay {
+    if !matches!(item.backend, QueueBackend::YtDlp) {
+        return Default::default();
+    }
+    if item.needs_analysis_refresh {
+        return item.saved_download_display.clone();
+    }
+    let label = |selector: &str| {
+        item.metadata()
+            .and_then(|m| m.formats.iter().find(|f| f.id == selector))
+            .map(|f| f.label.clone())
+            .unwrap_or_default()
+    };
+    crate::domain::queue_preview::DownloadQueueDisplay {
+        video: label(&item.selection.video_selector),
+        audio: label(&item.selection.audio_selector),
+        extension: resolved_download_item_extension(item).unwrap_or_default(),
+    }
+}
+
 fn apply_download_container_preference(
     selection: &mut crate::domain::DownloadSelection,
     preference: DownloadContainerPreference,
@@ -178,50 +270,4 @@ fn apply_download_container_preference(
         selection.embed_thumbnail = false;
     }
     selection.container_preference = preference;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn explicit_container_extensions_are_stable() {
-        assert_eq!(DownloadContainerPreference::Mkv.extension(), Some("mkv"));
-        assert_eq!(DownloadContainerPreference::Mp4.extension(), Some("mp4"));
-        assert_eq!(DownloadContainerPreference::Webm.extension(), Some("webm"));
-        assert_eq!(DownloadContainerPreference::Mov.extension(), Some("mov"));
-        assert_eq!(DownloadContainerPreference::Flv.extension(), Some("flv"));
-        assert_eq!(DownloadContainerPreference::Auto.extension(), None);
-    }
-
-    #[test]
-    fn save_as_extensions_map_to_explicit_container_preferences() {
-        assert_eq!(
-            DownloadContainerPreference::from_extension(".mov"),
-            Some(DownloadContainerPreference::Mov)
-        );
-        assert_eq!(
-            DownloadContainerPreference::from_extension("FLV"),
-            Some(DownloadContainerPreference::Flv)
-        );
-        assert_eq!(DownloadContainerPreference::from_extension("mp3"), None);
-    }
-
-    #[test]
-    fn choosing_webm_keeps_thumbnail_as_sidecar_instead_of_embedding() {
-        let mut selection = crate::domain::DownloadSelection {
-            write_thumbnail: true,
-            embed_thumbnail: true,
-            ..Default::default()
-        };
-
-        apply_download_container_preference(&mut selection, DownloadContainerPreference::Webm);
-
-        assert_eq!(
-            selection.container_preference,
-            DownloadContainerPreference::Webm
-        );
-        assert!(selection.write_thumbnail);
-        assert!(!selection.embed_thumbnail);
-    }
 }

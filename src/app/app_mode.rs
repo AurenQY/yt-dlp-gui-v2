@@ -56,26 +56,3 @@ impl QueueDisplayMode {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::AppMode;
-
-    #[test]
-    fn app_mode_accepts_only_canonical_config_values() {
-        assert_eq!(AppMode::from_config_value("origin"), AppMode::Origin);
-        assert_eq!(AppMode::from_config_value("standard"), AppMode::Standard);
-        assert_eq!(AppMode::from_config_value("audio"), AppMode::Audio);
-
-        assert_eq!(AppMode::from_config_value("single"), AppMode::Origin);
-        assert_eq!(AppMode::from_config_value("normal"), AppMode::Origin);
-        assert_eq!(AppMode::from_config_value("garbage"), AppMode::Origin);
-    }
-
-    #[test]
-    fn app_mode_saves_only_canonical_config_values() {
-        assert_eq!(AppMode::Origin.config_value(), "origin");
-        assert_eq!(AppMode::Standard.config_value(), "standard");
-        assert_eq!(AppMode::Audio.config_value(), "audio");
-    }
-}

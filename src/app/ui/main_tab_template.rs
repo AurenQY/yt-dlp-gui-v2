@@ -4,7 +4,7 @@ use egui_taffy::{Tui, TuiBuilderLogic as _};
 use crate::app::state::{AppMode, AppState};
 use crate::app::widgets::url_input::app_textbox_single_line_height;
 
-use super::item_card::render_batch_list;
+use super::batch_list_template::show_batch_list;
 use super::main_tab_controls::{MainTabButtonRole, MainTabControls, MainTabTextBoxRole};
 use super::main_tab_music_panel::MusicPlayerPanel;
 use super::main_tab_output_actions::DownloadContainerPicker;
@@ -20,6 +20,7 @@ pub(super) fn render_main_tab(
     state: &mut AppState,
     render_resources: &UiRenderResources,
 ) {
+    state.refresh_url_source_preview(ui.ctx());
     let template = MainTabTemplate::resolve(ui, state, render_resources);
     template.show(ui, state);
 }
@@ -277,20 +278,16 @@ fn show_main_tab_content_body(
 ) {
     match state.app_mode() {
         AppMode::Origin => build_single_mode_item(tui, state, context.row_height),
-        _ => {
-            xaml_taffy_styles::XamlTaffyElement::grow_block().show_fill_ui(tui, |ui| {
-                render_batch_list(
-                    ui,
-                    state,
-                    bottom_safe_area,
-                    context.music_window_material_progress,
-                )
-            });
-        }
+        _ => show_batch_list(
+            tui,
+            state,
+            bottom_safe_area,
+            context.music_window_material_progress,
+        ),
     }
 }
 
-fn main_single_line_row_layout(
+pub(super) fn main_single_line_row_layout(
     ui: &Ui,
     row_height: f32,
 ) -> xaml_taffy_styles::XamlSingleLineRowLayout {

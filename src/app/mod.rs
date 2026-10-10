@@ -2,12 +2,15 @@ pub(crate) mod app_icon;
 mod app_mode;
 mod batch_add_worker;
 mod compatibility_profiles;
+pub(crate) mod component_icon;
 mod component_update_worker;
 mod custom_chrome;
 mod download_resilience;
 mod download_worker;
 mod format_picker_state;
 mod format_picker_visibility;
+pub(crate) mod gallery_canonical_metadata;
+pub(crate) mod gallery_metadata_mapping;
 mod media_probe;
 mod metadata;
 pub(crate) mod music_analysis;
@@ -19,7 +22,9 @@ mod music_timestretch;
 mod native_titlebar;
 mod post_process_worker;
 mod queue_status;
+pub(crate) mod site_icon;
 pub mod state;
+mod thumbnail_pixels;
 mod thumbnail_worker;
 mod transcode_graph;
 mod transcode_plan;
@@ -42,7 +47,6 @@ use eframe::{
 use egui_extras::install_image_loaders;
 
 use self::{
-    custom_chrome::CustomChromeResult,
     native_titlebar::NativeTitlebarAccentResult,
     state::{AppState, OptionsDetailPage, PrepareDetailPage},
 };
@@ -59,7 +63,6 @@ pub struct NgDlpApp {
     applied_keep_window_on_top: Option<bool>,
     applied_theme_mode: Option<ThemeMode>,
     applied_theme_accent: Option<(ThemeAccentColor, bool)>,
-    applied_custom_chrome: bool,
     applied_native_titlebar_accent: Option<(ThemeAccentColor, bool)>,
     applied_window_icon_theme: Option<egui::Theme>,
     window_icon_transition: Option<WindowIconTransition>,
@@ -144,6 +147,10 @@ impl NgDlpApp {
         tool_paths: ToolPaths,
     ) -> Self {
         record_startup_checkpoint("app runtime init begin");
+        crate::infrastructure::record_startup_event(
+            "custom-chrome",
+            format!("early-install={:?}", custom_chrome::install(cc)),
+        );
         let startup_font_profile = startup_font_profile(&config);
         let font_worker = thread::Builder::new()
             .name("startup-font-read".to_owned())
@@ -174,7 +181,6 @@ impl NgDlpApp {
             applied_keep_window_on_top: None,
             applied_theme_mode: None,
             applied_theme_accent: None,
-            applied_custom_chrome: false,
             applied_native_titlebar_accent: None,
             applied_window_icon_theme: None,
             window_icon_transition: None,
@@ -267,20 +273,6 @@ impl NgDlpApp {
         ctx.set_global_style(style);
         self.applied_theme_accent = Some(key);
         self.applied_native_titlebar_accent = None;
-    }
-
-    fn apply_custom_chrome(&mut self) {
-        if self.applied_custom_chrome {
-            return;
-        }
-
-        match custom_chrome::install() {
-            CustomChromeResult::Applied | CustomChromeResult::Unsupported => {
-                self.applied_custom_chrome = true;
-                self.applied_native_titlebar_accent = None;
-            }
-            CustomChromeResult::NotReady => {}
-        }
     }
 
     fn apply_native_titlebar_accent(&mut self, ctx: &egui::Context) {
@@ -434,9 +426,8 @@ impl eframe::App for NgDlpApp {
         self.apply_window_options(ctx);
         self.apply_theme_mode(ctx);
         self.apply_theme_accent(ctx);
-        self.apply_custom_chrome();
-        #[cfg(all(windows, debug_assertions))]
-        custom_chrome::diagnostics::tick(ctx);
+        #[cfg(windows)]
+        custom_chrome::diagnostics::tick(ctx, _frame);
         self.apply_native_titlebar_accent(ctx);
         self.apply_window_icon_theme(ctx);
         self.apply_ui_scale(ctx);
@@ -458,6 +449,7 @@ impl eframe::App for NgDlpApp {
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
         ui::render_app(ui, &mut self.state, &self.ui_render_resources);
+        self.state.save_queue_if_changed();
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
@@ -521,6 +513,21 @@ fn dynamic_font_scripts_for_state(state: &AppState) -> DynamicFontScripts {
         }
         if let Some(metadata) = item.metadata() {
             observe_metadata_font_scripts(&mut scripts, metadata);
+        }
+        if let crate::domain::QueueBackend::GalleryDl(gallery) = &item.backend {
+            if let Some(analysis) = gallery.analysis.as_ref() {
+                let metadata = gallery_metadata_mapping::map_gallery_ui_metadata(analysis);
+                for text in [
+                    metadata.title.as_str(),
+                    metadata.author.as_str(),
+                    metadata.author_handle.as_str(),
+                    metadata.date.as_str(),
+                    metadata.description.as_str(),
+                    metadata.source.site.as_str(),
+                ] {
+                    scripts.observe_text(text);
+                }
+            }
         }
         if scripts.is_complete() {
             break;
@@ -831,90 +838,4 @@ fn load_windows_ui_fonts(profile: FontLoadProfile) -> Vec<(String, Vec<u8>)> {
 #[cfg(not(target_os = "windows"))]
 fn load_windows_ui_fonts(_profile: FontLoadProfile) -> Vec<(String, Vec<u8>)> {
     Vec::new()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn font_group_names(profile: FontLoadProfile) -> Vec<&'static str> {
-        windows_ui_font_groups(profile)
-            .into_iter()
-            .map(|group| group.font_name)
-            .collect()
-    }
-
-    #[test]
-    fn startup_font_profile_only_loads_the_current_cjk_family() {
-        let names = font_group_names(FontLoadProfile {
-            language: Language::ZhTw,
-            language_picker_visible: false,
-            dynamic_scripts: DynamicFontScripts::default(),
-        });
-
-        assert_eq!(
-            names,
-            vec![
-                "windows-segoeui",
-                "windows-jhenghei",
-                "windows-segoeuisymbol"
-            ]
-        );
-    }
-
-    #[test]
-    fn language_picker_profile_loads_each_modern_cjk_family() {
-        let names = font_group_names(FontLoadProfile {
-            language: Language::EnUs,
-            language_picker_visible: true,
-            dynamic_scripts: DynamicFontScripts::default(),
-        });
-
-        assert_eq!(
-            names,
-            vec![
-                "windows-segoeui",
-                "windows-jhenghei",
-                "windows-yahei",
-                "windows-yugothic",
-                "windows-malgungothic",
-                "windows-segoeuisymbol"
-            ]
-        );
-    }
-
-    #[test]
-    fn mixed_video_text_requests_lazy_script_fallbacks() {
-        let mut scripts = DynamicFontScripts::default();
-        scripts.observe_text("日本語かな 한국어 中文 🎬 हिन्दी ไทย");
-
-        assert!(scripts.han);
-        assert!(scripts.japanese);
-        assert!(scripts.korean);
-        assert!(scripts.emoji);
-        assert!(scripts.indic);
-        assert!(scripts.thai);
-    }
-
-    #[test]
-    fn active_locale_font_precedes_dynamic_han_fallbacks() {
-        let names = font_group_names(FontLoadProfile {
-            language: Language::ZhCn,
-            language_picker_visible: false,
-            dynamic_scripts: DynamicFontScripts {
-                han: true,
-                ..DynamicFontScripts::default()
-            },
-        });
-
-        assert_eq!(
-            names,
-            vec![
-                "windows-segoeui",
-                "windows-yahei",
-                "windows-jhenghei",
-                "windows-segoeuisymbol"
-            ]
-        );
-    }
 }

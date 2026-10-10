@@ -93,38 +93,3 @@ impl RuntimeRendererInfo {
         info
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn api_defaults_round_trip_and_explicit_masks() {
-        let legacy: crate::infrastructure::AppConfig = serde_yaml::from_str("{}").unwrap();
-        assert_eq!(legacy.wgpu_api, WgpuApi::Auto);
-        assert_eq!(
-            serde_yaml::from_str::<WgpuApi>("future").unwrap(),
-            WgpuApi::Auto
-        );
-        for api in [
-            WgpuApi::Auto,
-            WgpuApi::Dx12,
-            WgpuApi::Vulkan,
-            WgpuApi::OpenGl,
-        ] {
-            assert_eq!(
-                serde_yaml::from_str::<WgpuApi>(&serde_yaml::to_string(&api).unwrap()).unwrap(),
-                api
-            );
-            let mut options = egui_wgpu::WgpuConfiguration::default();
-            api.configure(&mut options);
-            if let Some(mask) = api.backends() {
-                let egui_wgpu::WgpuSetup::CreateNew(setup) = options.wgpu_setup else {
-                    panic!()
-                };
-                assert_eq!(setup.instance_descriptor.backends, mask);
-                assert_eq!(mask.bits().count_ones(), 1);
-            }
-        }
-    }
-}

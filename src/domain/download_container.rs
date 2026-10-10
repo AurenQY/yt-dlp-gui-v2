@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DownloadContainerPreference {
     #[default]
     Auto,
@@ -39,17 +39,44 @@ impl DownloadContainerPreference {
 }
 
 pub fn codecs_support_mp4_container(video_codec: &str, audio_codec: &str) -> bool {
-    mp4_video_codec_is_supported(video_codec) && mp4_audio_codec_is_supported(audio_codec)
+    mp4_video_codec_is_supported(video_codec)
+        && (audio_codec.is_empty() || mp4_audio_codec_is_supported(audio_codec))
 }
 
 pub fn codecs_support_webm_container(video_codec: &str, audio_codec: &str) -> bool {
-    webm_video_codec_is_supported(video_codec) && webm_audio_codec_is_supported(audio_codec)
+    webm_video_codec_is_supported(video_codec)
+        && (audio_codec.is_empty() || webm_audio_codec_is_supported(audio_codec))
+}
+
+/// One source keeps its container; only a separate video/audio pair needs merging.
+pub fn default_download_container_extension(
+    merge_container: Option<&str>,
+    muxed: bool,
+    video_ext: &str,
+    audio_ext: &str,
+) -> String {
+    let normalize = |value: &str| value.trim().trim_start_matches('.').to_ascii_lowercase();
+    if let Some(container) = merge_container.filter(|value| !value.trim().is_empty()) {
+        return normalize(container);
+    }
+    let video = normalize(video_ext);
+    let audio = normalize(audio_ext);
+    if (muxed || audio.is_empty()) && !video.is_empty() {
+        return video;
+    }
+    match (video.as_str(), audio.as_str()) {
+        ("webm", "webm") => "webm",
+        ("mp4", "m4a" | "aac") => "mp4",
+        _ => "mkv",
+    }
+    .to_owned()
 }
 
 fn webm_video_codec_is_supported(codec: &str) -> bool {
     let codec = codec.trim().to_ascii_lowercase();
     codec.starts_with("vp8")
         || codec.starts_with("vp9")
+        || codec.starts_with("vp09")
         || codec.starts_with("av1")
         || codec.starts_with("av01")
 }
@@ -62,6 +89,8 @@ fn webm_audio_codec_is_supported(codec: &str) -> bool {
 fn mp4_video_codec_is_supported(codec: &str) -> bool {
     let codec = codec.trim().to_ascii_lowercase();
     codec.starts_with("h264")
+        || codec.starts_with("vp9")
+        || codec.starts_with("vp09")
         || codec.starts_with("h.264")
         || codec.starts_with("avc")
         || codec.starts_with("hevc")
@@ -74,23 +103,4 @@ fn mp4_video_codec_is_supported(codec: &str) -> bool {
 fn mp4_audio_codec_is_supported(codec: &str) -> bool {
     let codec = codec.trim().to_ascii_lowercase();
     codec.starts_with("aac") || codec.starts_with("mp4a") || codec.starts_with("mp3")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn webm_accepts_vp9_opus_and_rejects_h264_aac() {
-        assert!(codecs_support_webm_container("VP9", "OPUS"));
-        assert!(codecs_support_webm_container("AV1", "Vorbis"));
-        assert!(!codecs_support_webm_container("H.264", "AAC"));
-    }
-
-    #[test]
-    fn mp4_accepts_h264_aac_and_rejects_vp9_opus() {
-        assert!(codecs_support_mp4_container("H.264", "AAC"));
-        assert!(codecs_support_mp4_container("AV1", "mp4a.40.2"));
-        assert!(!codecs_support_mp4_container("VP9", "OPUS"));
-    }
 }

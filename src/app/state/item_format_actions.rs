@@ -20,6 +20,14 @@ impl AppState {
         self.ui_i18n_text_for_key(queue_item_status_key(item))
     }
     pub fn single_mode_status_lines(&self) -> Vec<(String, String)> {
+        if self
+            .queue_items
+            .first()
+            .is_some_and(|item| matches!(&item.backend, QueueBackend::GalleryDl(_)))
+        {
+            // Gallery feedback lives in its format-area controls, not the right metadata panel.
+            return Vec::new();
+        }
         let Some(item) = self.queue_items.first() else {
             return Vec::new();
         };
@@ -115,7 +123,12 @@ impl AppState {
         })
     }
     pub fn url_input_locked(&self) -> bool {
-        self.is_adding_batch || self.youtube_playlist_prompt.is_some()
+        self.is_adding_batch
+            || self.youtube_playlist_prompt.is_some()
+            || self.gallery_route_pending
+            || self.gallery_downloader_choice_prompt.is_some()
+            || self.gallery_route_prompt.is_some()
+            || self.audio_url_preflight_pending
     }
     pub(super) fn add_single_url_to_batch(&mut self, source: String) {
         if let Err(error) = self.ensure_yt_dlp_ready() {
@@ -164,6 +177,22 @@ impl AppState {
                 )
         }) {
             return ItemTitleVisualState::Pending;
+        }
+
+        // Gallery items do not have yt-dlp's format metadata or completed
+        // video/audio selection. Use their own analysis and download state.
+        if let QueueBackend::GalleryDl(gallery) = &item.backend {
+            if item.last_error.is_some() {
+                return ItemTitleVisualState::Failed;
+            }
+            if item_latest_download_state(item) == Some(WorkflowState::Finished) {
+                return ItemTitleVisualState::Completed;
+            }
+            return if gallery.analysis.is_some() {
+                ItemTitleVisualState::Ready
+            } else {
+                ItemTitleVisualState::Pending
+            };
         }
 
         if item
@@ -401,6 +430,14 @@ impl AppState {
         items
     }
     pub fn open_format_picker(&mut self, target_item_id: usize, kind: FormatPickerKind) {
+        if let Some(item_id) = self.queue_items.get(target_item_id).map(|item| item.id) {
+            if self.refresh_restored_queue_item(
+                item_id,
+                super::queue_reanalysis_actions::QueueRefreshAction::Picker(kind),
+            ) {
+                return;
+            }
+        }
         if kind == FormatPickerKind::Section {
             self.open_download_range_picker(target_item_id);
             return;
@@ -626,6 +663,30 @@ impl AppState {
             return String::new();
         };
 
+        if item.needs_analysis_refresh {
+            let display = match kind {
+                FormatPickerKind::Video => &item.saved_download_display.video,
+                FormatPickerKind::Audio => &item.saved_download_display.audio,
+                _ => "",
+            };
+            if !display.is_empty() {
+                return display.to_owned();
+            }
+            let saved = match kind {
+                FormatPickerKind::Video => &item.selection.video_selector,
+                FormatPickerKind::Audio => &item.selection.audio_selector,
+                FormatPickerKind::Subtitle => &item.selection.subtitle_selector,
+                FormatPickerKind::Section => {
+                    return self.selected_download_section_summary(item_index);
+                }
+            };
+            return if saved.is_empty() {
+                self.ui_i18n_text_for_key("picker.waiting_analysis")
+                    .to_owned()
+            } else {
+                saved.clone()
+            };
+        }
         if !item.metadata_loaded() {
             return self
                 .ui_i18n_text_for_key("picker.waiting_analysis")
@@ -707,8 +768,27 @@ impl AppState {
             return false;
         };
 
-        item.metadata()
-            .is_some_and(|metadata| !metadata.subtitle_tracks.is_empty())
+        (item.needs_analysis_refresh && !item.selection.subtitle_selector.is_empty())
+            || item
+                .metadata()
+                .is_some_and(|metadata| !metadata.subtitle_tracks.is_empty())
+    }
+    pub fn item_shows_audio_format_row(&self, item_index: usize) -> bool {
+        if let Some(item) = self.queue_items.get(item_index) {
+            if item.needs_analysis_refresh {
+                return !item.selection.audio_selector.is_empty()
+                    && item.selection.audio_selector != item.selection.video_selector;
+            }
+        }
+        self.queue_items
+            .get(item_index)
+            .and_then(|item| item.metadata())
+            .is_some_and(|metadata| {
+                metadata
+                    .formats
+                    .iter()
+                    .any(|format| format.kind == MediaKind::Audio)
+            })
     }
     pub fn item_uses_seed_compact_layout(&self, item_index: usize) -> bool {
         self.queue_items
@@ -813,11 +893,22 @@ impl AppState {
             return;
         }
 
+        let extractor_key = json
+            .get("extractor_key")
+            .or_else(|| json.get("extractor"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
         let title = json
             .get("title")
             .and_then(Value::as_str)
             .unwrap_or("Untitled video")
             .to_owned();
+        let source_media_id = json
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned);
         let webpage_url = json
             .get("webpage_url")
             .or_else(|| json.get("original_url"))
@@ -866,6 +957,7 @@ impl AppState {
         });
 
         let metadata = VideoMetadata {
+            extractor_key,
             title: title.clone(),
             channel,
             channel_url,
@@ -909,21 +1001,38 @@ impl AppState {
         let default_file_name = default_file_name_from_title(&title);
 
         if let Some(item_id) = target_item_id {
+            let preserve_selection = self
+                .queue_item_by_id(item_id)
+                .is_some_and(|item| item.needs_analysis_refresh);
             if let Some(item) = self.queue_item_mut_by_id(item_id) {
-                item.title = title.clone();
-                item.thumbnail_hint = "item.thumbnail".to_owned();
-                item.thumbnail_url = metadata.thumbnail_url.clone();
-                item.duration_text = metadata.duration_text.clone();
-                item.metadata_state = MetadataState::Ready(metadata.clone());
-                item.selection
-                    .download_range
-                    .retain_available_chapters(metadata.chapters.len());
-                item.selection.video_selector = default_video.clone();
-                item.selection.audio_selector = default_audio.clone();
-                item.selection.subtitle_selector = default_subtitle.clone();
-                item.selection.subtitle_source = default_subtitle_source;
+                item.source_media_id = source_media_id.clone();
+                if !preserve_selection {
+                    item.title = title.clone();
+                    item.thumbnail_hint = "item.thumbnail".to_owned();
+                    item.thumbnail_url = metadata.thumbnail_url.clone();
+                    item.duration_text = metadata.duration_text.clone();
+                    item.metadata_state = MetadataState::Ready(metadata.clone());
+                    item.selection
+                        .download_range
+                        .retain_available_chapters(metadata.chapters.len());
+                    item.selection.video_selector = default_video.clone();
+                    item.selection.audio_selector = default_audio.clone();
+                    item.selection.subtitle_selector = default_subtitle.clone();
+                    item.selection.subtitle_source = default_subtitle_source;
+                } else {
+                    crate::domain::queue_reanalysis::install_refreshed_video_metadata(
+                        item,
+                        &metadata,
+                        &default_video,
+                        &default_audio,
+                    );
+                }
+                item.needs_analysis_refresh = false;
                 if item.selection.file_name.trim().is_empty() {
-                    item.selection.file_name = default_file_name.clone();
+                    item.selection.file_name = item
+                        .playlist_index
+                        .map(|index| format!("{default_file_name} [{index}]"))
+                        .unwrap_or_else(|| default_file_name.clone());
                 }
                 let run_index = workflow_id
                     .and_then(|workflow_id| {
@@ -941,7 +1050,10 @@ impl AppState {
                         .unwrap_or_else(|| metadata.webpage_url.clone());
                 }
             }
-            if let Some(item_index) = self.queue_item_index_by_id(item_id) {
+            if let Some(item_index) = self
+                .queue_item_index_by_id(item_id)
+                .filter(|_| !preserve_selection)
+            {
                 self.reconcile_item_download_container(item_index);
             }
             if let Some(workflow_id) = workflow_id {
@@ -957,6 +1069,7 @@ impl AppState {
                 .unwrap_or_else(|| self.url_input.trim().to_owned());
             let mut item =
                 QueueItem::new(self.alloc_queue_item_id(), item_source_url, title.clone());
+            item.source_media_id = source_media_id;
             item.selection.quality = self.item_defaults.quality;
             item.selection.write_thumbnail = self.item_defaults.write_thumbnail;
             item.selection.embed_thumbnail = self.item_defaults.embed_thumbnail;

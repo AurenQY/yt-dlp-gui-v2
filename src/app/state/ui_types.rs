@@ -136,13 +136,30 @@ pub enum ThumbnailRenderSource {
     None,
     DirectUrl,
     Loading,
-    Texture(eframe::egui::TextureHandle),
+    Texture(ThumbnailReadyImage),
     Failed(String),
+}
+
+#[derive(Clone)]
+pub struct ThumbnailReadyImage {
+    pub(crate) foreground: eframe::egui::TextureHandle,
+    pub(crate) blurred_background: Option<eframe::egui::TextureHandle>,
+    pub(crate) foreground_ready_at: std::time::Instant,
+    pub(crate) background_ready_at: Option<std::time::Instant>,
+    pub(crate) attempt: u8,
+}
+
+impl std::ops::Deref for ThumbnailReadyImage {
+    type Target = eframe::egui::TextureHandle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.foreground
+    }
 }
 
 pub(super) enum ThumbnailCacheEntry {
     Loading,
-    Ready(eframe::egui::TextureHandle),
+    Ready(ThumbnailReadyImage),
     Failed {
         error: String,
         attempt: u8,
@@ -161,4 +178,5 @@ pub struct YoutubePlaylistPrompt {
 pub enum YoutubePlaylistPromptKind {
     VideoAndPlaylist,
     HighRiskPlaylist,
+    GenericPlaylist,
 }

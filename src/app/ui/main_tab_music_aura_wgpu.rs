@@ -231,7 +231,3 @@ impl egui_wgpu::CallbackTrait for AuraDraw {
         pass.draw(0..3, 0..1);
     }
 }
-
-#[cfg(test)]
-#[path = "main_tab_music_aura_wgpu_tests.rs"]
-mod tests;

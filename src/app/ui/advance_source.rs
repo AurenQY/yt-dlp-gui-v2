@@ -4,6 +4,7 @@ use crate::app::state::AppState;
 
 use super::settings_components::{
     SettingsFormLayout, SettingsSelectOption, settings_section, settings_select_row,
+    settings_toggle_row,
 };
 
 pub(super) fn render_config_source_section(
@@ -42,6 +43,15 @@ pub(super) fn render_config_source_section(
             &options,
         ) {
             state.set_yt_dlp_config_path(path);
+        }
+        if let Some(enabled) = settings_toggle_row(
+            tui,
+            form,
+            state.ui_i18n_text_for_key("advance.analysis"),
+            state.config.force_analysis,
+            state.ui_i18n_text_for_key("advance.force_analysis"),
+        ) {
+            state.set_force_analysis(enabled);
         }
     });
 }

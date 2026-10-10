@@ -29,6 +29,7 @@ function isNestedSelectionPage(page) {
     'smart-select-page',
     'time-range',
     'chapter-range',
+    'gallery-format',
   ].includes(pageName(page));
 }
 
@@ -80,7 +81,7 @@ export function installPopupHostSizing(app) {
     if (!content) return;
 
     const name = pageName(page);
-    if (name === 'detail') {
+    if (name === 'detail' || name === 'gallery-detail') {
       detailPageHeight = naturalPageHeight(content);
       applyHostHeight(detailPageHeight, app);
       return;

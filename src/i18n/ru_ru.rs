@@ -1,5 +1,66 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "Способ выбора диапазона",
+        "gallery.range.time" => "По времени",
+        "gallery.range.posts" => "По числу публикаций",
+        "gallery.range.date" => "Начальная дата (UTC)",
+        "gallery.range.count" => "Число публикаций (положительное целое)",
+        "gallery.range.custom" => "Свой диапазон",
+        "gallery.range.positive" => "Положительное целое",
+        "gallery.range.invalid" => "Введите допустимый диапазон загрузки.",
+        "gallery.range.invalid_date" => "Введите допустимую дату UTC (YYYY-MM-DD).",
+        "gallery.range.help" => "Справка",
+        "gallery.range.title" => "Диапазон загрузки ленты",
+        "gallery.range.time_or_all" => "Выберите период или всё",
+        "gallery.range.latest" => "Последние {count} публикаций",
+        "gallery.range.recent24h" => "Последние 24 часа",
+        "gallery.range.days" => "Последние {days} дней",
+        "gallery.range.since" => "С {date} (UTC)",
+        "gallery.status.finishing" => "Завершение",
+        "gallery.status.waiting" => "Ожидание загрузки",
+        "gallery.status.analyzing" => "Анализ",
+        "gallery.posts_count" => "{count} публикаций",
+        "gallery.media_count" => "{count} медиафайлов",
+        "music.volume" => "Громкость",
+        "gallery.folder_pending" => "Ожидает подтверждения",
+        "gallery.folder_opened" => "Папка открыта.",
+        "gallery.choice.downloader" => "Выберите загрузчик",
+        "gallery.choice.content" => "Выберите содержимое",
+        "gallery.choice.add_title" => "Выберите содержимое для добавления",
+        "gallery.choice.dual_hint" => {
+            "Этот URL поддерживают два загрузчика. Выберите хотя бы один."
+        }
+        "gallery.choice.origin_hint" => {
+            "Выберите содержимое для анализа (классический режим: один тип за раз)."
+        }
+        "gallery.choice.add_hint" => "Выберите содержимое для добавления",
+        "gallery.choice.dual_media" => "Видео и изображения можно добавить вместе.",
+        "gallery.choice.one_required" => "Выберите один загрузчик.",
+        "gallery.choice.tool_required" => "Выберите хотя бы один загрузчик.",
+        "gallery.choice.content_required" => "Выберите содержимое для анализа или добавления.",
+        "gallery.choice.cancelled" => "Выбор отменён.",
+        "gallery.range.help_steps" => "Выберите способ и границы диапазона, затем подтвердите.",
+        "gallery.range.help_multiple" => {
+            "Источник содержит несколько лент. Общий лимит публикаций недоступен; выберите период или всё."
+        }
+        "gallery.range.help_order" => {
+            "Публикации следуют порядку сайта и могут включать закреплённые. При перезапуске поиск начинается сначала, существующие файлы пропускаются."
+        }
+        "gallery.range.help_time" => {
+            "Период определяется датами публикаций. Instagram пропускает старые закреплённые записи и останавливается на обычной записи вне диапазона. Другие источники могут просматривать всю ленту. Отсутствие допустимых дат вызывает ошибку."
+        }
+        "about.core_tools" => "Основные инструменты",
+        "about.extension_tools" => "Дополнительные инструменты",
+        "about.gallery_dl_description" => {
+            "Скачивает галереи изображений и подборки из социальных сетей."
+        }
+        "about.aria2_description" => {
+            "Внешний загрузчик для yt-dlp; скорость зависит от сайта и соединения."
+        }
+        "about.required" => "Обязательно",
+        "about.availability.ready" => "Доступно",
+        "about.availability.missing" => "Не найдено",
+        "advance.use_aria2_external_downloader" => "Использовать aria2 как внешний загрузчик",
         "tab.advanced" => "Расширенные",
         "advance.browser_integration" => "Интеграция с браузером",
         "advance.browser_connection" => "Подключение браузера",
@@ -17,6 +78,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "Сообщение",
         "about.check_updates" => "Проверить обновления",
         "about.update_all" => "Обновить всё",
+        "about.install_dependencies" => "Установить зависимости",
         "about.restart" => "Перезапустить",
         "about.open_release" => "Открыть Release",
         "about.install" => "Установить",
@@ -97,9 +159,11 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.codec" => "Кодек",
         "picker.filter.sample_rate" => "Частота дискретизации",
         "main.missing_yt_dlp_callout" => {
-            "yt-dlp отсутствует. Установите его или выберите yt-dlp.exe в настройках."
+            "yt-dlp отсутствует. Установите его или выберите yt-dlp.exe в разделе О программе."
         }
         "advance.source" => "Источник",
+        "advance.analysis" => "Анализ",
+        "advance.force_analysis" => "Принудительный анализ",
         "advance.config" => "Конфигурация",
         "advance.none" => "Нет",
         "advance.network_access" => "Сеть и доступ",
@@ -186,7 +250,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "Браузер",
         "advance.default" => "По умолчанию",
         "advance.external_downloader" => "Внешний загрузчик",
-        "advance.use_aria2_for_faster_downloads" => "Использовать Aria2 для более быстрых загрузок",
         "advance.download_control" => "Управление загрузкой",
         "advance.concurrent_fragments" => "Одновременные фрагменты",
         "advance.live_streams" => "Прямые трансляции",

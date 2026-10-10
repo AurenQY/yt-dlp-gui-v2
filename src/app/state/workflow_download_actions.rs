@@ -5,7 +5,7 @@ impl AppState {
         let ready_item_ids = self
             .queue_items
             .iter()
-            .filter(|item| !item.source_url.trim().is_empty())
+            .filter(|item| item_can_enter_download_queue(item))
             .filter(|item| match item_latest_download_state(item) {
                 None => true,
                 Some(
@@ -17,30 +17,36 @@ impl AppState {
             .collect::<Vec<_>>();
 
         for item_id in ready_item_ids {
-            let workflow_id = self.alloc_workflow_run_id();
-            let Some(item) = self.queue_item_mut_by_id(item_id) else {
-                continue;
-            };
-            reset_item_for_new_work(item, DownloadTargetKind::Normal);
-            item.completed_selection = None;
-            let mut run = WorkflowRun::new(
-                workflow_id,
-                WorkflowKind::DownloadMedia,
-                ToolKind::YtDlp,
-                WorkflowState::Queued,
-            );
-            run.detail = item.source_url.clone();
-            item.workflows.push(run);
+            self.enqueue_download_ready_item(item_id);
         }
+    }
+
+    pub(super) fn enqueue_download_ready_item(&mut self, item_id: QueueItemId) {
+        let workflow_id = self.alloc_workflow_run_id();
+        let Some(item) = self.queue_item_mut_by_id(item_id) else {
+            return;
+        };
+        reset_item_for_new_work(item, DownloadTargetKind::Normal);
+        item.completed_selection = None;
+        let mut run = WorkflowRun::new(
+            workflow_id,
+            WorkflowKind::DownloadMedia,
+            match &item.backend {
+                QueueBackend::YtDlp => ToolKind::YtDlp,
+                QueueBackend::GalleryDl(_) => ToolKind::Other("gallery-dl".to_owned()),
+            },
+            WorkflowState::Queued,
+        );
+        run.detail = item.source_url.clone();
+        item.workflows.push(run);
     }
 
     pub(super) fn ensure_queue_item_for_url(&mut self, url: &str) -> QueueItemId {
         let source_key = canonical_queue_source_key(url);
-        if let Some(item) = self
-            .queue_items
-            .iter()
-            .find(|item| canonical_queue_source_key(&item.source_url) == source_key)
-        {
+        if let Some(item) = self.queue_items.iter().find(|item| {
+            matches!(&item.backend, QueueBackend::YtDlp)
+                && canonical_queue_source_key(&item.source_url) == source_key
+        }) {
             return item.id;
         }
 
@@ -177,6 +183,14 @@ impl AppState {
     }
 
     pub(super) fn queue_structure_mutation_blocked(&mut self, action: &str) -> bool {
+        if self.gallery_route_pending
+            || self.gallery_downloader_choice_prompt.is_some()
+            || self.gallery_route_prompt.is_some()
+            || self.audio_url_preflight_pending
+        {
+            self.last_action = format!("Finish the URL choice before {action}.");
+            return true;
+        }
         if self.is_adding_batch {
             self.last_action = format!("Wait for batch add to finish before {action}.");
             return true;
@@ -270,6 +284,9 @@ impl AppState {
     }
 
     pub(super) fn start_next_queued_download_after(&mut self, finished_item_id: QueueItemId) {
+        if self.app_mode == AppMode::Origin {
+            return;
+        }
         if self.has_running_download_workflow() {
             return;
         }
@@ -344,9 +361,52 @@ impl AppState {
         }
 
         for workflow_id in workflows {
-            self.request_active_download_stop(workflow_id);
+            let Some(workflow) = self.active_workflows.get(&workflow_id) else {
+                continue;
+            };
+            let (Some(child_handle), Some(cancel_requested)) = (
+                workflow.download_child.clone(),
+                workflow.cancel_requested.clone(),
+            ) else {
+                continue;
+            };
+            // Publish the stopping state immediately. taskkill/child locks must
+            // not block the UI; shutdown cleanup retains its synchronous path.
+            cancel_requested.store(true, Ordering::Relaxed);
+            let post_process = workflow.kind == WorkflowKind::PostProcess;
+            thread::spawn(move || {
+                if post_process {
+                    request_post_process_stop(&child_handle, &cancel_requested);
+                } else {
+                    request_download_stop(&child_handle, &cancel_requested);
+                }
+            });
         }
         self.last_action = "Stopping download...".to_owned();
+    }
+
+    pub fn item_download_stopping(&self, item_id: QueueItemId) -> bool {
+        self.active_workflows.values().any(|workflow| {
+            workflow.item_id == item_id
+                && workflow
+                    .cancel_requested
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        })
+    }
+
+    pub fn item_can_remove(&self, index: usize) -> bool {
+        let Some(item) = self.queue_items.get(index) else {
+            return false;
+        };
+        self.item_has_cancellable_download_workflow(item.id)
+            || (!matches!(
+                item.metadata_state,
+                MetadataState::Running | MetadataState::Queued
+            ) && !item
+                .workflows
+                .iter()
+                .any(|run| run.state == WorkflowState::Running))
     }
 
     pub(super) fn request_active_download_stop(&self, workflow_id: WorkflowRunId) {
@@ -403,7 +463,7 @@ impl AppState {
         let Some(item) = self.queue_items.get(item_index) else {
             return false;
         };
-        if !item.metadata_loaded() || self.item_is_busy(item_index) {
+        if item.needs_analysis_refresh || !item.metadata_loaded() || self.item_is_busy(item_index) {
             return false;
         }
 

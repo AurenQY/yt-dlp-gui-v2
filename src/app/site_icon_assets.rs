@@ -1,0 +1,126 @@
+// Generated from assets/site-icons/catalog.json; do not edit by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SiteIcon {
+    YouTube,
+    X,
+    Instagram,
+    Pixiv,
+    Reddit,
+    Twitch,
+    Bilibili,
+    Vimeo,
+    TikTok,
+    Facebook,
+    Pinterest,
+    SoundCloud,
+    Dailymotion,
+    Tumblr,
+    Bluesky,
+    Mastodon,
+    Spotify,
+}
+pub(super) const SITE_ICONS: &[SiteIcon] = &[
+    SiteIcon::YouTube,
+    SiteIcon::X,
+    SiteIcon::Instagram,
+    SiteIcon::Pixiv,
+    SiteIcon::Reddit,
+    SiteIcon::Twitch,
+    SiteIcon::Bilibili,
+    SiteIcon::Vimeo,
+    SiteIcon::TikTok,
+    SiteIcon::Facebook,
+    SiteIcon::Pinterest,
+    SiteIcon::SoundCloud,
+    SiteIcon::Dailymotion,
+    SiteIcon::Tumblr,
+    SiteIcon::Bluesky,
+    SiteIcon::Mastodon,
+    SiteIcon::Spotify,
+];
+impl SiteIcon {
+    pub(super) fn hosts(self) -> &'static [&'static str] {
+        match self {
+            Self::YouTube => &["youtube.com", "youtu.be", "youtube-nocookie.com"],
+            Self::X => &["x.com", "twitter.com"],
+            Self::Instagram => &["instagram.com"],
+            Self::Pixiv => &["pixiv.net"],
+            Self::Reddit => &["reddit.com", "redd.it"],
+            Self::Twitch => &["twitch.tv"],
+            Self::Bilibili => &["bilibili.com", "b23.tv"],
+            Self::Vimeo => &["vimeo.com"],
+            Self::TikTok => &["tiktok.com"],
+            Self::Facebook => &["facebook.com", "fb.watch"],
+            Self::Pinterest => &["pinterest.com", "pin.it"],
+            Self::SoundCloud => &["soundcloud.com"],
+            Self::Dailymotion => &["dailymotion.com", "dai.ly"],
+            Self::Tumblr => &["tumblr.com"],
+            Self::Bluesky => &["bsky.app"],
+            Self::Mastodon => &["mastodon.social", "mastodon.online"],
+            Self::Spotify => &["spotify.com"],
+        }
+    }
+    pub(super) fn file(self) -> &'static str {
+        match self {
+            Self::YouTube => "youtube.ico",
+            Self::X => "x.png",
+            Self::Instagram => "instagram.png",
+            Self::Pixiv => "pixiv.ico",
+            Self::Reddit => "reddit.svg",
+            Self::Twitch => "twitch.svg",
+            Self::Bilibili => "bilibili.svg",
+            Self::Vimeo => "vimeo.svg",
+            Self::TikTok => "tiktok.svg",
+            Self::Facebook => "facebook.svg",
+            Self::Pinterest => "pinterest.svg",
+            Self::SoundCloud => "soundcloud.svg",
+            Self::Dailymotion => "dailymotion.svg",
+            Self::Tumblr => "tumblr.svg",
+            Self::Bluesky => "bluesky.svg",
+            Self::Mastodon => "mastodon.svg",
+            Self::Spotify => "spotify.svg",
+        }
+    }
+    pub(super) fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::YouTube => include_bytes!("../../assets/site-icons/youtube.ico"),
+            Self::X => include_bytes!("../../assets/site-icons/x.png"),
+            Self::Instagram => include_bytes!("../../assets/site-icons/instagram.png"),
+            Self::Pixiv => include_bytes!("../../assets/site-icons/pixiv.ico"),
+            Self::Reddit => include_bytes!("../../assets/site-icons/reddit.svg"),
+            Self::Twitch => include_bytes!("../../assets/site-icons/twitch.svg"),
+            Self::Bilibili => include_bytes!("../../assets/site-icons/bilibili.svg"),
+            Self::Vimeo => include_bytes!("../../assets/site-icons/vimeo.svg"),
+            Self::TikTok => include_bytes!("../../assets/site-icons/tiktok.svg"),
+            Self::Facebook => include_bytes!("../../assets/site-icons/facebook.svg"),
+            Self::Pinterest => include_bytes!("../../assets/site-icons/pinterest.svg"),
+            Self::SoundCloud => include_bytes!("../../assets/site-icons/soundcloud.svg"),
+            Self::Dailymotion => include_bytes!("../../assets/site-icons/dailymotion.svg"),
+            Self::Tumblr => include_bytes!("../../assets/site-icons/tumblr.svg"),
+            Self::Bluesky => include_bytes!("../../assets/site-icons/bluesky.svg"),
+            Self::Mastodon => include_bytes!("../../assets/site-icons/mastodon.svg"),
+            Self::Spotify => include_bytes!("../../assets/site-icons/spotify.svg"),
+        }
+    }
+    pub(super) fn extractor_prefixes(self) -> &'static [&'static str] {
+        match self {
+            Self::YouTube => &["youtube"],
+            Self::X => &["twitter", "x:"],
+            Self::Instagram => &["instagram"],
+            Self::Pixiv => &["pixiv"],
+            Self::Reddit => &["reddit"],
+            Self::Twitch => &["twitch"],
+            Self::Bilibili => &["bilibili"],
+            Self::Vimeo => &["vimeo"],
+            Self::TikTok => &["tiktok"],
+            Self::Facebook => &["facebook"],
+            Self::Pinterest => &["pinterest"],
+            Self::SoundCloud => &["soundcloud"],
+            Self::Dailymotion => &["dailymotion"],
+            Self::Tumblr => &["tumblr"],
+            Self::Bluesky => &["bluesky"],
+            Self::Mastodon => &["mastodon"],
+            Self::Spotify => &["spotify"],
+        }
+    }
+}

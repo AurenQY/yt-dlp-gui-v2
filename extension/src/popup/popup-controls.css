@@ -1,0 +1,174 @@
+/* Popup-wide control/layout contracts. Colors and metrics come from egui-shadow-theme.css.
+   Pages own markup and actions, never local palettes or Framework7 sizing overrides. */
+.popup-view {
+  --f7-list-item-padding-horizontal: var(--ui-space);
+  --f7-list-item-padding-vertical: 4px;
+  --f7-list-item-min-height: 36px;
+  --f7-list-item-title-font-size: var(--ui-font-size);
+  --f7-list-item-after-font-size: var(--ui-font-size);
+  --f7-input-height: var(--ui-control-height);
+  --f7-input-font-size: var(--ui-font-size);
+  --f7-input-text-color: var(--egui-text);
+  --f7-input-bg-color: var(--egui-extreme);
+  --f7-label-text-color: var(--egui-text-muted);
+  --f7-input-info-text-color: var(--egui-text-muted);
+  --f7-list-chevron-icon-color: var(--egui-link);
+}
+
+/* One action vocabulary for the homepage, detail and generated Smart Select pages. */
+.popup-view .analysis-error-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space);
+  margin-bottom: var(--ui-space);
+}
+.popup-view .segmented .button-active {
+  background: var(--egui-selection);
+  color: var(--egui-selection-text);
+}
+.popup-view .segmented .button-active:hover {
+  background: var(--egui-selection-hover);
+}
+.popup-view a[disabled] { pointer-events: none; cursor: default; opacity: .5; }
+.popup-view .segmented {
+  background: var(--egui-extreme);
+  border: 1px solid var(--egui-border);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+  padding: 2px;
+}
+.popup-view .segmented .button {
+  height: var(--ui-control-height);
+  border-radius: var(--ui-radius);
+  font-size: var(--ui-font-size);
+  color: var(--egui-text);
+}
+.popup-view .segmented .button-active { color: var(--egui-selection-text); }
+.popup-view .segmented .segmented-highlight { display: none; }
+.popup-view .list > ul { background: var(--egui-window); }
+
+/* Detail options have explicit label/value/chevron slots, not absolute alignment fixes. */
+.popup-view .option-list .item-inner {
+  display: grid;
+  grid-template-columns: var(--ui-option-label-width) minmax(0, 1fr) var(--ui-icon-size);
+  gap: var(--ui-space);
+  padding: 4px var(--ui-space);
+  align-items: center;
+}
+.popup-view .option-list .item-title {
+  grid-column: 1;
+  grid-row: 1;
+  color: var(--egui-text-muted);
+  white-space: normal;
+}
+.popup-view .option-list .item-after {
+  grid-column: 2;
+  grid-row: 1;
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--egui-border);
+  border-radius: var(--ui-radius);
+  background: var(--egui-extreme);
+  color: var(--egui-text);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.popup-view .option-list .item-link .item-inner::before {
+  position: static;
+  grid-column: 3;
+  grid-row: 1;
+  margin: 0;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
+  line-height: var(--ui-icon-size);
+  font-size: var(--ui-icon-size);
+}
+.popup-view .option-list .item-link:hover .item-after { border-color: var(--egui-link); }
+.popup-view .format-choice-summary { display: block; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.popup-view .option-list .item-input .item-inner { grid-template-columns: var(--ui-option-label-width) minmax(0, 1fr) var(--ui-icon-size); }
+.popup-view .option-list .item-input .item-label { width: auto; max-width: none; margin: 0; }
+.popup-view .option-list .item-input-wrap { grid-column: 2; min-width: 0; margin: 0; }
+.popup-view .option-list .item-input-wrap input {
+  box-sizing: border-box;
+  border: 1px solid var(--egui-border);
+  border-radius: var(--ui-radius);
+  padding-inline: 6px;
+}
+.popup-view .option-list .item-input-wrap::after { display: none; }
+.popup-view .option-list .item-input-info { position: static; margin-top: 4px; white-space: normal; }
+.popup-view .file-name-option .item-after { padding: 0; border: 0; background: transparent; }
+.file-name-value { display: grid; gap: 4px; min-width: 0; }
+.file-name-editor { display: grid; grid-template-columns: minmax(0, 1fr) var(--ui-control-height); gap: var(--ui-space); align-items: start; padding: 4px 6px; border: 1px solid var(--egui-border); border-radius: var(--ui-radius); background: var(--egui-extreme); }
+.file-name-editor:focus-within { border-color: var(--egui-link); }
+.popup-view .file-name-editor textarea { box-sizing: border-box; width: 100%; height: auto; min-width: 0; min-height: 2.8em; margin: 0; padding: 0; border: 0; background: transparent; color: var(--egui-text); font: inherit; line-height: 1.4; overflow-wrap: anywhere; resize: vertical; }
+@supports (field-sizing: content) {
+  .popup-view .file-name-editor textarea { field-sizing: content; resize: none; }
+}
+.file-name-clear { --action-icon-size: var(--ui-icon-size); display: grid; place-items: center; width: var(--ui-control-height); height: var(--ui-control-height); padding: 0; border: 0; border-radius: var(--ui-radius); background: var(--egui-widget); color: var(--egui-text); }
+.file-name-clear:hover:not(:disabled) { background: var(--egui-widget-hover); }
+.file-name-hint { font-size: 12px; color: var(--egui-text-muted); }
+
+/* Both format selectors use the same compact rows, radio marks and selected surface. */
+.format-grid {
+  --format-columns: 30px minmax(92px, 1.15fr) 48px minmax(104px, 1.35fr) minmax(72px, .9fr);
+  width: 100%;
+  min-width: 0;
+}
+.format-grid.audio-grid {
+  --format-columns: 30px minmax(58px, .75fr) minmax(72px, .9fr) minmax(78px, 1fr) minmax(62px, .7fr) minmax(70px, .8fr);
+}
+.format-header, .format-grid .format-row, .gallery-format-row {
+  display: grid;
+  grid-template-columns: var(--format-columns);
+  align-items: center;
+  min-width: 0;
+  border-bottom: 1px solid var(--egui-border);
+}
+.format-header {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  min-height: 32px;
+  color: var(--egui-text-muted);
+  background: var(--egui-window);
+  font-size: 12px;
+  font-weight: 600;
+}
+.format-grid .format-row, .gallery-format-row {
+  min-height: 36px;
+  color: var(--egui-text);
+  text-decoration: none;
+}
+.format-grid .format-row:hover, .gallery-format-row:hover { background: var(--egui-widget-hover); }
+.format-grid .format-row.selected, .gallery-format-row.selected {
+  background: var(--egui-selection);
+  color: var(--egui-selection-text);
+}
+.gallery-format-choices { --format-columns: 30px minmax(0, 1fr); width: 100%; min-width: 0; }
+.radio-cell { display: grid; place-items: center; }
+.radio-cell input { width: var(--ui-select-size); height: var(--ui-select-size); margin: 0; accent-color: var(--egui-link); pointer-events: none; }
+.format-header > span:not(:first-child), .format-cell { min-width: 0; padding-inline: 5px; }
+.format-cell { overflow: hidden; font-size: var(--ui-font-size); text-overflow: ellipsis; white-space: nowrap; }
+
+/* Range/settings pages share the same toolbar and feedback contracts. */
+.range-toolbar .toolbar-inner, .chapter-range-toolbar .toolbar-inner { padding-inline: var(--shadow-action-inset); }
+.range-actions, .chapter-range-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-space); width: 100%; }
+.range-actions.range-presets { grid-template-columns: repeat(3, minmax(0, 1fr)); width: auto; }
+.popup-view [data-name="chapter-range"] .item-after { font-size: 12px; font-variant-numeric: tabular-nums; }
+.range-error, .error-message { color: var(--f7-color-red); }
+.extension-version { color: var(--egui-text-muted); font-size: 12px; }
+.tool-settings { display: grid; gap: var(--ui-space); }
+.tool-settings-heading { font-weight: 600; }
+.tool-settings-row { display: grid; grid-template-columns: var(--ui-select-size) minmax(0, 1fr) auto; align-items: center; gap: var(--ui-space); cursor: pointer; }
+.tool-settings-row input { width: var(--ui-select-size); height: var(--ui-select-size); margin: 0; accent-color: var(--egui-selection); cursor: inherit; }
+.tool-settings-row:has(input:disabled) { cursor: default; }
+.tool-availability, .tool-settings-hint { color: var(--egui-text-muted); font-size: 12px; }
+.tool-settings-hint { margin: 0; }
+.tool-settings .button { justify-self: start; }
+.tool-settings .preloader { width: var(--ui-icon-size); height: var(--ui-icon-size); }

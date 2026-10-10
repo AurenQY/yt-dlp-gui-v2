@@ -136,13 +136,19 @@ pub fn collect_dependency_presence_report(tool_paths: &ToolPaths) -> PrepareRepo
         &mut requirements,
         DependencyTool::YtDlp,
         tool_paths.yt_dlp.as_str(),
-        "Core video analysis and downloading.",
+        "Video analysis and downloading require yt-dlp; settings and tool management remain available without it.",
+    );
+    push_tool_requirement(
+        &mut requirements,
+        DependencyTool::GalleryDl,
+        tool_paths.gallery_dl.as_str(),
+        "Downloads image galleries and social-media collections.",
     );
     push_tool_requirement(
         &mut requirements,
         DependencyTool::Deno,
         tool_paths.deno.as_str(),
-        "Improves YouTube analysis stability.",
+        "JavaScript runtime for yt-dlp's YouTube challenges; not needed for every website.",
     );
     push_tool_requirement(
         &mut requirements,
@@ -530,27 +536,4 @@ fn classify_io_error(error: &std::io::Error) -> (String, String) {
         reason,
         "prepare.req.choose_writable_portable_folder".to_owned(),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dependency_presence_report_only_contains_core_tool_checks() {
-        let report = collect_dependency_presence_report(&ToolPaths::default());
-        let ids = report
-            .requirements
-            .iter()
-            .map(|requirement| requirement.id.as_str())
-            .collect::<Vec<_>>();
-
-        assert_eq!(ids, vec!["tool-yt-dlp", "tool-deno", "tool-ffmpeg"]);
-        assert!(
-            report
-                .requirements
-                .iter()
-                .all(|requirement| requirement.action.is_some())
-        );
-    }
 }

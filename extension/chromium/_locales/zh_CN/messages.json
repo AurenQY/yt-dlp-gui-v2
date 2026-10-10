@@ -1,4 +1,86 @@
 {
+  "albumNotFound": { "message": "找不到相册。" },
+  "albumExpired": { "message": "相册数据已失效，请从扩展重新打开。" },
+  "albumEmpty": { "message": "相册没有可浏览的项目。" },
+  "galleryPathMissing": { "message": "缺少文件夹与文件名信息，请更新 v2 并重新分析。" },
+  "galleryPathInvalid": { "message": "gallery-dl 的路径无法安全保存到浏览器下载文件夹。" },
+  "mediaPermissionRequired": { "message": "需要允许访问所选媒体的网站才能下载。" },
+  "browserDownloadInterrupted": { "message": "浏览器下载已中断。" },
+  "albumOriginalNoXmp": { "message": "此格式未嵌入 XMP，显示原始内容。" },
+  "albumDownloadAuthorized": { "message": "已取得下载授权，准备下载全部项目…" },
+  "albumActions": { "message": "相册选择与下载" },
+  "albumMedia": { "message": "相册媒体" },
+  "albumGrid": { "message": "对齐式相册" },
+  "post": { "message": "帖子" },
+  "postViewInfo": { "message": "查看帖子信息" },
+  "postInfo": { "message": "帖子信息" },
+  "postCloseInfo": { "message": "关闭帖子信息" },
+  "postEmpty": { "message": "这篇帖子没有文字内容。" },
+  "postOpenOriginal": { "message": "打开原始帖子" },
+  "albumReading": { "message": "读取中…" },
+  "albumReadDone": { "message": "已读取完毕" },
+  "albumReadRetry": { "message": "重试读取" },
+  "albumReadMore": { "message": "继续读取" },
+  "albumReadHint": { "message": "滚动到此处，自动读取后续帖子" },
+  "albumNoMore": { "message": "已没有更多帖子" },
+  "albumProcessingImage": { "message": "处理图片…" },
+  "albumWaiting": { "message": "等待加载" },
+  "albumMutedVideoPreview": { "message": "静音视频预览" },
+  "creatingZip": { "message": "正在创建 ZIP…" },
+  "browserDownloadNoMedia": { "message": "所选范围没有可下载的媒体。" },
+  "browserJobStateFailed": { "message": "无法保存下载任务状态。" },
+  "missingXmpMetadata": { "message": "缺少 XMP 信息，请回到扩展重新分析此网址。" },
+  "timelineRangeMethod": { "message": "范围方式" },
+  "rangePosts": { "message": "按篇数" },
+  "rangeTime": { "message": "按时间" },
+  "rangeSinceChoice": { "message": "指定开始日期（UTC）" },
+  "rangeAll": { "message": "全部" },
+  "rangeCount": { "message": "篇数（正整数）" },
+  "rangeDays": { "message": "最近几天" },
+  "rangeDate": { "message": "开始日期（UTC）" },
+  "rangeInvalid": { "message": "请输入有效的下载范围。" },
+  "rangeRecent24h": { "message": "最近 24 小时" },
+  "zipItemsLimit": { "message": "ZIP 格式最多容纳 65,535 个项目。" },
+  "zipSizeLimit": { "message": "这份 ZIP 超过 4 GiB 上限；请改用下载所选项目。" },
+  "galleryTimelineUpgradeRequired": { "message": "请更新 v2，以支持 timeline 范围与相册续读。" },
+  "timelineReadFailed": { "message": "Timeline 读取失败。" },
+  "albumSelected": { "message": "已选 {count}/{total}" },
+  "albumViewItem": { "message": "放大查看第 {number} 项" },
+  "albumSelectItem": { "message": "选择第 {number} 项" },
+  "albumImage": { "message": "图片 {number}" },
+  "albumProcessingNumber": { "message": "处理图片 {number}…" },
+  "albumPreferencesFailed": { "message": "无法读取相册设置：{message}" },
+  "albumViewerFailed": { "message": "无法打开查看器：{message}" },
+  "browserDownloadFailed": { "message": "浏览器下载失败：{message}" },
+  "processingMedia": { "message": "处理 {current}/{total} · {name}" },
+  "savingMedia": { "message": "下载 {current}/{total} · {name}" },
+  "downloadCompletedXmp": { "message": "完成 {count} 个项目。已保留 XMP 信息。" },
+  "downloadCompletedOriginal": { "message": "完成 {count} 个项目。其中 {unsupported} 个格式不支持 XMP，保留原始内容。" },
+  "browserJobInterrupted": { "message": "后台任务已中断；已交给浏览器的文件可能已完成，请检查下载记录后再重试。" },
+  "timelineReadProgress": { "message": "读取 timeline · 从第 {number} 篇开始…" },
+  "rangeLatest": { "message": "最新 {count} 篇" },
+  "rangeRecentDays": { "message": "最近 {days} 天" },
+  "rangeSince": { "message": "自 {date} 起（UTC）" },
+  "albumSettings": { "message": "相册设置" },
+  "albumWheelOperation": { "message": "滚轮操作" },
+  "albumWheelZoom": { "message": "缩放（默认）" },
+  "albumWheelNavigate": { "message": "上一张／下一张" },
+  "albumWheelHint": { "message": "查看时向上滚为上一张，向下滚为下一张；帖子文字区仍可滚动。" },
+  "albumSettingsFailed": { "message": "无法保存相册设置：{message}" },
+  "analysisTools": { "message": "分析工具" },
+  "analysisToolsHint": { "message": "应用于下次分析。选择和上次检测结果保存在扩展中，打开时不会额外查询 v2。" },
+  "detectTools": { "message": "检测工具" },
+  "toolAvailable": { "message": "可用" },
+  "toolUnavailable": { "message": "未找到" },
+  "toolNotDetected": { "message": "未检测" },
+  "lastToolDetection": { "message": "上次检测：{date}" },
+  "toolDetectionDone": { "message": "工具状态已更新；已有选择不会被覆盖。" },
+  "toolDetectionLegacy": { "message": "此版本 v2 无法报告 gallery-dl 可用性；请更新 v2 以检测两套工具。" },
+  "toolSettingsFailed": { "message": "无法更新工具设置：{message}" },
+  "selectAnalysisTool": { "message": "请在设置中启用至少一个分析工具。" },
+  "summaryVideo": { "message": "视频" },
+  "summaryAudio": { "message": "音频" },
+  "album": { "message": "相册" },
   "extensionName": {
     "message": "yt-dlp-gui"
   },
@@ -53,9 +135,10 @@
   "playlistLimit": {
     "message": "列表分析上限"
   },
-  "playlistLimitCompact": {
-    "message": "最多分析"
+  "ytDlpFetchLimit": {
+    "message": "抓取上限"
   },
+  "ytDlpFetchLimitHint": { "message": "每次 yt-dlp 列表分析最多抓取的项数（1–100）。" },
   "itemsUnit": {
     "message": "项"
   },
@@ -103,6 +186,9 @@
   },
   "fileNameBaseHint": {
     "message": "扩展名由输出格式决定。"
+  },
+  "clearFileName": {
+    "message": "清除文件名"
   },
   "downloadRange": {
     "message": "下载范围"
@@ -272,6 +358,9 @@
   "showFirstItems": {
     "message": "仅显示前 {count} 项"
   },
+  "galleryMediaCount": {
+    "message": "{count} 个媒体"
+  },
   "mediaCountLimit": {
     "message": "{count} 个媒体 · 上限 {limit}"
   },
@@ -287,6 +376,7 @@
   "analysisFailed": {
     "message": "分析失败：{message}"
   },
+  "retryAnalysis": { "message": "重试" },
   "noDownloadableMedia": {
     "message": "此页面没有可下载的视频或音频。"
   },
@@ -493,5 +583,77 @@
   },
   "supportGenericBadge": {
     "message": "通用"
+  },
+  "settings": {
+    "message": "设置"
+  },
+  "saveSiteCookies": {
+    "message": "传送 Cookie 至 yt-dlp-gui 保存"
+  },
+  "saveSiteCookiesHint": {
+    "message": "保存当前网站主域及其所有子域、路径的 Cookie。普通窗口分析、下载向 v2 传送 Cookie 时，会先更新对应存档，再沿用 v2 设置的 Cookie 来源；不必先点击保存。无痕窗口不自动保存。"
+  },
+  "save": {
+    "message": "保存"
+  },
+  "cookieSaveNoPage": {
+    "message": "当前没有可使用的网站。"
+  },
+  "cookieSaveSuccess": {
+    "message": "已保存此网站完整范围的 Cookie。普通窗口向 v2 传送 Cookie 时，也会先更新对应存档。"
+  },
+  "cookieSaveFailed": {
+    "message": "无法保存当前网站的 Cookie。"
+  },
+  "cookieSaveAutoUpdateUnavailable": {
+    "message": "Cookie 已保存，但当前 Native Host 尚未支持自动更新；请更新 v2 后再按一次保存。"
+  },
+  "analysisLaunchGalleryDl": {
+    "message": "运行 gallery-dl"
+  },
+  "browserDownloadDestination": {
+    "message": "由浏览器下载至默认下载文件夹"
+  },
+  "browserDownloadsStarted": {
+    "message": "浏览器已开始下载 {count} 个文件；未能开始 {failed} 个。请在浏览器下载记录中查看结果。"
+  },
+  "browserDownloadUnavailable": {
+    "message": "浏览器下载功能不可用。"
+  },
+  "galleryAnalysisWarning": {
+    "message": "gallery-dl 部分结果：{message}"
+  },
+  "nativeGalleryUpgradeRequired": {
+    "message": "请更新 yt-dlp-gui-v2 程序，才能使用 gallery-dl 分析。"
+  },
+  "openAllPostsInNewTab": {
+    "message": "在新标签页查看全部帖子"
+  },
+  "galleryAlbumOpenFailed": {
+    "message": "无法打开相册"
+  },
+  "galleryDownloadUrlUnavailable": {
+    "message": "无法取得可供 V2 下载的单篇帖子网址"
+  },
+  "nativeGalleryDownloadUpgradeRequired": {
+    "message": "请重新编译并更新 V2 可执行文件，以启用 gallery-dl 下载。"
+  },
+  "galleryDownloadMode": {
+    "message": "下载方式"
+  },
+  "galleryModeV2Direct": {
+    "message": "应用程序下载"
+  },
+  "galleryModeBrowserFiles": {
+    "message": "浏览器下载"
+  },
+  "galleryDownloadChoiceSaveFailed": {
+    "message": "无法保存下载方式：{message}"
+  },
+  "noMatchingExtractor": {
+    "message": "V2 的 JSON 规则中，没有符合这个网址的 yt-dlp 或 gallery-dl 解析器。"
+  },
+  "nativeAnalysisUpgradeRequired": {
+    "message": "请重新编译并更新 V2 可执行文件，才能使用统一网址分析。"
   }
 }

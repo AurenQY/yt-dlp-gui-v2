@@ -1,10 +1,10 @@
 use eframe::egui::{
-    self, Align, Layout, RichText, ScrollArea, Sense, Spinner, TextEdit, TextStyle, TextWrapMode,
-    Ui, WidgetText,
+    self, RichText, Sense, Spinner, TextEdit, TextStyle, TextWrapMode, Ui, WidgetText,
 };
 use egui_extras::{Size, StripBuilder};
-use egui_taffy::{Tui, TuiBuilderLogic as _, taffy, tui};
+use egui_taffy::{Tui, TuiBuilderLogic as _, taffy};
 
+use crate::app::site_icon::{SiteIcon, site_icon_image, yt_dlp_site_icon};
 use crate::app::state::{AppState, FormatPickerKind, ItemTitleVisualState, ThumbnailRenderSource};
 use crate::app::widgets::icon::{AppIcon, icon_image, standard_icon_color};
 use crate::app::widgets::url_input::{accent_blue_for_ui, accent_green_for_ui, accent_red_for_ui};
@@ -12,16 +12,14 @@ use crate::domain::DownloadContainerPreference;
 use crate::infrastructure::DownloadTargetKind;
 
 use super::common::{UiText, cell_label_right};
-use super::item_card_compact::{render_empty_music_compact_item, render_music_queue_item_row};
 pub(super) use super::item_card_output_actions::open_export_dialog;
 use super::item_card_output_actions::{draw_output_action_arrow_button, row_output_action_button};
-use super::item_card_template::{
-    item_card_root_style, item_detail_column_style, item_thumbnail_column_style,
-};
+use super::item_card_template::{item_detail_column_style, item_thumbnail_column_style};
+use super::item_card_thumbnail::paint_thumbnail_image_layers;
 use super::xaml_layout_contracts::{LayoutLength, LayoutSize, SingleLineControlRowContract};
 use super::{semantic_ui_metrics, xaml_taffy_styles};
 
-fn item_card_field_row_contract() -> SingleLineControlRowContract {
+pub(super) fn item_card_field_row_contract() -> SingleLineControlRowContract {
     semantic_ui_metrics::xaml_single_line_control_row_contract_from_height(
         semantic_ui_metrics::item_card_field_row_height(),
     )
@@ -33,7 +31,7 @@ fn item_card_action_icon_button_size_for_row(row: SingleLineControlRowContract) 
     )
 }
 
-fn item_card_action_column_width_for_row(row: SingleLineControlRowContract) -> f32 {
+pub(super) fn item_card_action_column_width_for_row(row: SingleLineControlRowContract) -> f32 {
     item_card_action_icon_button_size_for_row(row).width
 }
 
@@ -84,316 +82,241 @@ fn item_card_layout_size_to_vec2(size: LayoutSize) -> egui::Vec2 {
     egui::vec2(size.width, size.height)
 }
 
-pub(super) fn render_batch_list(
-    ui: &mut Ui,
+pub(super) fn render_video_queue_item(
+    tui: &mut Tui,
     state: &mut AppState,
-    bottom_safe_area: f32,
-    music_window_material_progress: f32,
-) {
-    render_queue_toolbar(ui, state);
-    ui.add_space(ui.spacing().item_spacing.y);
+    index: usize,
+) -> super::batch_list_template::QueueCardActions {
     let mut pending_remove_item_id = None;
     let mut pending_cancel_item_id = None;
     let mut pending_export = None;
+    let item_id = state.queue_items[index].id;
+    let ui = tui.egui_ui();
+    let title = state.item_title_text(index);
+    let title_hover = title.clone();
+    let title_state = state.item_title_visual_state(index);
+    let title_loading = state.item_title_is_loading(index);
+    let site_icon = state.queue_items[index]
+        .metadata()
+        .and_then(|metadata| yt_dlp_site_icon(&metadata.extractor_key));
+    let item_locked = state.item_is_busy(index);
+    let item_cancellable = state.item_has_cancellable_download_workflow(item_id);
+    let video_summary = state.selected_format_summary(index, FormatPickerKind::Video);
+    let audio_summary = state.selected_format_summary(index, FormatPickerKind::Audio);
+    let subtitle_summary = state.selected_format_summary(index, FormatPickerKind::Subtitle);
+    let audio_locked = state.item_uses_muxed_video(index);
+    let use_seed_compact_layout = state.item_uses_seed_compact_layout(index);
+    let show_audio_row = state.item_shows_audio_format_row(index);
+    let show_subtitle_row = state.item_shows_subtitle_row(index);
+    let video_progress = state.item_progress(index, FormatPickerKind::Video);
+    let audio_progress = state.item_progress(index, FormatPickerKind::Audio);
+    let subtitle_progress = state.item_progress(index, FormatPickerKind::Subtitle);
+    let show_av_progress = state.item_av_progress_visible(index);
+    let show_subtitle_progress = state.item_subtitle_progress_visible(index);
+    let show_section_row = state.item_shows_download_section_row(index);
+    let section_summary = state.selected_download_section_summary(index);
+    let item_error_text = state.item_error_text(index);
+    let item_label_width = visible_item_label_width(
+        ui,
+        state,
+        use_seed_compact_layout,
+        show_audio_row,
+        show_subtitle_row,
+        show_section_row,
+    );
 
-    ScrollArea::vertical()
-        .id_salt("batch-item-list")
-        .show(ui, |ui| {
-            if state.queue_items.is_empty() {
-                if state.queue_display_mode_is_audio() {
-                    render_empty_music_compact_item(ui, state, music_window_material_progress);
-                } else {
-                    let empty_item_preview = state.empty_item_preview.clone();
-                    render_empty_batch_item_card(ui, state, &empty_item_preview);
-                }
-                return;
-            }
-
-            for index in 0..state.queue_items.len() {
-                let item_id = state.queue_items[index].id;
-                if state.queue_display_mode_is_audio() {
-                    if let Some(item_id) = render_music_queue_item_row(
-                        ui,
-                        state,
-                        index,
-                        music_window_material_progress,
-                    ) {
-                        pending_remove_item_id = Some(item_id);
-                    }
-                    continue;
-                }
-                let title = state.item_title_text(index);
-                let title_hover = title.clone();
-                let title_state = state.item_title_visual_state(index);
-                let title_loading = state.item_title_is_loading(index);
-                let item_locked = state.item_is_busy(index);
-                let item_cancellable = state.item_has_cancellable_download_workflow(item_id);
-                let video_summary = state.selected_format_summary(index, FormatPickerKind::Video);
-                let audio_summary = state.selected_format_summary(index, FormatPickerKind::Audio);
-                let subtitle_summary =
-                    state.selected_format_summary(index, FormatPickerKind::Subtitle);
-                let audio_locked = state.item_uses_muxed_video(index);
-                let use_seed_compact_layout = state.item_uses_seed_compact_layout(index);
-                let show_subtitle_row = state.item_shows_subtitle_row(index);
-                let video_progress = state.item_progress(index, FormatPickerKind::Video);
-                let audio_progress = state.item_progress(index, FormatPickerKind::Audio);
-                let subtitle_progress = state.item_progress(index, FormatPickerKind::Subtitle);
-                let show_av_progress = state.item_av_progress_visible(index);
-                let show_subtitle_progress = state.item_subtitle_progress_visible(index);
-                let show_section_row = state.item_shows_download_section_row(index);
-                let section_summary = state.selected_download_section_summary(index);
-                let item_error_text = state.item_error_text(index);
-                let item_label_width = visible_item_label_width(
+    super::item_card_template::show_queue_card(
+        tui,
+        ("normal-item-card", item_id),
+        |tui, item_hovered| {
+            super::item_card_template::show_card_thumbnail(tui, site_icon, |ui| {
+                let thumbnail_url = state.item_thumbnail_url(index).to_owned();
+                let thumbnail_hint = state
+                    .localized_thumbnail_hint(state.item_thumbnail_hint(index))
+                    .into_owned();
+                let duration_text = state.item_duration_text(index).to_owned();
+                let thumbnail_source = state.queue_thumbnail_render_source(
+                    ui.ctx(),
+                    item_id,
+                    &[thumbnail_url.clone()],
+                    semantic_ui_metrics::item_card_thumbnail_size(),
+                );
+                row_thumbnail(
                     ui,
                     state,
+                    &thumbnail_url,
+                    &thumbnail_hint,
+                    &duration_text,
+                    thumbnail_source,
+                );
+            });
+
+            tui.style(item_detail_column_style()).add(|tui| {
+                let ui = tui.egui_ui();
+                let header_height =
+                    item_header_height(ui, &title, title_loading, None, ui.available_width());
+                let visible_body_rows = visible_item_body_rows(
                     use_seed_compact_layout,
+                    show_audio_row,
                     show_subtitle_row,
                     show_section_row,
+                    item_error_text.is_some(),
                 );
-
-                ui.set_width(ui.available_width());
-                let hover_memory_id = ui
-                    .id()
-                    .with(("queue-item-hover", state.queue_items[index].id));
-                let item_hovered = ui
-                    .ctx()
-                    .data(|data| data.get_temp::<bool>(hover_memory_id).unwrap_or(false));
-                let group_response = ui.group(|ui| {
-                    let card_width = ui.available_width();
-                    let detail_width =
-                        semantic_ui_metrics::item_card_detail_width_for_card_width(card_width);
-                    let header_height = item_header_height(ui, &title, title_loading, detail_width);
-                    let visible_body_rows = visible_item_body_rows(
-                        use_seed_compact_layout,
-                        show_subtitle_row,
-                        show_section_row,
-                        item_error_text.is_some(),
+                let body_target_height =
+                    semantic_ui_metrics::item_card_body_target_height_for_header_height(
+                        header_height,
                     );
-                    let body_target_height =
-                        semantic_ui_metrics::item_card_body_target_height_for_header_height(
-                            header_height,
-                        );
-                    let body_content_height =
-                        semantic_ui_metrics::item_card_body_content_height_for_visible_row_count(
-                            visible_body_rows,
-                        );
-                    let body_spacer =
-                        semantic_ui_metrics::item_card_body_spacer_height_for_target_and_content(
-                            body_target_height,
-                            body_content_height,
-                        );
-                    let error_color = accent_red_for_ui(ui);
+                let body_content_height =
+                    semantic_ui_metrics::item_card_body_content_height_for_visible_row_count(
+                        visible_body_rows,
+                    );
+                let body_spacer =
+                    semantic_ui_metrics::item_card_body_spacer_height_for_target_and_content(
+                        body_target_height,
+                        body_content_height,
+                    );
+                let error_color = accent_red_for_ui(ui);
 
-                    ui.set_width(card_width);
-                    tui(ui, ui.id().with(("normal-item-card", item_id)))
-                        .reserve_width(card_width)
-                        .style(item_card_root_style())
-                        .show(|tui| {
-                            tui.style(item_thumbnail_column_style()).ui(|ui| {
-                                let thumbnail_url = state.item_thumbnail_url(index).to_owned();
-                                let thumbnail_hint = state
-                                    .localized_thumbnail_hint(state.item_thumbnail_hint(index))
-                                    .into_owned();
-                                let duration_text = state.item_duration_text(index).to_owned();
-                                let thumbnail_source =
-                                    state.thumbnail_render_source_for_url(ui.ctx(), &thumbnail_url);
-                                row_thumbnail(
-                                    ui,
-                                    state,
-                                    &thumbnail_url,
-                                    &thumbnail_hint,
-                                    &duration_text,
-                                    thumbnail_source,
-                                );
-                            });
-
-                            tui.style(item_detail_column_style()).add(|tui| {
-                                if item_header_row(
-                                    tui,
-                                    &title,
-                                    &title_hover,
-                                    title_state,
-                                    title_loading,
-                                    header_height,
-                                    !item_locked || item_cancellable,
-                                    item_hovered,
-                                ) {
-                                    if item_cancellable {
-                                        pending_cancel_item_id = Some(item_id);
-                                    } else {
-                                        pending_remove_item_id = Some(item_id);
-                                    }
-                                }
-                                if !use_seed_compact_layout {
-                                    item_format_summary_row(
-                                        tui,
-                                        item_label_width,
-                                        state.ui_i18n_text_for_key(UiText::VIDEO),
-                                        &state.localize_message(&video_summary),
-                                        video_progress,
-                                        show_av_progress,
-                                        !item_locked,
-                                        state.item_can_export(index, DownloadTargetKind::Video),
-                                        || state.open_format_picker(index, FormatPickerKind::Video),
-                                        || {
-                                            pending_export =
-                                                Some((item_id, DownloadTargetKind::Video))
-                                        },
-                                    );
-                                    item_format_summary_row(
-                                        tui,
-                                        item_label_width,
-                                        state.ui_i18n_text_for_key(UiText::AUDIO),
-                                        &state.localize_message(&audio_summary),
-                                        audio_progress,
-                                        show_av_progress,
-                                        !audio_locked && !item_locked,
-                                        state.item_can_export(index, DownloadTargetKind::Audio),
-                                        || state.open_format_picker(index, FormatPickerKind::Audio),
-                                        || {
-                                            pending_export =
-                                                Some((item_id, DownloadTargetKind::Audio))
-                                        },
-                                    );
-                                    if show_subtitle_row {
-                                        item_format_summary_row(
-                                            tui,
-                                            item_label_width,
-                                            state.ui_i18n_text_for_key(UiText::SUBTITLE),
-                                            &state.localize_message(&subtitle_summary),
-                                            subtitle_progress,
-                                            show_subtitle_progress,
-                                            !item_locked,
-                                            state.item_can_export(
-                                                index,
-                                                DownloadTargetKind::Subtitle,
-                                            ),
-                                            || {
-                                                state.open_format_picker(
-                                                    index,
-                                                    FormatPickerKind::Subtitle,
-                                                )
-                                            },
-                                            || {
-                                                pending_export =
-                                                    Some((item_id, DownloadTargetKind::Subtitle))
-                                            },
-                                        );
-                                    }
-                                    if show_section_row {
-                                        item_download_section_summary_row(
-                                            tui,
-                                            item_label_width,
-                                            state.ui_i18n_text_for_key(UiText::SECTION),
-                                            &state.localize_message(&section_summary),
-                                            !item_locked,
-                                            || {
-                                                state.open_format_picker(
-                                                    index,
-                                                    FormatPickerKind::Section,
-                                                )
-                                            },
-                                        );
-                                    }
-                                }
-                                if let Some(error_text) = item_error_text.as_deref() {
-                                    item_status_message_row(
-                                        tui,
-                                        item_label_width,
-                                        state.ui_i18n_text_for_key("item.error"),
-                                        &state.localize_message(error_text),
-                                        error_color,
-                                    );
-                                }
-                                item_taffy_spacer(tui, body_spacer);
-                                item_file_name_input_row(
-                                    tui,
-                                    state,
-                                    index,
-                                    !item_locked,
-                                    item_label_width,
-                                );
-                            });
-                        });
-                });
-                ui.ctx().data_mut(|data| {
-                    data.insert_temp(hover_memory_id, group_response.response.hovered());
-                });
-            }
-            ui.add_space(bottom_safe_area.max(0.0));
-        });
-
-    if let Some(item_id) = pending_cancel_item_id {
-        state.cancel_item_download(item_id);
-    }
-    if let Some(item_id) = pending_remove_item_id {
-        state.remove_queue_item(item_id);
-    }
-    if let Some((item_id, kind)) = pending_export {
-        open_export_dialog(state, item_id, kind);
+                if item_header_row(
+                    tui,
+                    &title,
+                    &title_hover,
+                    title_state,
+                    title_loading,
+                    None,
+                    header_height,
+                    state.item_can_remove(index),
+                    item_hovered,
+                    item_cancellable,
+                    state.item_download_stopping(item_id),
+                    state.ui_i18n_text_for_key(if state.item_download_stopping(item_id) {
+                        "action.stopping"
+                    } else if item_cancellable {
+                        "action.stop"
+                    } else {
+                        "action.clear"
+                    }),
+                ) {
+                    if item_cancellable {
+                        pending_cancel_item_id = Some(item_id);
+                    } else {
+                        pending_remove_item_id = Some(item_id);
+                    }
+                }
+                if !use_seed_compact_layout {
+                    item_format_summary_row(
+                        tui,
+                        item_label_width,
+                        state.ui_i18n_text_for_key(UiText::VIDEO),
+                        &state.localize_message(&video_summary),
+                        video_progress,
+                        show_av_progress,
+                        !item_locked,
+                        state.item_can_export(index, DownloadTargetKind::Video),
+                        || state.open_format_picker(index, FormatPickerKind::Video),
+                        || pending_export = Some((item_id, DownloadTargetKind::Video)),
+                    );
+                    if show_audio_row {
+                        item_format_summary_row(
+                            tui,
+                            item_label_width,
+                            state.ui_i18n_text_for_key(UiText::AUDIO),
+                            &state.localize_message(&audio_summary),
+                            audio_progress,
+                            show_av_progress,
+                            !audio_locked && !item_locked,
+                            state.item_can_export(index, DownloadTargetKind::Audio),
+                            || state.open_format_picker(index, FormatPickerKind::Audio),
+                            || pending_export = Some((item_id, DownloadTargetKind::Audio)),
+                        );
+                    }
+                    if show_subtitle_row {
+                        item_format_summary_row(
+                            tui,
+                            item_label_width,
+                            state.ui_i18n_text_for_key(UiText::SUBTITLE),
+                            &state.localize_message(&subtitle_summary),
+                            subtitle_progress,
+                            show_subtitle_progress,
+                            !item_locked,
+                            state.item_can_export(index, DownloadTargetKind::Subtitle),
+                            || state.open_format_picker(index, FormatPickerKind::Subtitle),
+                            || pending_export = Some((item_id, DownloadTargetKind::Subtitle)),
+                        );
+                    }
+                    if show_section_row {
+                        item_download_section_summary_row(
+                            tui,
+                            item_label_width,
+                            state.ui_i18n_text_for_key(UiText::SECTION),
+                            &state.localize_message(&section_summary),
+                            !item_locked,
+                            || state.open_format_picker(index, FormatPickerKind::Section),
+                        );
+                    }
+                }
+                if let Some(error_text) = item_error_text.as_deref() {
+                    item_status_message_row(
+                        tui,
+                        item_label_width,
+                        state.ui_i18n_text_for_key("item.error"),
+                        &state.localize_message(error_text),
+                        error_color,
+                    );
+                }
+                item_taffy_spacer(tui, body_spacer);
+                item_file_name_input_row(tui, state, index, !item_locked, item_label_width);
+            });
+        },
+    );
+    super::batch_list_template::QueueCardActions {
+        remove: pending_remove_item_id,
+        cancel: pending_cancel_item_id,
+        export: pending_export,
+        ..Default::default()
     }
 }
 
-fn render_queue_toolbar(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn render_queue_summary(ui: &mut Ui, state: &AppState) {
     let summary = state.queue_summary();
-
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!(
-                "{} {}  {} {}  {} {}  {} {}",
-                state.ui_i18n_text_for_key("item.all"),
-                summary.total,
-                state.ui_i18n_text_for_key("item.queued"),
-                summary.queued,
-                state.ui_i18n_text_for_key("item.done"),
-                summary.completed,
-                state.ui_i18n_text_for_key("item.failed"),
-                summary.failed,
-            ))
-            .strong(),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let response = ui.add_enabled(
-                summary.total > 0,
-                super::common::icon_text_button(
-                    ui,
-                    AppIcon::Eraser,
-                    state.ui_i18n_text_for_key("item.clear_all"),
-                ),
-            );
-            if response.clicked() {
-                state.clear_queue();
-            }
-        });
-    });
+    ui.label(
+        RichText::new(format!(
+            "{} {}  {} {}  {} {}  {} {}",
+            state.ui_i18n_text_for_key("item.all"),
+            summary.total,
+            state.ui_i18n_text_for_key("item.queued"),
+            summary.queued,
+            state.ui_i18n_text_for_key("item.done"),
+            summary.completed,
+            state.ui_i18n_text_for_key("item.failed"),
+            summary.failed,
+        ))
+        .strong(),
+    );
+}
+pub(super) fn render_clear_queue_button(ui: &mut Ui, state: &mut AppState) {
+    let response = ui.add_enabled(
+        !state.queue_items.is_empty(),
+        super::common::icon_text_button(
+            ui,
+            AppIcon::Eraser,
+            state.ui_i18n_text_for_key("item.clear_all"),
+        ),
+    );
+    if response.clicked() {
+        state.clear_queue();
+    }
 }
 
-fn render_empty_batch_item_card(
-    ui: &mut Ui,
+pub(super) fn render_empty_batch_item_card(
+    tui: &mut Tui,
     state: &AppState,
     metadata: &crate::domain::VideoMetadata,
 ) {
-    let item_label_width = visible_item_label_width(ui, state, false, false, false);
-    ui.set_width(ui.available_width());
-    ui.group(|ui| {
-        let card_width = ui.available_width();
-        let detail_width = semantic_ui_metrics::item_card_detail_width_for_card_width(card_width);
-        let header_title = state.ui_i18n_text_for_key("item.add_a_video_url");
-        let header_height = item_header_height(ui, header_title, false, detail_width);
-        let visible_body_rows = 3usize;
-        let body_target_height =
-            semantic_ui_metrics::item_card_body_target_height_for_header_height(header_height);
-        let body_content_height =
-            semantic_ui_metrics::item_card_body_content_height_for_visible_row_count(
-                visible_body_rows,
-            );
-        let body_spacer = semantic_ui_metrics::item_card_body_spacer_height_for_target_and_content(
-            body_target_height,
-            body_content_height,
-        );
-
-        ui.set_width(card_width);
-        ui.horizontal(|ui| {
+    let item_label_width =
+        visible_item_label_width(tui.egui_ui(), state, false, true, false, false);
+    super::item_card_template::show_queue_card(tui, "empty-batch-item-card", |tui, _| {
+        tui.style(item_thumbnail_column_style()).ui(|ui| {
             row_thumbnail(
                 ui,
                 state,
@@ -404,34 +327,48 @@ fn render_empty_batch_item_card(
                 &metadata.duration_text,
                 ThumbnailRenderSource::DirectUrl,
             );
-            ui.add_space(semantic_ui_metrics::item_card_column_gap());
-            ui.vertical(|ui| {
-                ui.set_width(detail_width);
-                let _ = row_item_header(
-                    ui,
-                    header_title,
-                    "",
-                    ItemTitleVisualState::Pending,
-                    false,
-                    header_height,
-                    false,
-                    false,
+        });
+        tui.style(item_detail_column_style()).ui(|ui| {
+            let header_title = state.ui_i18n_text_for_key("item.add_a_video_url");
+            let header_height =
+                item_header_height(ui, header_title, false, None, ui.available_width());
+            let visible_body_rows = 3usize;
+            let body_target_height =
+                semantic_ui_metrics::item_card_body_target_height_for_header_height(header_height);
+            let body_content_height =
+                semantic_ui_metrics::item_card_body_content_height_for_visible_row_count(
+                    visible_body_rows,
                 );
-                row_empty_format_summary(
-                    ui,
-                    item_label_width,
-                    state.ui_i18n_text_for_key(UiText::VIDEO),
-                    state.ui_i18n_text_for_key("item.after_adding_choose_the_video_format_here"),
+            let body_spacer =
+                semantic_ui_metrics::item_card_body_spacer_height_for_target_and_content(
+                    body_target_height,
+                    body_content_height,
                 );
-                row_empty_format_summary(
-                    ui,
-                    item_label_width,
-                    state.ui_i18n_text_for_key(UiText::AUDIO),
-                    state.ui_i18n_text_for_key("item.after_adding_choose_the_audio_format_here"),
-                );
-                ui.add_space(body_spacer);
-                row_empty_file_name_placeholder(ui, state, "", item_label_width);
-            });
+
+            let _ = row_item_header(
+                ui,
+                header_title,
+                "",
+                ItemTitleVisualState::Pending,
+                false,
+                header_height,
+                false,
+                false,
+            );
+            row_empty_format_summary(
+                ui,
+                item_label_width,
+                state.ui_i18n_text_for_key(UiText::VIDEO),
+                state.ui_i18n_text_for_key("item.after_adding_choose_the_video_format_here"),
+            );
+            row_empty_format_summary(
+                ui,
+                item_label_width,
+                state.ui_i18n_text_for_key(UiText::AUDIO),
+                state.ui_i18n_text_for_key("item.after_adding_choose_the_audio_format_here"),
+            );
+            ui.add_space(body_spacer);
+            row_empty_file_name_placeholder(ui, state, "", item_label_width);
         });
     });
 }
@@ -459,7 +396,7 @@ fn row_item_header(
             .size(Size::exact(delete_button_width))
             .horizontal(|mut strip| {
                 strip.cell(|ui| {
-                    row_item_title(ui, title, hover_url, state, loading);
+                    row_item_title(ui, title, hover_url, state, loading, None);
                 });
                 strip.cell(|ui| {
                     ui.vertical(|ui| {
@@ -544,15 +481,19 @@ fn row_empty_file_name_placeholder(ui: &mut Ui, state: &AppState, value: &str, l
     });
 }
 
-fn item_header_row(
+pub(super) fn item_header_row(
     tui: &mut Tui,
     title: &str,
     hover_url: &str,
     state: ItemTitleVisualState,
     loading: bool,
+    site_icon: Option<SiteIcon>,
     row_height: f32,
     delete_enabled: bool,
-    item_hovered: bool,
+    _item_hovered: bool,
+    cancellable: bool,
+    stopping: bool,
+    action_tooltip: &str,
 ) -> bool {
     let delete_button_width = item_card_action_column_width_for_row(item_card_field_row_contract());
     let mut delete_clicked = false;
@@ -560,16 +501,38 @@ fn item_header_row(
     tui.style(item_header_row_style(row_height, delete_button_width))
         .add(|tui| {
             tui.style(item_flex_cell_style()).ui(|ui| {
-                row_item_title(ui, title, hover_url, state, loading);
+                row_item_title(ui, title, hover_url, state, loading, site_icon);
             });
             tui.style(item_fixed_cell_style(delete_button_width))
                 .ui(|ui| {
                     ui.vertical(|ui| {
                         ui.add_space(semantic_ui_metrics::item_card_title_delete_top_padding());
-                        let response = ui.add_enabled(
-                            delete_enabled,
-                            draw_delete_icon_button(delete_button_width, item_hovered),
-                        );
+                        let response = ui
+                            .add_enabled(
+                                if cancellable {
+                                    !stopping
+                                } else {
+                                    delete_enabled
+                                },
+                                egui::Button::image(icon_image(
+                                    if cancellable {
+                                        AppIcon::Stop
+                                    } else {
+                                        AppIcon::WindowClose
+                                    },
+                                    semantic_ui_metrics::item_card_delete_icon_size(),
+                                    if cancellable {
+                                        ui.visuals().text_color()
+                                    } else {
+                                        accent_red_for_ui(ui)
+                                    },
+                                ))
+                                .min_size(egui::vec2(
+                                    delete_button_width,
+                                    ui.spacing().interact_size.y,
+                                )),
+                            )
+                            .on_hover_text(action_tooltip);
                         if response.clicked() {
                             delete_clicked = true;
                         }
@@ -588,18 +551,18 @@ fn item_format_row_style(row_height: f32, action_width: f32) -> taffy::Style {
     item_row_style(row_height, action_width)
 }
 
-fn item_row_style(height: f32, _action_width: f32) -> taffy::Style {
+pub(super) fn item_row_style(height: f32, _action_width: f32) -> taffy::Style {
     xaml_taffy_styles::xaml_fixed_height_row_style(
         SingleLineControlRowContract::new(height),
         semantic_ui_metrics::item_card_detail_column_gap(),
     )
 }
 
-fn item_fixed_cell_style(width: f32) -> taffy::Style {
+pub(super) fn item_fixed_cell_style(width: f32) -> taffy::Style {
     xaml_taffy_styles::xaml_fixed_width_stretch_height_gap_style(width)
 }
 
-fn item_flex_cell_style() -> taffy::Style {
+pub(super) fn item_flex_cell_style() -> taffy::Style {
     xaml_taffy_styles::xaml_flex_spacer_cell_style(SingleLineControlRowContract::new(1.0))
 }
 
@@ -642,13 +605,17 @@ fn draw_delete_icon_button(width: f32, item_hovered: bool) -> impl egui::Widget 
 
 fn visible_item_body_rows(
     use_seed_compact_layout: bool,
+    show_audio_row: bool,
     show_subtitle_row: bool,
     show_section_row: bool,
     show_error_row: bool,
 ) -> usize {
     let mut rows = 1usize;
     if !use_seed_compact_layout {
-        rows += 2;
+        rows += 1;
+        if show_audio_row {
+            rows += 1;
+        }
         if show_subtitle_row {
             rows += 1;
         }
@@ -670,7 +637,13 @@ pub(super) fn item_detail_row_gap() -> f32 {
     semantic_ui_metrics::item_card_detail_row_gap()
 }
 
-fn item_header_height(ui: &Ui, title: &str, loading: bool, available_width: f32) -> f32 {
+pub(super) fn item_header_height(
+    ui: &Ui,
+    title: &str,
+    loading: bool,
+    site_icon: Option<SiteIcon>,
+    available_width: f32,
+) -> f32 {
     let delete_button_width =
         semantic_ui_metrics::item_card_title_delete_button_width_from_current_control_metrics(ui);
     let spinner_width = if loading {
@@ -678,7 +651,13 @@ fn item_header_height(ui: &Ui, title: &str, loading: bool, available_width: f32)
     } else {
         0.0
     };
-    let title_width = (available_width - delete_button_width - spinner_width).max(0.0);
+    let site_icon_width = if site_icon.is_some() {
+        semantic_ui_metrics::item_card_title_site_icon_occupied_width()
+    } else {
+        0.0
+    };
+    let title_width =
+        (available_width - delete_button_width - spinner_width - site_icon_width).max(0.0);
     let title_height =
         measure_two_line_title_height(ui, title, title_width).min(max_two_line_title_height(ui));
     let spinner_height = if loading {
@@ -686,21 +665,29 @@ fn item_header_height(ui: &Ui, title: &str, loading: bool, available_width: f32)
     } else {
         0.0
     };
+    let leading_height = if site_icon.is_some() {
+        spinner_height.max(semantic_ui_metrics::item_card_title_site_icon_size())
+    } else {
+        spinner_height
+    };
 
-    semantic_ui_metrics::item_card_title_height_for_measured_parts(title_height, spinner_height)
+    semantic_ui_metrics::item_card_title_height_for_measured_parts(title_height, leading_height)
 }
 
 pub(super) fn visible_item_label_width(
     ui: &Ui,
     state: &AppState,
     use_seed_compact_layout: bool,
+    show_audio_row: bool,
     show_subtitle_row: bool,
     show_section_row: bool,
 ) -> f32 {
     let mut labels = vec![UiText::FILE_NAME];
     if !use_seed_compact_layout {
         labels.push(UiText::VIDEO);
-        labels.push(UiText::AUDIO);
+        if show_audio_row {
+            labels.push(UiText::AUDIO);
+        }
         if show_subtitle_row {
             labels.push(UiText::SUBTITLE);
         }
@@ -718,6 +705,7 @@ fn row_item_title(
     hover_url: &str,
     state: ItemTitleVisualState,
     loading: bool,
+    site_icon: Option<SiteIcon>,
 ) {
     let color = match state {
         ItemTitleVisualState::Default => ui.visuals().text_color(),
@@ -727,6 +715,42 @@ fn row_item_title(
         ItemTitleVisualState::Failed => accent_red_for_ui(ui),
     };
 
+    if let Some(site_icon) = site_icon {
+        let icon_width = semantic_ui_metrics::item_card_title_site_icon_column_width();
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x =
+                semantic_ui_metrics::item_card_title_site_icon_to_text_gap();
+            StripBuilder::new(ui)
+                .size(Size::exact(icon_width))
+                .size(
+                    Size::remainder().at_least(
+                        semantic_ui_metrics::item_card_zero_remainder_column_minimum_width(),
+                    ),
+                )
+                .horizontal(|mut strip| {
+                    strip.cell(|ui| {
+                        ui.add(site_icon_image(
+                            site_icon,
+                            semantic_ui_metrics::item_card_title_site_icon_size(),
+                        ));
+                    });
+                    strip.cell(|ui| {
+                        row_item_title_without_site_icon(ui, title, hover_url, color, loading);
+                    });
+                });
+        });
+    } else {
+        row_item_title_without_site_icon(ui, title, hover_url, color, loading);
+    }
+}
+
+fn row_item_title_without_site_icon(
+    ui: &mut Ui,
+    title: &str,
+    hover_url: &str,
+    color: egui::Color32,
+    loading: bool,
+) {
     if loading {
         let spinner_width =
             semantic_ui_metrics::item_card_title_spinner_width_from_current_spacing(ui);
@@ -809,7 +833,7 @@ fn max_two_line_title_height(ui: &Ui) -> f32 {
     semantic_ui_metrics::item_card_maximum_two_line_title_height_for_font(ui, item_title_font_id())
 }
 
-fn row_thumbnail(
+pub(super) fn row_thumbnail(
     ui: &mut Ui,
     state: &AppState,
     thumbnail_url: &str,
@@ -822,27 +846,16 @@ fn row_thumbnail(
     let visuals = &ui.style().visuals.widgets.noninteractive;
 
     ui.painter()
+        .rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
+    ui.painter()
         .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Outside);
 
+    if paint_thumbnail_image_layers(ui, rect, &thumbnail_source, thumbnail_url) {
+        paint_duration_badge(ui, rect, duration_text);
+        return;
+    }
+
     match thumbnail_source {
-        ThumbnailRenderSource::Texture(texture) => {
-            ui.painter().image(
-                texture.id(),
-                rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-            paint_duration_badge(ui, rect, duration_text);
-            return;
-        }
-        ThumbnailRenderSource::DirectUrl if !thumbnail_url.is_empty() => {
-            let image = egui::Image::new(thumbnail_url)
-                .fit_to_exact_size(size)
-                .show_loading_spinner(false);
-            image.paint_at(ui, rect);
-            paint_duration_badge(ui, rect, duration_text);
-            return;
-        }
         ThumbnailRenderSource::Loading => {
             paint_thumbnail_placeholder(
                 ui,
@@ -854,7 +867,9 @@ fn row_thumbnail(
         ThumbnailRenderSource::Failed(_error) => {
             paint_thumbnail_placeholder(ui, rect, thumbnail_hint, visuals.fg_stroke.color);
         }
-        ThumbnailRenderSource::None | ThumbnailRenderSource::DirectUrl => {
+        ThumbnailRenderSource::None
+        | ThumbnailRenderSource::DirectUrl
+        | ThumbnailRenderSource::Texture(_) => {
             paint_thumbnail_placeholder(ui, rect, thumbnail_hint, visuals.fg_stroke.color);
         }
     }
@@ -871,7 +886,7 @@ fn paint_thumbnail_placeholder(ui: &Ui, rect: egui::Rect, text: &str, color: egu
     );
 }
 
-fn paint_duration_badge(ui: &Ui, rect: egui::Rect, duration_text: &str) {
+pub(super) fn paint_duration_badge(ui: &Ui, rect: egui::Rect, duration_text: &str) {
     let text = duration_text.trim();
     if text.is_empty() {
         return;
@@ -954,6 +969,11 @@ fn draw_picker_summary(
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(desired_size, sense);
+    let response = if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    };
     let visuals = ui.style().interact(&response);
     let fill_ratio = if show_progress {
         (progress / 100.0).clamp(0.0, 1.0)
@@ -973,6 +993,12 @@ fn draw_picker_summary(
     };
 
     let corner_radius = semantic_ui_metrics::item_card_field_corner_radius();
+    let border =
+        if response.hovered() || response.is_pointer_button_down_on() || response.has_focus() {
+            visuals.bg_stroke
+        } else {
+            ui.visuals().widgets.noninteractive.bg_stroke
+        };
     ui.painter().rect_filled(rect, corner_radius, bg_fill);
     if fill_width > 0.0 {
         ui.painter()
@@ -982,7 +1008,7 @@ fn draw_picker_summary(
         rect,
         corner_radius,
         egui::Color32::TRANSPARENT,
-        visuals.bg_stroke,
+        border,
         egui::StrokeKind::Outside,
     );
 

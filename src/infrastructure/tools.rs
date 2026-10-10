@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "windows")]
@@ -9,15 +8,13 @@ use std::os::raw::c_void;
 use std::process::{Command, Stdio};
 #[cfg(target_os = "windows")]
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::cookie_site_index::read_cookie_site_index;
-use super::process_guard::{
-    force_cleanup_tracked_processes, run_tracked_command_output, track_child_process,
-};
+use super::process_guard::run_tracked_command_output;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -107,6 +104,7 @@ impl CacheLocationMode {
 pub struct DownloadRequest {
     pub target_kind: DownloadTargetKind,
     pub url: String,
+    pub playlist_index: Option<usize>,
     pub format_selector: String,
     pub video_selector: String,
     pub audio_selector: String,
@@ -178,10 +176,16 @@ pub enum DownloadTargetKind {
     Subtitle,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ResolvedCookieSource {
+    File(PathBuf),
+    Browser(String),
+}
+
 #[derive(Clone)]
 pub struct ToolPaths {
-    pub native_cookie_override: Option<PathBuf>,
     pub yt_dlp: String,
+    pub gallery_dl: String,
     pub yt_dlp_config: String,
     pub ffmpeg: String,
     pub aria2c: String,
@@ -198,6 +202,7 @@ pub struct ToolPaths {
     pub proxy_enabled: bool,
     pub proxy_url: String,
     pub no_check_certificates: bool,
+    pub impersonate: String,
     pub limit_rate: String,
     pub download_sections: String,
     pub chapter_compatibility_mode: bool,
@@ -207,8 +212,8 @@ pub struct ToolPaths {
 impl Default for ToolPaths {
     fn default() -> Self {
         Self {
-            native_cookie_override: None,
             yt_dlp: ".\\tools\\yt-dlp\\yt-dlp.exe".to_owned(),
+            gallery_dl: ".\\tools\\gallery-dl\\gallery-dl.exe".to_owned(),
             yt_dlp_config: String::new(),
             ffmpeg: ".\\tools\\ffmpeg\\ffmpeg.exe".to_owned(),
             aria2c: ".\\tools\\aria2c\\aria2c.exe".to_owned(),
@@ -225,6 +230,7 @@ impl Default for ToolPaths {
             proxy_enabled: false,
             proxy_url: String::new(),
             no_check_certificates: false,
+            impersonate: String::new(),
             limit_rate: String::new(),
             download_sections: String::new(),
             chapter_compatibility_mode: true,
@@ -244,6 +250,12 @@ fn apply_analyze_playlist_scope(command: &mut Command, playlist_item_limit: Opti
     }
 }
 
+fn apply_download_playlist_index_arg(command: &mut Command, playlist_index: Option<usize>) {
+    if let Some(index) = playlist_index.filter(|index| *index > 0) {
+        command.arg("--playlist-items").arg(index.to_string());
+    }
+}
+
 fn apply_analysis_selection_args(
     command: &mut Command,
     playlist_item_limit: Option<usize>,
@@ -253,14 +265,6 @@ fn apply_analysis_selection_args(
     if let Some(selector) = format_selector.filter(|value| !value.trim().is_empty()) {
         command.arg("-f").arg(selector);
     }
-}
-
-fn apply_streaming_playlist_analysis_args(command: &mut Command, item_limit: usize) {
-    command
-        .arg("--dump-json")
-        .arg("--lazy-playlist")
-        .arg("--no-warnings");
-    apply_analysis_selection_args(command, Some(item_limit.max(1)), None);
 }
 
 impl ToolPaths {
@@ -365,19 +369,39 @@ impl ToolPaths {
         browser_cookie_profiles(&self.browser_cookie_source)
     }
 
-    pub fn prepare_batch_add_command(&self, url: &str) -> Result<Command, String> {
+    pub fn prepare_batch_add_command(
+        &self,
+        url: &str,
+        use_cookies: bool,
+    ) -> Result<Command, String> {
+        self.prepare_playlist_discovery_command(url, use_cookies, None)
+    }
+
+    pub(crate) fn prepare_playlist_discovery_command(
+        &self,
+        url: &str,
+        use_cookies: bool,
+        item_limit: Option<usize>,
+    ) -> Result<Command, String> {
         let tool_path = self.validate_yt_dlp_available()?;
 
         let mut command = Command::new(&tool_path);
         configure_background_command(&mut command);
         self.apply_common_yt_dlp_args(&mut command);
+        self.apply_cookie_args(&mut command, use_cookies, Some(url))?;
         command
             .arg("--flat-playlist")
             .arg("--dump-json")
             .arg("--lazy-playlist")
             .arg("--no-warnings")
-            .arg("--ignore-errors")
-            .arg(url);
+            .arg("--ignore-errors");
+        if let Some(limit) = item_limit {
+            command
+                .arg("--yes-playlist")
+                .arg("--playlist-end")
+                .arg(limit.max(1).to_string());
+        }
+        command.arg(url);
 
         eprintln!(
             "[batch-add] command: {}",
@@ -430,7 +454,53 @@ impl ToolPaths {
             .validate_yt_dlp_available()
             .map_err(|error| AnalyzeError::new(error, None))?;
 
-        self.run_analyze_command(&tool_path, url, use_cookies, None, None)
+        self.run_analyze_command(&tool_path, url, use_cookies, None, None, None)
+    }
+
+    /// Desktop-only classification probe. Native extension workflows stay unchanged.
+    pub(crate) fn prepare_source_probe_command(
+        &self,
+        url: &str,
+        use_cookies: bool,
+    ) -> Result<(Command, String), String> {
+        let tool_path = self.validate_yt_dlp_available()?;
+        let mut command = Command::new(&tool_path);
+        configure_background_command(&mut command);
+        self.apply_common_yt_dlp_args(&mut command);
+        self.apply_cookie_args(&mut command, use_cookies, Some(url))?;
+        self.apply_youtube_extractor_args(&mut command);
+        command
+            .args([
+                "--flat-playlist",
+                "--playlist-end",
+                "2",
+                "--dump-single-json",
+                "--no-warnings",
+                "--skip-download",
+            ])
+            .arg(url);
+        let command_line = format_command_line(&tool_path, &command);
+        Ok((command, command_line))
+    }
+
+    pub(crate) fn analyze_queue_item_detailed(
+        &self,
+        url: &str,
+        use_cookies: bool,
+        playlist_index: Option<usize>,
+    ) -> Result<AnalyzeOutput, AnalyzeError> {
+        if playlist_index.is_none() {
+            return super::yt_dlp_source_analysis::analyze_desktop_source(self, url, use_cookies)
+                .and_then(|output| match output {
+                    super::yt_dlp_source_analysis::DesktopSourceAnalysis::Single(output) => Ok(output),
+                    super::yt_dlp_source_analysis::DesktopSourceAnalysis::Playlist => Err(AnalyzeError::new(
+                        "Saved source is a playlist without an entry index. Import it through Standard Mode Batch instead.", None)),
+                });
+        }
+        let tool_path = self
+            .validate_yt_dlp_available()
+            .map_err(|error| AnalyzeError::new(error, None))?;
+        self.run_analyze_command(&tool_path, url, use_cookies, None, None, playlist_index)
     }
 
     pub fn analyze_playlist_url_detailed(
@@ -439,111 +509,43 @@ impl ToolPaths {
         use_cookies: bool,
         item_limit: usize,
     ) -> Result<AnalyzeOutput, AnalyzeError> {
-        let tool_path = self
-            .validate_yt_dlp_available()
-            .map_err(|error| AnalyzeError::new(error, None))?;
-        self.run_analyze_command(&tool_path, url, use_cookies, None, Some(item_limit.max(1)))
+        let mut items = Vec::new();
+        let summary = self.analyze_playlist_url_streaming_detailed(
+            url,
+            use_cookies,
+            item_limit,
+            &AtomicBool::new(false),
+            |item| {
+                items.push(item);
+                Ok(())
+            },
+        )?;
+        Ok(AnalyzeOutput {
+            json: serde_json::json!({
+                "_type": "playlist", "entries": items,
+                "analysisTruncated": summary.truncated,
+                "analysisWarning": summary.warning,
+            }),
+            command_line: summary.command_line,
+        })
     }
 
-    pub fn analyze_playlist_url_streaming_detailed(
+    pub(crate) fn analyze_playlist_url_streaming_detailed(
         &self,
         url: &str,
         use_cookies: bool,
         item_limit: usize,
         cancelled: &AtomicBool,
-        mut on_item: impl FnMut(Value) -> Result<(), String>,
-    ) -> Result<usize, AnalyzeError> {
-        let tool_path = self
-            .validate_yt_dlp_available()
-            .map_err(|error| AnalyzeError::new(error, None))?;
-        let mut command = Command::new(&tool_path);
-        configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
-        apply_streaming_playlist_analysis_args(&mut command, item_limit);
-        self.apply_cookie_args(&mut command, use_cookies, Some(url))
-            .map_err(|error| AnalyzeError::new(error, None))?;
-        self.apply_youtube_extractor_args(&mut command);
-        command
-            .arg(url)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let command_line = format_command_line(&tool_path, &command);
-        eprintln!("[analyze-stream] command: {command_line}");
-        let mut child = command.spawn().map_err(|error| {
-            AnalyzeError::new(
-                format!("Could not start yt-dlp: {error}"),
-                Some(command_line.clone()),
-            )
-        })?;
-        let _guard = track_child_process(&child, "yt-dlp streaming analysis");
-        if cancelled.load(Ordering::Acquire) {
-            force_cleanup_tracked_processes();
-        }
-        let stdout = child.stdout.take().ok_or_else(|| {
-            AnalyzeError::new(
-                "Could not capture yt-dlp analysis output.",
-                Some(command_line.clone()),
-            )
-        })?;
-        let mut stderr = child.stderr.take().ok_or_else(|| {
-            AnalyzeError::new(
-                "Could not capture yt-dlp analysis errors.",
-                Some(command_line.clone()),
-            )
-        })?;
-        let stderr_reader = std::thread::spawn(move || {
-            let mut value = String::new();
-            let _ = stderr.read_to_string(&mut value);
-            value
-        });
-
-        let mut item_count = 0;
-        for line in BufReader::new(stdout).lines() {
-            let line = line.map_err(|error| {
-                AnalyzeError::new(
-                    format!("Could not read yt-dlp JSON: {error}"),
-                    Some(command_line.clone()),
-                )
-            })?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let item = serde_json::from_str::<Value>(&line).map_err(|error| {
-                AnalyzeError::new(
-                    format!("Could not parse yt-dlp JSON: {error}"),
-                    Some(command_line.clone()),
-                )
-            })?;
-            item_count += 1;
-            if let Err(error) = on_item(item) {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stderr_reader.join();
-                return Err(AnalyzeError::new(error, Some(command_line)));
-            }
-        }
-
-        let status = child.wait().map_err(|error| {
-            AnalyzeError::new(
-                format!("Could not wait for yt-dlp: {error}"),
-                Some(command_line.clone()),
-            )
-        })?;
-        let stderr = stderr_reader.join().unwrap_or_default();
-        if !status.success() {
-            let detail = if stderr.trim().is_empty() {
-                format!("exit code {:?}", status.code())
-            } else {
-                humanize_yt_dlp_error(stderr.trim())
-            };
-            return Err(AnalyzeError::new(
-                format!("yt-dlp analysis failed: {detail}"),
-                Some(command_line),
-            ));
-        }
-        Ok(item_count)
+        on_item: impl FnMut(Value) -> Result<(), String>,
+    ) -> Result<super::yt_dlp_playlist_analysis::PlaylistAnalysisSummary, AnalyzeError> {
+        super::yt_dlp_playlist_analysis::analyze_playlist_formats(
+            self,
+            url,
+            use_cookies,
+            item_limit,
+            cancelled,
+            on_item,
+        )
     }
 
     pub fn analyze_music_stream_url(
@@ -582,6 +584,17 @@ impl ToolPaths {
         use_cookies: bool,
         format_selector: &str,
     ) -> Result<AnalyzeOutput, AnalyzeError> {
+        // A saved/audio source can bypass Add. Do not resolve every creator item
+        // merely to obtain one stream; retain the explicit audio selector below.
+        if matches!(
+            super::yt_dlp_source_analysis::preflight_desktop_source(self, url, use_cookies)?,
+            super::yt_dlp_source_analysis::DesktopSourcePreflight::Playlist
+        ) {
+            return Err(AnalyzeError::new(
+                "Audio playback requires a single track. Import this playlist first.",
+                None,
+            ));
+        }
         let tool_path = self
             .validate_yt_dlp_available()
             .map_err(|error| AnalyzeError::new(error, None))?;
@@ -590,6 +603,7 @@ impl ToolPaths {
             url,
             use_cookies,
             Some(format_selector.trim()).filter(|value| !value.is_empty()),
+            None,
             None,
         )
     }
@@ -820,6 +834,7 @@ impl ToolPaths {
             .arg("--newline")
             .arg("--progress-template")
             .arg("[yt-dlp],%(info.format_id)s,%(progress._percent_str)s,%(progress._eta_str)s,%(progress.downloaded_bytes)s,%(progress.total_bytes)s,%(progress.speed)s,%(progress.eta)s");
+        apply_download_playlist_index_arg(&mut command, request.playlist_index);
 
         if request.target_kind != DownloadTargetKind::Subtitle {
             command
@@ -926,8 +941,9 @@ impl ToolPaths {
 
         let forces_webm_container = request.target_kind == DownloadTargetKind::Normal
             && request
-                .merge_output_container
+                .output_extension_override
                 .as_deref()
+                .or(request.merge_output_container.as_deref())
                 .is_some_and(|container| container.trim().eq_ignore_ascii_case("webm"));
         if forces_webm_container {
             // WebM cannot carry the cover-art attachment used by yt-dlp's
@@ -958,18 +974,12 @@ impl ToolPaths {
         apply_subtitle_download_args(&mut command, request, should_write_subtitles);
 
         if !self.has_explicit_config() {
-            if request.write_chapters && request.target_kind == DownloadTargetKind::Normal {
-                command.arg("--split-chapters");
-                command
-                    .arg("--output")
-                    .arg(chapter_output_argument(&output_plan.final_output_path));
-            }
-
-            if request.write_chapters
-                && request.embed_chapters
-                && request.target_kind != DownloadTargetKind::Subtitle
-            {
-                command.arg("--embed-chapters");
+            if request.target_kind != DownloadTargetKind::Subtitle {
+                super::yt_dlp_chapters::apply_chapter_choices(
+                    &mut command,
+                    request.write_chapters,
+                    request.embed_chapters,
+                );
             }
 
             if request.write_thumbnail && request.embed_thumbnail && !forces_webm_container {
@@ -1014,33 +1024,8 @@ impl ToolPaths {
     }
 
     pub fn validate_cookie_setup(&self, use_cookies: bool) -> Result<(), String> {
-        if self.native_cookie_override.is_some() {
-            return Ok(());
-        }
-        if !use_cookies || self.has_explicit_config() {
-            return Ok(());
-        }
-
-        if self.uses_auto_cookie_source() {
-            return Ok(());
-        }
-
-        if self.uses_cookie_file_source() {
-            if self.cookie_file_path()?.is_some() {
-                return Ok(());
-            }
-            return Err("Cookies are enabled and the cookie source is file, but no valid Netscape cookies.txt is selected.".to_owned());
-        }
-
-        let browser_cookie_arg =
-            cookie_source_argument(&self.browser_cookie_source, &self.browser_cookie_profile);
-        if browser_cookie_arg.trim().is_empty() {
-            return Err(
-                "Cookies are enabled, but no browser or cookies.txt source is selected.".to_owned(),
-            );
-        }
-
-        Ok(())
+        self.resolve_cookie_source(use_cookies, None, true)
+            .map(|_| ())
     }
 
     fn apply_cookie_args(
@@ -1049,40 +1034,62 @@ impl ToolPaths {
         use_cookies: bool,
         url: Option<&str>,
     ) -> Result<(), String> {
-        if let Some(path) = &self.native_cookie_override {
-            command
-                .arg("--no-cookies-from-browser")
-                .arg("--cookies")
-                .arg(path);
-            return Ok(());
+        let source = self.resolve_cookie_source(use_cookies, url, true)?;
+        match source {
+            Some(ResolvedCookieSource::File(path)) => {
+                command.arg("--cookies").arg(path);
+            }
+            Some(ResolvedCookieSource::Browser(browser)) => {
+                command.arg("--cookies-from-browser").arg(browser);
+            }
+            None => {}
         }
-        self.validate_cookie_setup(use_cookies)?;
-        if !use_cookies || self.has_explicit_config() {
-            return Ok(());
+        Ok(())
+    }
+
+    pub(crate) fn resolve_shared_cookie_source(
+        &self,
+        use_cookies: bool,
+        url: Option<&str>,
+    ) -> Result<Option<ResolvedCookieSource>, String> {
+        self.resolve_cookie_source(use_cookies, url, false)
+    }
+
+    fn resolve_cookie_source(
+        &self,
+        use_cookies: bool,
+        url: Option<&str>,
+        explicit_yt_dlp_config_owns_cookies: bool,
+    ) -> Result<Option<ResolvedCookieSource>, String> {
+        if !use_cookies || (explicit_yt_dlp_config_owns_cookies && self.has_explicit_config()) {
+            return Ok(None);
         }
 
         if self.uses_auto_cookie_source() {
-            if let Some(url) = url {
-                if let Some(cookie_file) = auto_cookie_file_for_url(url)? {
-                    command.arg("--cookies").arg(cookie_file);
-                }
-            }
-            return Ok(());
+            return url
+                .map(auto_cookie_file_for_url)
+                .transpose()
+                .map(Option::flatten)
+                .map(|path| path.map(ResolvedCookieSource::File));
         }
 
         if self.uses_cookie_file_source() {
-            if let Some(cookie_file) = self.cookie_file_path()? {
-                command.arg("--cookies").arg(cookie_file);
-            }
-            return Ok(());
+            return self.cookie_file_path()?.map(ResolvedCookieSource::File).map_or_else(
+                || {
+                    Err("Cookies are enabled and the cookie source is file, but no valid Netscape cookies.txt is selected.".to_owned())
+                },
+                |source| Ok(Some(source)),
+            );
         }
 
-        let browser_cookie_arg =
+        let browser =
             cookie_source_argument(&self.browser_cookie_source, &self.browser_cookie_profile);
-        command
-            .arg("--cookies-from-browser")
-            .arg(browser_cookie_arg.trim());
-        Ok(())
+        if browser.trim().is_empty() {
+            return Err(
+                "Cookies are enabled, but no browser or cookies.txt source is selected.".to_owned(),
+            );
+        }
+        Ok(Some(ResolvedCookieSource::Browser(browser)))
     }
 
     fn uses_auto_cookie_source(&self) -> bool {
@@ -1155,6 +1162,10 @@ impl ToolPaths {
             command.arg("--no-check-certificates");
         }
 
+        if !self.impersonate.is_empty() {
+            command.arg("--impersonate").arg(&self.impersonate);
+        }
+
         let ffmpeg_path = resolve_tool_path(&self.ffmpeg);
         if ffmpeg_path.is_file() {
             command.arg("--ffmpeg-location").arg(ffmpeg_path);
@@ -1214,6 +1225,7 @@ impl ToolPaths {
         use_cookies: bool,
         format_selector: Option<&str>,
         playlist_item_limit: Option<usize>,
+        playlist_index: Option<usize>,
     ) -> Result<AnalyzeOutput, AnalyzeError> {
         let mut command = Command::new(tool_path);
         configure_background_command(&mut command);
@@ -1221,6 +1233,7 @@ impl ToolPaths {
         command.arg("--dump-single-json").arg("--no-warnings");
 
         apply_analysis_selection_args(&mut command, playlist_item_limit, format_selector);
+        apply_download_playlist_index_arg(&mut command, playlist_index);
 
         self.apply_cookie_args(&mut command, use_cookies, Some(url))
             .map_err(|error| AnalyzeError::new(error, None))?;
@@ -1238,7 +1251,13 @@ impl ToolPaths {
                 )
             })?;
 
-        if !output.status.success() {
+        // Some extractors return a usable playlist JSON together with a
+        // non-zero status when individual entries fail (Instagram carousels
+        // are one example). Keep the successful entries for the queue path.
+        let partial_playlist = serde_json::from_slice::<Value>(&output.stdout)
+            .ok()
+            .filter(yt_dlp_has_usable_playlist_entries);
+        if !output.status.success() && partial_playlist.is_none() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
             let detail = if !stderr.is_empty() {
@@ -1255,14 +1274,24 @@ impl ToolPaths {
             ));
         }
 
-        let json = serde_json::from_slice::<Value>(&output.stdout).map_err(|error| {
-            AnalyzeError::new(
-                format!("Could not parse yt-dlp JSON: {error}"),
-                Some(command_line.clone()),
-            )
-        })?;
+        let json = partial_playlist
+            .map_or_else(|| serde_json::from_slice::<Value>(&output.stdout), Ok)
+            .map_err(|error| {
+                AnalyzeError::new(
+                    format!("Could not parse yt-dlp JSON: {error}"),
+                    Some(command_line.clone()),
+                )
+            })?;
         Ok(AnalyzeOutput { json, command_line })
     }
+}
+
+fn yt_dlp_has_usable_playlist_entries(json: &Value) -> bool {
+    json.get("_type").and_then(Value::as_str) == Some("playlist")
+        && json
+            .get("entries")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| entries.iter().any(Value::is_object))
 }
 
 pub fn humanize_yt_dlp_error(detail: &str) -> String {
@@ -1740,10 +1769,6 @@ fn chromium_profile_display_names(base_dir: &Path) -> std::collections::HashMap<
     names
 }
 
-pub fn looks_like_playlist_url(url: &str) -> bool {
-    url.contains("list=") || url.contains("/playlist")
-}
-
 pub fn youtube_url_has_video_and_playlist(url: &str) -> bool {
     looks_like_youtube_url(url) && youtube_video_id(url).is_some() && youtube_list_id(url).is_some()
 }
@@ -2050,18 +2075,12 @@ fn determine_expected_container(request: &DownloadRequest) -> String {
         DownloadTargetKind::Normal => {}
     }
 
-    if request.is_muxed_video {
-        return normalized_extension(&request.video_ext).unwrap_or_else(|| "mkv".to_owned());
-    }
-
-    let video_ext = normalized_extension(&request.video_ext);
-    let audio_ext = normalized_extension(&request.audio_ext);
-
-    match (video_ext.as_deref(), audio_ext.as_deref()) {
-        (Some("webm"), Some("webm")) => "webm".to_owned(),
-        (Some("mp4"), Some("m4a" | "aac")) => "mp4".to_owned(),
-        _ => "mkv".to_owned(),
-    }
+    crate::domain::default_download_container_extension(
+        None,
+        request.is_muxed_video,
+        &request.video_ext,
+        &request.audio_ext,
+    )
 }
 
 fn build_explicit_output_plan(
@@ -2123,20 +2142,6 @@ fn output_base_name_with_section_number(base_name: &str, section_count: usize) -
     } else {
         base_name.to_owned()
     }
-}
-
-fn chapter_output_argument(path: &Path) -> String {
-    let parent = path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("chapter");
-    let template = format!("{stem} - %(section_number)03d. %(section_title)s.%(ext)s");
-    format!("chapter:{}", parent.join(template).display())
 }
 
 fn music_chapter_output_argument(output_dir: &Path) -> String {
@@ -2299,378 +2304,6 @@ fn normalized_normal_output_extension(extension: &str) -> Option<String> {
         .filter(|extension| matches!(extension.as_str(), "mkv" | "mp4" | "webm" | "mov" | "flv"))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn analysis_playlist_scope_is_explicit_and_bounded() {
-        let mut current = Command::new("yt-dlp");
-        apply_analyze_playlist_scope(&mut current, None);
-        assert_eq!(command_args(&current), ["--no-playlist"]);
-
-        let mut playlist = Command::new("yt-dlp");
-        apply_analyze_playlist_scope(&mut playlist, Some(33));
-        assert_eq!(
-            command_args(&playlist),
-            ["--yes-playlist", "--playlist-end", "33"]
-        );
-    }
-
-    #[test]
-    fn streaming_playlist_analysis_is_lazy_and_bounded() {
-        let mut command = Command::new("yt-dlp");
-        apply_streaming_playlist_analysis_args(&mut command, 2);
-        assert_eq!(
-            command_args(&command),
-            [
-                "--dump-json",
-                "--lazy-playlist",
-                "--no-warnings",
-                "--yes-playlist",
-                "--playlist-end",
-                "2",
-            ]
-        );
-    }
-
-    #[test]
-    fn generic_analysis_does_not_apply_a_download_format_selector() {
-        let mut generic = Command::new("yt-dlp");
-        apply_analysis_selection_args(&mut generic, None, None);
-        assert_eq!(command_args(&generic), ["--no-playlist"]);
-
-        let mut music = Command::new("yt-dlp");
-        apply_analysis_selection_args(&mut music, None, Some(MUSIC_STREAM_FORMAT_SELECTOR));
-        assert_eq!(
-            command_args(&music),
-            ["--no-playlist", "-f", MUSIC_STREAM_FORMAT_SELECTOR]
-        );
-    }
-
-    fn subtitle_test_request(write_auto_subs: bool, embed_subtitles: bool) -> DownloadRequest {
-        DownloadRequest {
-            target_kind: DownloadTargetKind::Normal,
-            url: "https://example.invalid/video".to_owned(),
-            format_selector: String::new(),
-            video_selector: String::new(),
-            audio_selector: String::new(),
-            is_muxed_video: true,
-            video_ext: "mkv".to_owned(),
-            audio_ext: String::new(),
-            merge_output_container: None,
-            output_extension_override: None,
-            upload_date: String::new(),
-            subtitle_lang: Some("en".to_owned()),
-            subtitle_ext: "vtt".to_owned(),
-            subtitle_source_ext: "vtt".to_owned(),
-            subtitle_url: None,
-            write_auto_subs,
-            subtitle_is_auto_translated: false,
-            write_subtitles: true,
-            embed_subtitles,
-            write_chapters: false,
-            embed_chapters: false,
-            write_thumbnail: false,
-            embed_thumbnail: false,
-            use_cookies: false,
-            use_aria2: false,
-            emit_json: false,
-            output_path: None,
-            output_dir: ".".to_owned(),
-            file_name: "video".to_owned(),
-            download_section_args: Vec::new(),
-        }
-    }
-
-    fn command_args(command: &Command) -> Vec<String> {
-        command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect()
-    }
-
-    #[test]
-    fn music_stream_selector_is_audio_only_without_muxed_fallback() {
-        assert_eq!(
-            MUSIC_STREAM_FORMAT_SELECTOR,
-            "bestaudio[vcodec=none][acodec!=none]"
-        );
-        assert!(!MUSIC_STREAM_FORMAT_SELECTOR.contains("/best"));
-    }
-
-    #[test]
-    fn live_from_start_applies_only_to_media_downloads() {
-        let mut media = Command::new("yt-dlp");
-        apply_live_from_start_arg(&mut media, DownloadTargetKind::Normal, true, false);
-        assert_eq!(command_args(&media), vec!["--live-from-start"]);
-
-        let mut subtitle = Command::new("yt-dlp");
-        apply_live_from_start_arg(&mut subtitle, DownloadTargetKind::Subtitle, true, false);
-        assert!(command_args(&subtitle).is_empty());
-
-        let mut config_owned = Command::new("yt-dlp");
-        apply_live_from_start_arg(&mut config_owned, DownloadTargetKind::Normal, true, true);
-        assert!(command_args(&config_owned).is_empty());
-    }
-
-    #[test]
-    fn multiple_item_ranges_repeat_download_sections_in_timeline_order() {
-        let mut command = Command::new("yt-dlp");
-        let ranges = vec![
-            "*00:00:10-00:00:20".to_owned(),
-            "*00:00:30-00:00:50".to_owned(),
-        ];
-
-        assert!(apply_download_section_args(
-            &mut command,
-            DownloadTargetKind::Normal,
-            &ranges,
-            false,
-        ));
-        assert_eq!(
-            command_args(&command),
-            vec![
-                "--download-sections",
-                "*00:00:10-00:00:20",
-                "--download-sections",
-                "*00:00:30-00:00:50",
-            ]
-        );
-    }
-
-    #[test]
-    fn multiple_item_ranges_add_section_number_to_output_template() {
-        let mut request = subtitle_test_request(false, false);
-        request.target_kind = DownloadTargetKind::Normal;
-        request.subtitle_lang = None;
-        request.video_ext = "mkv".to_owned();
-        request.download_section_args = vec![
-            "*00:00:10-00:00:20".to_owned(),
-            "*00:00:30-00:00:50".to_owned(),
-        ];
-
-        let plan = build_directory_output_plan(&request, Path::new("output"));
-
-        assert!(
-            plan.output_argument
-                .contains("video - %(section_number)02d.mkv")
-        );
-        assert!(
-            plan.final_output_path
-                .ends_with(Path::new("output").join("video.mkv"))
-        );
-    }
-
-    #[test]
-    fn explicit_webm_container_controls_merge_and_expected_output() {
-        let mut request = subtitle_test_request(false, false);
-        request.merge_output_container = Some("webm".to_owned());
-        request.video_ext = "webm".to_owned();
-        request.audio_ext = "webm".to_owned();
-        request.file_name = "video.mkv".to_owned();
-        let plan = build_directory_output_plan(&request, Path::new("output"));
-        assert!(
-            plan.final_output_path
-                .ends_with(Path::new("output").join("video.webm"))
-        );
-
-        let mut command = Command::new("yt-dlp");
-        apply_merge_output_container_arg(
-            &mut command,
-            DownloadTargetKind::Normal,
-            request.merge_output_container.as_deref(),
-        );
-        assert_eq!(
-            command_args(&command),
-            vec!["--merge-output-format", "webm"]
-        );
-    }
-
-    #[test]
-    fn explicit_mp4_container_controls_merge_and_expected_output() {
-        let mut request = subtitle_test_request(false, false);
-        request.merge_output_container = Some("mp4".to_owned());
-        request.video_ext = "mp4".to_owned();
-        request.audio_ext = "m4a".to_owned();
-        request.file_name = "video.mkv".to_owned();
-        let plan = build_directory_output_plan(&request, Path::new("output"));
-        assert!(
-            plan.final_output_path
-                .ends_with(Path::new("output").join("video.mp4"))
-        );
-
-        let mut command = Command::new("yt-dlp");
-        apply_merge_output_container_arg(
-            &mut command,
-            DownloadTargetKind::Normal,
-            request.merge_output_container.as_deref(),
-        );
-        assert_eq!(command_args(&command), vec!["--merge-output-format", "mp4"]);
-    }
-
-    #[test]
-    fn normal_download_ignores_legacy_file_name_extension() {
-        let mut request = subtitle_test_request(false, false);
-        request.video_ext = "mp4".to_owned();
-        request.file_name = "video.webm".to_owned();
-
-        let plan = build_directory_output_plan(&request, Path::new("output"));
-
-        assert!(
-            plan.final_output_path
-                .ends_with(Path::new("output").join("video.mp4"))
-        );
-        assert_eq!(plan.remux_extension, None);
-    }
-
-    #[test]
-    fn normal_download_preserves_non_container_dots_in_base_name() {
-        let mut request = subtitle_test_request(false, false);
-        request.video_ext = "mp4".to_owned();
-        request.file_name = "recording.mp3".to_owned();
-
-        let plan = build_directory_output_plan(&request, Path::new("output"));
-
-        assert!(
-            plan.final_output_path
-                .ends_with(Path::new("output").join("recording.mp3.mp4"))
-        );
-    }
-
-    #[test]
-    fn explicit_mov_output_extension_remuxes_without_using_file_name_as_state() {
-        let mut request = subtitle_test_request(false, false);
-        request.video_ext = "mp4".to_owned();
-        request.file_name = "custom name".to_owned();
-        request.output_extension_override = Some("mov".to_owned());
-
-        let plan = build_directory_output_plan(&request, Path::new("output"));
-
-        assert!(
-            plan.final_output_path
-                .ends_with(Path::new("output").join("custom name.mov"))
-        );
-        assert_eq!(plan.remux_extension.as_deref(), Some("mov"));
-        assert!(plan.output_argument.ends_with("custom name.%(ext)s"));
-    }
-
-    #[test]
-    fn merge_container_is_not_applied_to_standalone_exports() {
-        let mut command = Command::new("yt-dlp");
-        apply_merge_output_container_arg(&mut command, DownloadTargetKind::Video, Some("webm"));
-        assert!(command_args(&command).is_empty());
-
-        apply_merge_output_container_arg(&mut command, DownloadTargetKind::Normal, Some("invalid"));
-        assert!(command_args(&command).is_empty());
-    }
-
-    #[test]
-    fn embedded_normal_subtitles_do_not_request_a_persistent_sidecar() {
-        let request = subtitle_test_request(false, true);
-        let mut command = Command::new("yt-dlp");
-
-        apply_subtitle_download_args(&mut command, &request, true);
-
-        let args = command_args(&command);
-        assert!(args.iter().any(|arg| arg == "--embed-subs"));
-        assert!(!args.iter().any(|arg| arg == "--write-subs"));
-    }
-
-    #[test]
-    fn embedded_auto_subtitles_keep_auto_source_selection_and_embed() {
-        let request = subtitle_test_request(true, true);
-        let mut command = Command::new("yt-dlp");
-
-        apply_subtitle_download_args(&mut command, &request, true);
-
-        let args = command_args(&command);
-        assert!(args.iter().any(|arg| arg == "--write-auto-subs"));
-        assert!(args.iter().any(|arg| arg == "--embed-subs"));
-        assert!(!args.iter().any(|arg| arg == "--write-subs"));
-    }
-
-    #[test]
-    fn downloaded_subtitles_still_request_a_sidecar() {
-        let request = subtitle_test_request(false, false);
-        let mut command = Command::new("yt-dlp");
-
-        apply_subtitle_download_args(&mut command, &request, true);
-
-        let args = command_args(&command);
-        assert!(args.iter().any(|arg| arg == "--write-subs"));
-        assert!(!args.iter().any(|arg| arg == "--embed-subs"));
-    }
-
-    #[test]
-    fn music_album_parse_metadata_args_use_current_yt_dlp_from_to_syntax() {
-        assert_eq!(
-            music_album_parse_metadata_args(),
-            [
-                "%(playlist|)s:%(meta_album)s",
-                "%(playlist_title|)s:%(meta_album)s",
-            ]
-        );
-    }
-
-    #[test]
-    fn music_chapter_output_uses_number_and_chapter_title() {
-        let output = music_chapter_output_argument(Path::new("album"));
-
-        assert!(output.starts_with("chapter:"));
-        assert!(output.contains("%(section_number)02d - %(section_title)s.%(ext)s"));
-    }
-
-    #[test]
-    fn music_chapter_split_args_are_only_added_for_split_output() {
-        let mut full_audio = Command::new("yt-dlp");
-        apply_music_chapter_split_args(&mut full_audio, None);
-        assert!(command_args(&full_audio).is_empty());
-
-        let mut split_audio = Command::new("yt-dlp");
-        apply_music_chapter_split_args(&mut split_audio, Some(Path::new("album")));
-        let chapter_output = music_chapter_output_argument(Path::new("album"));
-        assert_eq!(
-            command_args(&split_audio),
-            vec![
-                "--split-chapters".to_owned(),
-                "--output".to_owned(),
-                chapter_output,
-            ]
-        );
-    }
-
-    #[test]
-    fn v2_cache_mode_keeps_yt_dlp_cache_and_temp_namespaced() {
-        let cache_root = std::env::temp_dir().join(format!(
-            "yt-dlp-gui-v2-cache-args-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        let tool_paths = ToolPaths {
-            cache_mode: CacheLocationMode::V2Cache,
-            cache_dir: cache_root.display().to_string(),
-            ffmpeg: "missing-ffmpeg.exe".to_owned(),
-            deno: "missing-deno.exe".to_owned(),
-            ..ToolPaths::default()
-        };
-        let mut command = Command::new("yt-dlp");
-
-        tool_paths.apply_common_yt_dlp_args(&mut command);
-
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert!(args.windows(2).any(|pair| pair[0] == "--cache-dir"
-            && pair[1] == cache_root.join("yt-dlp").display().to_string()));
-        assert!(args.windows(2).any(|pair| pair[0] == "-P"
-            && pair[1] == format!("temp:{}", cache_root.join("yt-dlp-temp").display())));
-    }
-}
-
 pub fn resolve_tool_path(path: &str) -> PathBuf {
     resolve_support_path(path)
 }
@@ -2717,7 +2350,7 @@ fn current_executable_dir() -> Option<PathBuf> {
         .and_then(|path| path.parent().map(Path::to_path_buf))
 }
 
-fn format_command_line(program: &Path, command: &Command) -> String {
+pub(super) fn format_command_line(program: &Path, command: &Command) -> String {
     let args = command
         .get_args()
         .map(|arg| quote_arg(&arg.to_string_lossy()))

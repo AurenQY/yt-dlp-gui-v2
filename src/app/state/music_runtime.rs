@@ -516,38 +516,6 @@ pub(super) struct CachedLrcTrack {
     pub(super) missing_checked_at: Option<Instant>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct AudioPlaylistSnapshot {
-    pub(super) version: u32,
-    pub(super) items: Vec<AudioPlaylistItemSnapshot>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct AudioPlaylistItemSnapshot {
-    pub(super) source_url: String,
-    pub(super) title: String,
-    #[serde(default)]
-    pub(super) album_title: String,
-    #[serde(default)]
-    pub(super) thumbnail_hint: String,
-    #[serde(default)]
-    pub(super) thumbnail_url: String,
-    #[serde(default)]
-    pub(super) duration_text: String,
-    pub(super) duration_seconds: Option<f64>,
-    #[serde(default)]
-    pub(super) stream_ext: String,
-    #[serde(default)]
-    pub(super) stream_format_id: String,
-    #[serde(default)]
-    pub(super) stream_acodec: String,
-    pub(super) expected_bytes: Option<u64>,
-    #[serde(default)]
-    pub(super) cache_key: String,
-    #[serde(default)]
-    pub(super) use_cookies: bool,
-}
-
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub(super) struct AudioCacheManifestSnapshot {

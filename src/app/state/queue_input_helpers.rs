@@ -152,20 +152,12 @@ pub(super) fn normal_download_default_extension(
     video_ext: &str,
     audio_ext: &str,
 ) -> String {
-    if let Some(extension) = merge_container.and_then(normalized_export_extension) {
-        return extension;
-    }
-    if is_muxed_video {
-        return normalized_export_extension(video_ext).unwrap_or_else(|| "mkv".to_owned());
-    }
-
-    let video_ext = normalized_export_extension(video_ext);
-    let audio_ext = normalized_export_extension(audio_ext);
-    match (video_ext.as_deref(), audio_ext.as_deref()) {
-        (Some("webm"), Some("webm")) => "webm".to_owned(),
-        (Some("mp4"), Some("m4a" | "aac")) => "mp4".to_owned(),
-        _ => "mkv".to_owned(),
-    }
+    crate::domain::default_download_container_extension(
+        merge_container,
+        is_muxed_video,
+        video_ext,
+        audio_ext,
+    )
 }
 
 pub(super) fn normalized_origin_save_target(
@@ -250,10 +242,11 @@ pub(super) fn validate_export_extension(
 pub(super) fn flat_music_entries_from_url(
     tool_paths: ToolPaths,
     source: &str,
+    use_cookies: bool,
     untitled_task: &str,
     imported_template: &str,
 ) -> Result<Vec<PlaylistEntrySeed>, String> {
-    let mut command = tool_paths.prepare_batch_add_command(source)?;
+    let mut command = tool_paths.prepare_batch_add_command(source, use_cookies)?;
     command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

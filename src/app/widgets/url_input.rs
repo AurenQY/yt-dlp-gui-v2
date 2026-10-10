@@ -45,6 +45,7 @@ pub struct AppTextBox<'a> {
     language: Language,
     syntax: AppTextBoxSyntax,
     error: bool,
+    progress_background: Option<f32>,
     desired_width: Option<f32>,
     desired_height: Option<f32>,
     min_rows: usize,
@@ -52,6 +53,9 @@ pub struct AppTextBox<'a> {
     allow_newline: bool,
     ctrl_click_links: bool,
     tag_link_base_url: Option<String>,
+    trailing_label: Option<&'a str>,
+    leading_image: Option<egui::Image<'static>>,
+    trailing_icons: Vec<(AppIcon, Color32)>,
 }
 
 pub struct DisplayPathInput<'a> {
@@ -150,6 +154,22 @@ impl<'a> UrlSyntaxInput<'a> {
 }
 
 impl<'a> AppTextBox<'a> {
+    pub fn leading_image(mut self, image: Option<egui::Image<'static>>) -> Self {
+        self.leading_image = image;
+        self
+    }
+
+    /// Ordered left-to-right adornments with width reserved by the field layout.
+    pub fn trailing_icons(mut self, icons: Vec<(AppIcon, Color32)>) -> Self {
+        self.trailing_icons = icons;
+        self
+    }
+    /// Read-only trailing adornment owned by the text-box layout, not an overlay.
+    pub fn trailing_label(mut self, label: &'a str) -> Self {
+        self.trailing_label = (!label.is_empty()).then_some(label);
+        self
+    }
+
     pub fn new(text: &'a mut String) -> Self {
         Self {
             text,
@@ -160,6 +180,7 @@ impl<'a> AppTextBox<'a> {
             language: Language::ZhTw,
             syntax: AppTextBoxSyntax::Plain,
             error: false,
+            progress_background: None,
             desired_width: None,
             desired_height: None,
             min_rows: 1,
@@ -167,6 +188,9 @@ impl<'a> AppTextBox<'a> {
             allow_newline: false,
             ctrl_click_links: false,
             tag_link_base_url: None,
+            trailing_label: None,
+            leading_image: None,
+            trailing_icons: Vec::new(),
         }
     }
 
@@ -202,6 +226,12 @@ impl<'a> AppTextBox<'a> {
 
     pub fn error(mut self, enabled: bool) -> Self {
         self.error = enabled;
+        self
+    }
+
+    /// A non-interactive fill behind the existing text editor, in the same field.
+    pub fn progress_background(mut self, progress: Option<f32>) -> Self {
+        self.progress_background = progress.map(|value| value.clamp(0.0, 1.0));
         self
     }
 
@@ -334,6 +364,7 @@ impl Widget for AppTextBox<'_> {
             language,
             syntax,
             error,
+            progress_background,
             desired_width,
             desired_height,
             min_rows,
@@ -341,9 +372,20 @@ impl Widget for AppTextBox<'_> {
             allow_newline,
             ctrl_click_links,
             tag_link_base_url,
+            trailing_label,
+            leading_image,
+            trailing_icons,
         } = self;
+        let adorned =
+            trailing_label.is_some() || leading_image.is_some() || !trailing_icons.is_empty();
+        // Capture identity at the field boundary, before optional icon/layout
+        // children consume auto IDs. Adornment changes must not recreate editor
+        // focus, cursor/selection or horizontal-scroll state.
+        let editor_id = ui.next_auto_id().with("app-textbox-editor");
+        let single_line = adorned || (min_rows == 1 && max_rows == Some(1) && !allow_newline);
 
         let frame = app_textbox_frame(ui);
+        let frame_padding = frame.inner_margin;
         let frame_margin = frame.total_margin().sum();
         let desired_width = desired_width
             .unwrap_or_else(|| ui.available_width())
@@ -361,14 +403,15 @@ impl Widget for AppTextBox<'_> {
         let visible_inner_height = desired_inner_height
             .unwrap_or_else(|| app_textbox_inner_height_for_rows(ui, visible_rows));
         let content_inner_height = content_rows.max(1) as f32 * line_height;
-        let needs_inner_scroll = if desired_inner_height.is_some() {
-            content_inner_height > visible_inner_height + 0.5
-        } else {
-            max_rows.is_some_and(|max_rows| {
-                let max_rows = max_rows.max(1);
-                max_rows > 1 && content_rows > max_rows
-            })
-        };
+        let needs_inner_scroll = !adorned
+            && if desired_inner_height.is_some() {
+                content_inner_height > visible_inner_height + 0.5
+            } else {
+                max_rows.is_some_and(|max_rows| {
+                    let max_rows = max_rows.max(1);
+                    max_rows > 1 && content_rows > max_rows
+                })
+            };
 
         let mut readonly_text;
         let editor_text = if editable {
@@ -388,18 +431,50 @@ impl Widget for AppTextBox<'_> {
                     ui.set_min_height(height);
                 }
 
+                if let Some(progress) = progress_background.filter(|progress| *progress > 0.0) {
+                    // This is the input's *background*, not the editor's text
+                    // area. Paint across the frame's padding too: otherwise the
+                    // original dark fill remains as a black inset around progress.
+                    // The one-pixel inset preserves the theme's outer border.
+                    let outer_min = ui.min_rect().min
+                        - egui::vec2(f32::from(frame_padding.left), f32::from(frame_padding.top));
+                    let outer_height =
+                        desired_height.unwrap_or(visible_inner_height + frame_margin.y);
+                    let bounds = egui::Rect::from_min_size(
+                        outer_min,
+                        egui::vec2(desired_width, outer_height),
+                    )
+                    .shrink(1.0);
+                    let fill = egui::Rect::from_min_size(
+                        bounds.min,
+                        egui::vec2(bounds.width() * progress, bounds.height()),
+                    );
+                    ui.painter().rect_filled(
+                        fill,
+                        1.0,
+                        accent_blue_for_ui(ui).gamma_multiply(0.28),
+                    );
+                }
+
                 let mut show_editor =
                     |ui: &mut Ui,
                      rows: usize,
                      wrap_max_rows: Option<usize>,
                      min_height: Option<f32>| {
-                        let mut editor = TextEdit::multiline(&mut *editor_text)
-                            .desired_width(inner_width)
-                            .desired_rows(rows)
-                            .hint_text(hint_text)
-                            .frame(egui::Frame::NONE)
-                            .margin(egui::Margin::same(0))
-                            .background_color(Color32::TRANSPARENT);
+                        let inner_width = inner_width.min(ui.available_width()).max(1.0);
+                        let mut editor = if single_line {
+                            // Keep Enter ownership in the surrounding URL action role.
+                            TextEdit::singleline(&mut *editor_text).return_key(None)
+                        } else {
+                            TextEdit::multiline(&mut *editor_text)
+                        }
+                        .id(editor_id)
+                        .desired_width(inner_width)
+                        .desired_rows(rows)
+                        .hint_text(hint_text)
+                        .frame(egui::Frame::NONE)
+                        .margin(egui::Margin::same(0))
+                        .background_color(Color32::TRANSPARENT);
 
                         if let Some(min_height) = min_height {
                             editor = editor.min_size(egui::vec2(inner_width, min_height));
@@ -421,29 +496,78 @@ impl Widget for AppTextBox<'_> {
                                 if error {
                                     apply_error_color(ui, &mut job);
                                 }
-                                job.wrap.max_width = wrap_width;
-                                job.wrap.max_rows = wrap_max_rows.unwrap_or(usize::MAX);
-                                job.wrap.break_anywhere = true;
-                                job.wrap.overflow_character = wrap_max_rows.map(|_| '…');
+                                if single_line {
+                                    // Single-line editing needs the complete galley:
+                                    // TextEdit owns clipping and caret-driven scrolling.
+                                    job.wrap.max_width = f32::INFINITY;
+                                    job.wrap.max_rows = 1;
+                                    job.wrap.break_anywhere = false;
+                                    job.wrap.overflow_character = None;
+                                } else {
+                                    job.wrap.max_width = wrap_width;
+                                    job.wrap.max_rows = wrap_max_rows.unwrap_or(usize::MAX);
+                                    job.wrap.break_anywhere = true;
+                                    job.wrap.overflow_character = wrap_max_rows.map(|_| '…');
+                                }
                                 ui.fonts_mut(|fonts| fonts.layout_job(job))
                             };
 
                         editor.layouter(&mut layouter).show(ui)
                     };
 
-                if needs_inner_scroll {
-                    ScrollArea::vertical()
-                        .id_salt(("app-textbox-scroll", hint_text, syntax))
-                        .max_height(visible_inner_height)
-                        .min_scrolled_height(visible_inner_height)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.set_width(inner_width);
-                            show_editor(ui, content_rows, None, None)
+                let mut show_content = |ui: &mut Ui| {
+                    if needs_inner_scroll {
+                        ScrollArea::vertical()
+                            .id_salt(("app-textbox-scroll", hint_text, syntax))
+                            .max_height(visible_inner_height)
+                            .min_scrolled_height(visible_inner_height)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_width(inner_width);
+                                show_editor(ui, content_rows, None, None)
+                            })
+                            .inner
+                    } else {
+                        show_editor(ui, visible_rows, max_rows, desired_inner_height)
+                    }
+                };
+                let mut show_adorned = |ui: &mut Ui| {
+                    if !trailing_icons.is_empty() || trailing_label.is_some() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            for &(icon, color) in trailing_icons.iter().rev() {
+                                ui.add(icon_image(
+                                    icon,
+                                    ui.text_style_height(&TextStyle::Body) * 0.85,
+                                    color,
+                                ));
+                            }
+                            if trailing_icons.is_empty()
+                                && let Some(label) = trailing_label
+                            {
+                                ui.label(
+                                    egui::RichText::new(label)
+                                        .size(TextStyle::Body.resolve(ui.style()).size * 0.85)
+                                        .color(ui.visuals().text_color().gamma_multiply(0.8)),
+                                );
+                            }
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                show_content(ui)
+                            })
+                            .inner
                         })
                         .inner
+                    } else {
+                        show_content(ui)
+                    }
+                };
+                if let Some(image) = leading_image {
+                    ui.horizontal(|ui| {
+                        ui.add(image);
+                        show_adorned(ui)
+                    })
+                    .inner
                 } else {
-                    show_editor(ui, visible_rows, max_rows, desired_inner_height)
+                    show_adorned(ui)
                 }
             })
             .inner;
@@ -464,13 +588,19 @@ impl Widget for AppTextBox<'_> {
             })
         {
             match link {
-                AppTextBoxLink::Url(url) => ui.ctx().open_url(egui::OpenUrl::new_tab(url)),
+                AppTextBoxLink::Url(url) => {
+                    if let Err(error) = crate::infrastructure::open_external_url(&url) {
+                        eprintln!("Could not open text-box URL: {error}");
+                    }
+                }
                 AppTextBoxLink::Tag(tag) => {
                     if let Some(url) = tag_link_base_url
                         .as_deref()
                         .and_then(|base_url| hashtag_url(base_url, &tag))
                     {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                        if let Err(error) = crate::infrastructure::open_external_url(&url) {
+                            eprintln!("Could not open hashtag URL: {error}");
+                        }
                     }
                 }
             }

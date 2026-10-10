@@ -48,34 +48,38 @@ pub(super) enum SingleModeNode {
 pub(super) fn build_single_mode_template(metrics: &SingleModeLayoutMetrics) -> SingleModeTemplate {
     use SingleModeNode::*;
 
-    // This template intentionally describes only coarse layout slots.  Thumbnail
-    // badges, text padding, row internals, and hover details stay in their own
-    // painters instead of becoming tiny template leaves.
+    // Gallery uses the existing format-area slot for range/status and output folder.
+    // Its Download/Stop action remains in the Classic bottom controls.
+    let gallery_media = metrics.gallery_media;
+    let mut left = vec![
+        fixed_px(metrics.title_height, block(TitleField)),
+        fill(block(DescriptionField)),
+    ];
+    if metrics.format_area_height > 0.0 {
+        left.extend([
+            gap(DESCRIPTION_TO_FORMAT_GAP_PX),
+            fixed_px(metrics.format_area_height, block(FormatRows)),
+            gap(FORMAT_BOTTOM_GAP_PX),
+        ]);
+    }
+    let mut right = vec![fixed_px(metrics.right_thumbnail_height, block(Thumbnail))];
+    if !gallery_media {
+        right.extend([
+            gap(THUMBNAIL_TO_CHECKBOX_GAP_PX),
+            fixed_px(
+                metrics.right_checkbox_height,
+                block(DownloadThumbnailCheckbox),
+            ),
+        ]);
+    }
+    right.extend([
+        fill(block(Empty)),
+        fixed_px(metrics.right_info_height, block(RightInfo)),
+    ]);
     cols([
-        star(
-            LEFT_COLUMN_STAR,
-            rows([
-                fixed_px(metrics.title_height, block(TitleField)),
-                fill(block(DescriptionField)),
-                gap(DESCRIPTION_TO_FORMAT_GAP_PX),
-                fixed_px(metrics.format_area_height, block(FormatRows)),
-                gap(FORMAT_BOTTOM_GAP_PX),
-            ]),
-        ),
+        star(LEFT_COLUMN_STAR, rows(left)),
         gap(COLUMN_GAP_PX),
-        star(
-            RIGHT_COLUMN_STAR,
-            rows([
-                fixed_px(metrics.right_thumbnail_height, block(Thumbnail)),
-                gap(THUMBNAIL_TO_CHECKBOX_GAP_PX),
-                fixed_px(
-                    metrics.right_checkbox_height,
-                    block(DownloadThumbnailCheckbox),
-                ),
-                fill(block(Empty)),
-                fixed_px(metrics.right_info_height, block(RightInfo)),
-            ]),
-        ),
+        star(RIGHT_COLUMN_STAR, rows(right)),
     ])
 }
 
@@ -100,11 +104,12 @@ fn show_single_mode_block(
 ) {
     match node {
         SingleModeNode::FormatRows => match single_mode_block_style(slot, node) {
-            None => render_format_rows(tui, state),
+            None => render_source_controls(tui, state),
             Some(style) => {
                 // FormatRows is a coarse block. Its internal video/audio/subtitle rows
                 // remain inside single_mode_format_rows.rs and need the same Tui tree.
-                tui.style(style).add(|tui| render_format_rows(tui, state));
+                tui.style(style)
+                    .add(|tui| render_source_controls(tui, state));
             }
         },
         node => {
@@ -113,6 +118,18 @@ fn show_single_mode_block(
             tui.style(style)
                 .ui(|ui| show_single_mode_leaf(node, ui, state, view));
         }
+    }
+}
+
+fn render_source_controls(tui: &mut Tui, state: &mut AppState) {
+    if state
+        .queue_items
+        .first()
+        .is_some_and(|item| matches!(&item.backend, crate::domain::QueueBackend::GalleryDl(_)))
+    {
+        super::single_mode_gallery::render(tui, state);
+    } else {
+        render_format_rows(tui, state);
     }
 }
 

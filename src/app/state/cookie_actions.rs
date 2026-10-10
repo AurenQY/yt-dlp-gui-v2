@@ -359,6 +359,14 @@ impl AppState {
 
     pub fn delete_saved_cookie_file(&mut self, id: &str) {
         let cookie_dir = cookie_rescue_cookie_dir_path();
+        let _cookie_store_lock =
+            match crate::infrastructure::cookie_site_index::lock_cookie_store(&cookie_dir) {
+                Ok(lock) => lock,
+                Err(error) => {
+                    self.last_action = error;
+                    return;
+                }
+            };
         let mut index = read_cookie_site_index_or_default(&cookie_dir);
         let Some(position) = index.sites.iter().position(|entry| entry.id == id) else {
             self.last_action = "Cookie file entry was not found.".to_owned();

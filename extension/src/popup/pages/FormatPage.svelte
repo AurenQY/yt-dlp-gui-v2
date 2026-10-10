@@ -101,7 +101,7 @@
             />
           </span>
           {#each values as value}
-            <span class="format-cell" title={value}>{value}</span>
+            <span class="format-cell">{value}</span>
           {/each}
         </Link>
       {/each}
@@ -110,72 +110,3 @@
     <Block strong inset>{t('noFormats')}</Block>
   {/if}
 </Page>
-
-<style>
-  .format-grid {
-    --format-columns: 38px minmax(92px, 1.15fr) 48px minmax(104px, 1.35fr) minmax(72px, 0.9fr);
-    width: 100%;
-    min-width: 0;
-  }
-
-  .format-grid.audio-grid {
-    --format-columns: 38px minmax(58px, 0.75fr) minmax(72px, 0.9fr) minmax(78px, 1fr) minmax(62px, 0.7fr) minmax(70px, 0.8fr);
-  }
-
-  .format-header,
-  :global(.format-grid .format-row) {
-    display: grid;
-    grid-template-columns: var(--format-columns);
-    align-items: center;
-    min-width: 0;
-  }
-
-  .format-header {
-    position: sticky;
-    z-index: 5;
-    top: 0;
-    min-height: 42px;
-    color: var(--f7-list-item-text-text-color, var(--f7-text-color));
-    background: var(--f7-page-bg-color);
-    border-bottom: 1px solid var(--f7-list-divider-border-color, rgba(127, 127, 127, 0.24));
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  :global(.format-grid .format-row) {
-    min-height: 52px;
-    border-bottom: 1px solid var(--f7-list-divider-border-color, rgba(127, 127, 127, 0.24));
-    cursor: pointer;
-  }
-
-  :global(.format-grid .format-row.selected) {
-    background: rgba(var(--f7-theme-color-rgb), 0.12);
-  }
-
-  .radio-cell {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .radio-cell input {
-    width: 18px;
-    height: 18px;
-    margin: 0;
-    accent-color: var(--f7-theme-color);
-    pointer-events: none;
-  }
-
-  .format-header > span:not(:first-child),
-  .format-cell {
-    min-width: 0;
-    padding-inline: 5px;
-  }
-
-  .format-cell {
-    overflow: hidden;
-    font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-</style>

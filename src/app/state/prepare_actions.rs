@@ -21,9 +21,13 @@ impl AppState {
     }
 
     pub fn should_show_prepare_tab(&self) -> bool {
-        !self.config.prepare_skipped
-            && !self.prepare_tab_snoozed
-            && self.prepare_report.should_show_tab()
+        // Setup diagnostics no longer gate navigation; a missing required tool
+        // opens About at startup, while individual operations validate tools.
+        false
+    }
+
+    pub(super) fn should_open_component_pool_on_startup(&self) -> bool {
+        self.first_missing_core_dependency().is_some()
     }
 
     pub fn prepare_requirements(&self) -> &[PrepareRequirement] {
@@ -204,7 +208,7 @@ impl AppState {
                     self.active_tab = AppTab::Main;
                 }
                 self.last_action =
-                    "Prepare page skipped. You can handle dependency deployment later in Options."
+                    "Prepare page skipped. You can handle dependency deployment later in About."
                         .to_owned();
             }
             Err(error) => {
@@ -244,9 +248,10 @@ impl AppState {
             .any(|item| item.needs_attention() && item.has_install_action(tool))
     }
 
-    fn prepare_install_order(&self) -> [DependencyTool; 3] {
+    fn prepare_install_order(&self) -> [DependencyTool; 4] {
         [
             DependencyTool::YtDlp,
+            DependencyTool::GalleryDl,
             DependencyTool::Deno,
             DependencyTool::Ffmpeg,
         ]
@@ -262,15 +267,73 @@ impl AppState {
         }
     }
 
+    pub fn open_dependency_component(&mut self, tool: DependencyTool) {
+        self.select_about_detail(AboutDetailTarget::Tool(
+            ManagedComponentId::for_dependency_tool(tool),
+        ));
+        self.active_tab = AppTab::About;
+    }
+
+    pub(super) fn first_missing_core_dependency(&self) -> Option<DependencyTool> {
+        [
+            DependencyTool::YtDlp,
+            DependencyTool::Deno,
+            DependencyTool::Ffmpeg,
+        ]
+        .into_iter()
+        .find(|tool| !self.dependency_tool_is_installed(*tool))
+    }
+
+    /// About's install action only concerns missing core dependencies. Optional
+    /// gallery-dl and aria2 remain individually installable from their cards.
+    pub fn has_missing_required_dependencies(&self) -> bool {
+        self.first_missing_core_dependency().is_some()
+    }
+
+    pub fn install_missing_required_dependencies(&mut self) {
+        if self.component_update_running() {
+            self.last_action = "Update check is already running.".to_owned();
+            return;
+        }
+
+        self.refresh_prepare_report();
+        if let Some(reason) = self.prepare_dependency_install_block_reason() {
+            self.last_action = reason;
+            return;
+        }
+
+        let missing = [
+            DependencyTool::YtDlp,
+            DependencyTool::Deno,
+            DependencyTool::Ffmpeg,
+        ]
+        .into_iter()
+        .filter(|tool| !self.dependency_tool_is_installed(*tool))
+        .collect::<Vec<_>>();
+        if missing.is_empty() {
+            self.last_action = "All required dependencies are already available.".to_owned();
+            return;
+        }
+        // The existing update worker installs missing components into their
+        // managed portable paths and synchronizes the configured paths on success.
+        self.update_dependency_tools_for_prepare(missing);
+    }
+
     pub fn component_update_running(&self) -> bool {
         self.component_update_snapshot.running
     }
 
     pub fn component_update_attention_signal_visible(&self) -> bool {
-        self.component_update_snapshot
-            .entries
-            .iter()
-            .any(|entry| component_update_status_needs_attention_signal(entry.status))
+        self.component_update_snapshot.entries.iter().any(|entry| {
+            // External and absent tools never receive a managed-update badge.
+            if let Some(tool) = entry.id.as_dependency_tool()
+                && (!self.dependency_tool_uses_managed_path(tool)
+                    || !self.dependency_tool_is_installed(tool))
+            {
+                return false;
+            }
+            component_update_status_needs_attention_signal(entry.status)
+        })
     }
 
     pub fn check_component_updates(&mut self) {
@@ -298,11 +361,21 @@ impl AppState {
             self.last_action = reason;
             return;
         }
+        let targets = ManagedComponentId::ALL
+            .into_iter()
+            .filter(|id| match id.as_dependency_tool() {
+                Some(tool) => {
+                    self.dependency_tool_uses_managed_path(tool)
+                        && self.dependency_tool_is_installed(tool)
+                }
+                None => true,
+            })
+            .collect::<Vec<_>>();
         let proxy_url = self.tool_paths.effective_proxy_url().map(str::to_owned);
         self.component_update_snapshot.running = true;
         self.component_update_snapshot.message = "updating managed components".to_owned();
         run_component_update_worker(
-            ComponentUpdateAction::UpdateAllManaged,
+            ComponentUpdateAction::UpdateMany(targets),
             proxy_url,
             self.component_update_result_tx.clone(),
         );
@@ -342,6 +415,15 @@ impl AppState {
     }
 
     pub fn update_component(&mut self, id: ManagedComponentId) {
+        if let Some(tool) = id.as_dependency_tool() {
+            if self.dependency_tool_is_installed(tool)
+                && !self.dependency_tool_uses_managed_path(tool)
+            {
+                self.last_action =
+                    format!("{}: external tool; update is not managed.", tool.label());
+                return;
+            }
+        }
         if self.component_update_running() {
             self.last_action = "Update check is already running.".to_owned();
             return;
@@ -375,6 +457,13 @@ impl AppState {
     pub fn set_yt_dlp_path(&mut self, path: impl Into<String>) {
         self.config.set_yt_dlp_path(path);
         self.tool_paths.yt_dlp = self.config.yt_dlp_path.clone();
+        let _ = self.config.save();
+        self.refresh_prepare_report();
+    }
+
+    pub fn set_gallery_dl_path(&mut self, path: impl Into<String>) {
+        self.config.set_gallery_dl_path(path);
+        self.tool_paths.gallery_dl = self.config.gallery_dl_path.clone();
         let _ = self.config.save();
         self.refresh_prepare_report();
     }
@@ -558,6 +647,7 @@ impl AppState {
     pub fn dependency_tool_path(&self, tool: DependencyTool) -> &str {
         match tool {
             DependencyTool::YtDlp => &self.tool_paths.yt_dlp,
+            DependencyTool::GalleryDl => &self.tool_paths.gallery_dl,
             DependencyTool::Ffmpeg => &self.tool_paths.ffmpeg,
             DependencyTool::Aria2c => &self.tool_paths.aria2c,
             DependencyTool::Deno => &self.tool_paths.deno,
@@ -568,7 +658,20 @@ impl AppState {
         dependency_tool_is_available(tool, self.dependency_tool_path(tool))
     }
 
+    pub fn dependency_tool_uses_managed_path(&self, tool: DependencyTool) -> bool {
+        crate::infrastructure::dependency_tool_path_is_managed(
+            tool,
+            self.dependency_tool_path(tool),
+        )
+    }
+
     pub fn auto_detect_dependency_tool_path(&mut self, tool: DependencyTool) {
+        // An existing saved executable is authoritative, including user-selected
+        // external tools. A manual re-detect must not silently change its path.
+        if dependency_tool_exists(self.dependency_tool_path(tool)) {
+            self.last_action = format!("{}: keeping the saved executable path.", tool.label());
+            return;
+        }
         match detect_dependency_tool(tool) {
             Some(path) => {
                 let display_path = path.display().to_string();
@@ -588,8 +691,9 @@ impl AppState {
     }
 
     pub fn auto_detect_dependency_tool_paths(&mut self) {
-        const TOOLS: [DependencyTool; 4] = [
+        const TOOLS: [DependencyTool; 5] = [
             DependencyTool::YtDlp,
+            DependencyTool::GalleryDl,
             DependencyTool::Deno,
             DependencyTool::Ffmpeg,
             DependencyTool::Aria2c,
@@ -599,6 +703,9 @@ impl AppState {
         let mut missing = Vec::new();
 
         for tool in TOOLS {
+            if dependency_tool_exists(self.dependency_tool_path(tool)) {
+                continue;
+            }
             match detect_dependency_tool(tool) {
                 Some(path) => {
                     let display_path = path.display().to_string();
@@ -610,9 +717,11 @@ impl AppState {
         }
 
         if detected.is_empty() {
-            self.last_action =
-                "No dependency tools were found beside the app, its subfolders, or system PATH."
-                    .to_owned();
+            self.last_action = if missing.is_empty() {
+                "All saved dependency paths still exist; no re-detection was necessary.".to_owned()
+            } else {
+                format!("No replacements found for: {}.", missing.join(", "))
+            };
             return;
         }
 
@@ -654,6 +763,12 @@ impl AppState {
                 self.config.set_yt_dlp_path(path);
                 self.tool_paths.yt_dlp = self.config.yt_dlp_path.clone();
                 before != self.config.yt_dlp_path
+            }
+            DependencyTool::GalleryDl => {
+                let before = self.config.gallery_dl_path.clone();
+                self.config.set_gallery_dl_path(path);
+                self.tool_paths.gallery_dl = self.config.gallery_dl_path.clone();
+                before != self.config.gallery_dl_path
             }
             DependencyTool::Ffmpeg => {
                 let before = self.config.ffmpeg_path.clone();

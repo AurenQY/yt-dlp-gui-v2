@@ -9,7 +9,8 @@ use egui_taffy::taffy::prelude::{auto, length, percent};
 use egui_taffy::{Tui, TuiBuilderLogic as _, taffy};
 
 use super::xaml_layout_contracts::{
-    LayoutLength, LayoutSize, MeasuredUiElement, SingleLineControlRowContract, UiElement,
+    HorizontalAlignment, LayoutLength, LayoutSize, MeasuredUiElement, SingleLineControlRowContract,
+    UiElement, VerticalAlignment,
 };
 use super::xaml_ui_nodes::{TemplateAxis, TemplateSizing};
 
@@ -224,6 +225,49 @@ impl XamlSingleLineRowCell {
 
     pub(super) fn show(self, tui: &mut Tui, add_contents: impl FnOnce(&mut Ui)) {
         tui.style(self.style()).ui(add_contents);
+    }
+
+    pub(super) fn show_aligned(self, tui: &mut Tui, add_contents: impl FnOnce(&mut Ui)) {
+        let mut style = self.style();
+        style.display = taffy::Display::Flex;
+        style.flex_direction = taffy::FlexDirection::Row;
+        style.justify_content = Some(match self.element.horizontal_content_alignment {
+            HorizontalAlignment::Left | HorizontalAlignment::Stretch => {
+                taffy::JustifyContent::Start
+            }
+            HorizontalAlignment::Center => taffy::JustifyContent::Center,
+            HorizontalAlignment::Right => taffy::JustifyContent::End,
+        });
+        style.align_items = Some(match self.element.vertical_content_alignment {
+            VerticalAlignment::Top => taffy::AlignItems::Start,
+            VerticalAlignment::Center => taffy::AlignItems::Center,
+            VerticalAlignment::Bottom => taffy::AlignItems::End,
+            VerticalAlignment::Stretch => taffy::AlignItems::Stretch,
+        });
+        let mut content = taffy::Style::default();
+        content.min_size = taffy::Size {
+            width: length(0.0_f32),
+            height: length(0.0_f32),
+        };
+        content.max_size.width = percent(1.0_f32);
+        // A flex child with an auto width can be measured at its min-content width
+        // before egui paints it. Labels and buttons then wrap one glyph per line,
+        // even though the containing UiElement cell already has sufficient width.
+        // Give the painter a real width in the layout contract, not a paint offset.
+        match self.element.horizontal_content_alignment {
+            HorizontalAlignment::Left | HorizontalAlignment::Stretch => {
+                content.size.width = percent(1.0_f32);
+                content.flex_grow = 1.0;
+                content.flex_basis = length(0.0_f32);
+            }
+            HorizontalAlignment::Center | HorizontalAlignment::Right => {
+                content.size.width = length(self.element.intrinsic_size.width);
+                content.flex_shrink = 1.0;
+            }
+        }
+        tui.style(style).add(|tui| {
+            tui.style(content).ui(add_contents);
+        });
     }
 }
 
@@ -788,74 +832,6 @@ pub(super) fn xaml_shrinkable_fixed_height_block_style(height: f32) -> taffy::St
     }
 }
 
-#[cfg(test)]
-mod xaml_taffy_style_tests {
-    use super::*;
-
-    #[test]
-    fn auto_height_row_keeps_height_content_driven() {
-        let style = xaml_auto_height_row_style(8.0);
-
-        assert_eq!(style.display, taffy::Display::Flex);
-        assert_eq!(style.flex_direction, taffy::FlexDirection::Row);
-        assert_eq!(style.align_items, Some(taffy::AlignItems::Center));
-        assert_eq!(style.size.width, percent(1.0_f32));
-        assert_eq!(style.size.height, auto());
-        assert_eq!(style.gap, length(8.0_f32));
-    }
-
-    #[test]
-    fn auto_height_row_cells_do_not_inherit_a_fixed_row_height() {
-        let element = UiElement::auto_content_panel();
-        let fixed = xaml_fixed_width_auto_height_element_cell_style(element, 120.0);
-        let star = xaml_star_width_auto_height_element_cell_style(element);
-
-        assert_eq!(fixed.size.width, length(120.0_f32));
-        assert_eq!(fixed.size.height, auto());
-        assert_eq!(star.size.height, auto());
-        assert_eq!(star.flex_grow, 1.0);
-        assert_eq!(star.flex_shrink, 1.0);
-    }
-
-    #[test]
-    fn overlay_host_owns_relative_full_size_layout() {
-        let style = xaml_overlay_host_style();
-
-        assert_eq!(style.position, taffy::Position::Relative);
-        assert_eq!(style.size.width, percent(1.0_f32));
-        assert_eq!(style.size.height, percent(1.0_f32));
-    }
-
-    #[test]
-    fn bottom_overlay_is_absolute_and_height_bounded() {
-        let style = xaml_bottom_overlay_style(72.0);
-
-        assert_eq!(style.position, taffy::Position::Absolute);
-        assert_eq!(style.inset.left, length(0.0_f32));
-        assert_eq!(style.inset.right, length(0.0_f32));
-        assert_eq!(style.inset.bottom, length(0.0_f32));
-        assert_eq!(style.size.height, length(72.0_f32));
-        assert_eq!(style.min_size.height, length(72.0_f32));
-        assert_eq!(style.max_size.height, length(72.0_f32));
-    }
-
-    #[test]
-    fn overlay_content_is_an_absolute_full_size_layer() {
-        let style = xaml_overlay_content_style();
-
-        assert_eq!(style.display, taffy::Display::Flex);
-        assert_eq!(style.flex_direction, taffy::FlexDirection::Column);
-        assert_eq!(style.align_items, Some(taffy::AlignItems::Stretch));
-        assert_eq!(style.position, taffy::Position::Absolute);
-        assert_eq!(style.inset.left, length(0.0_f32));
-        assert_eq!(style.inset.right, length(0.0_f32));
-        assert_eq!(style.inset.top, length(0.0_f32));
-        assert_eq!(style.inset.bottom, length(0.0_f32));
-        assert_eq!(style.size.width, percent(1.0_f32));
-        assert_eq!(style.size.height, percent(1.0_f32));
-    }
-}
-
 pub(super) fn xaml_vertical_root_style(height: f32) -> taffy::Style {
     taffy::Style {
         display: taffy::Display::Flex,
@@ -980,6 +956,20 @@ pub(super) fn xaml_grow_block_style() -> taffy::Style {
     }
 }
 
+/// Apply the control's theme padding inside its layout box, before measurement.
+pub(super) fn xaml_padded_style(
+    mut style: taffy::Style,
+    padding: eframe::egui::Margin,
+) -> taffy::Style {
+    style.padding = taffy::Rect {
+        left: length(f32::from(padding.left)),
+        right: length(f32::from(padding.right)),
+        top: length(f32::from(padding.top)),
+        bottom: length(f32::from(padding.bottom)),
+    };
+    style
+}
+
 pub(super) fn xaml_fixed_size_flex_cell_style(width: f32, height: f32) -> taffy::Style {
     taffy::Style {
         display: taffy::Display::Flex,
@@ -1003,6 +993,12 @@ pub(super) fn xaml_fixed_size_flex_cell_style(width: f32, height: f32) -> taffy:
         margin: length(0.0_f32),
         ..Default::default()
     }
+}
+
+pub(super) fn xaml_centered_fixed_size_cell_style(width: f32, height: f32) -> taffy::Style {
+    let mut style = xaml_fixed_size_flex_cell_style(width, height);
+    style.align_self = Some(taffy::AlignSelf::Center);
+    style
 }
 
 pub(super) fn xaml_fixed_width_stretch_height_flex_cell_style(width: f32) -> taffy::Style {

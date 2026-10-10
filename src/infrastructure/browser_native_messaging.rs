@@ -25,6 +25,13 @@ use super::{
 };
 use crate::domain::DownloadTimeRange;
 
+#[path = "browser_gallery_zip.rs"]
+mod browser_gallery_zip;
+#[path = "browser_native_analysis_unified.rs"]
+mod browser_native_analysis_unified;
+#[path = "browser_native_gallery_download.rs"]
+mod browser_native_gallery_download;
+
 pub const HOST_NAME: &str = "kannagi0303.yt_dlp_gui";
 const HOST_NAMES: [&str; 1] = [HOST_NAME];
 pub const EXTENSION_ID: &str = "jnhdidpednnfdphbcbeignbhceemminn";
@@ -40,18 +47,32 @@ const MAX_CHAPTERS_PER_ITEM: usize = 300;
 const BROWSER_YOUTUBE_PLAYER_CLIENTS: &str = "player_client=default,android_vr";
 const NATIVE_WIRE_VERSION: u32 = 1;
 const NATIVE_CAPABILITIES: &[&str] = &[
+    "gallery.timeline.v1",
     "fields.ignore-unknown.v1",
     "events.ignore-unknown.v1",
     "analysis.stream.v1",
     "analysis.cancel.v1",
     "analysis.playlist-limit.v1",
+    "analysis.gallery-dl.v1",
+    "analysis.gallery-relative-path.v1",
+    "analysis.multi-backend.v1",
+    "analysis.v2-owned-routing.v1",
+    "analysis.unified-result.v1",
+    "analysis.tool-selection.v1",
+    "analysis.source-scope.v1",
+    "analysis.suitability.v1",
     "download.stream.v1",
+    "download.gallery-post.v1",
+    "download.gallery-zip.v1",
     "download.cancel.v1",
     "download.custom-filename.v1",
     "download.time-range.v1",
     "download.chapter-range.v1",
     "download.aria2-choice.v1",
     "cookies.browser-transfer.v1",
+    "cookies.browser-persist.v1",
+    "cookies.browser-auto-update.v1",
+    "cookies.shared-saved-source.v1",
     "formats.explicit-pair.v1",
     "postprocess.subtitle-chapter.v1",
     "postprocess.subtitle-mode.v1",
@@ -331,7 +352,7 @@ fn validated_url(value: &Value) -> Result<&str, String> {
 fn apply_browser_youtube_format_coverage(
     tools: &mut ToolPaths,
     url: &str,
-    youtube_authenticated: bool,
+    allow_anonymous_clients: bool,
     allow_supplemental_client: bool,
 ) {
     let authority = url
@@ -347,7 +368,7 @@ fn apply_browser_youtube_format_coverage(
     let is_youtube = host == "youtube.com" || host.ends_with(".youtube.com") || host == "youtu.be";
     if allow_supplemental_client
         && is_youtube
-        && !youtube_authenticated
+        && allow_anonymous_clients
         && tools.youtube_extractor_args.trim().is_empty()
     {
         tools.youtube_extractor_args = BROWSER_YOUTUBE_PLAYER_CLIENTS.to_owned();
@@ -689,7 +710,10 @@ fn playlist_analysis_is_truncated(value: &Value, playlist_scope: &str, item_limi
         .and_then(Value::as_array)
         .map(|entries| entries.iter().filter(|entry| !entry.is_null()).count())
         .unwrap_or_default();
-    playlist_scope == "playlist" && (reported_count > item_limit || returned_count > item_limit)
+    playlist_scope == "playlist"
+        && (value.get("analysisTruncated").and_then(Value::as_bool) == Some(true)
+            || reported_count > item_limit
+            || returned_count > item_limit)
 }
 
 fn analyze(request: &Value) -> Result<Value, String> {
@@ -697,22 +721,28 @@ fn analyze(request: &Value) -> Result<Value, String> {
     let playlist_scope = browser_playlist_scope(request)?;
     let item_limit = browser_analysis_item_limit(request)?;
     let (config, mut tools) = AppConfig::load_runtime();
-    let cookies = super::browser_native_cookies::NativeCookies::from_request(request)?;
-    let youtube_authenticated = cookies
-        .as_ref()
-        .is_some_and(|cookies| cookies.youtube_authenticated());
+    let allow_anonymous_clients =
+        super::browser_native_cookies::shared_source_allows_anonymous_youtube_clients(
+            &tools,
+            config.use_browser_cookies,
+            url,
+        )?;
     apply_browser_youtube_format_coverage(
         &mut tools,
         url,
-        youtube_authenticated,
+        allow_anonymous_clients,
         playlist_scope != "playlist",
     );
-    tools.native_cookie_override = cookies.as_ref().map(|cookies| cookies.path());
     tools.validate_cookie_setup(config.use_browser_cookies)?;
     let output = if playlist_scope == "playlist" {
-        tools.analyze_playlist_url_detailed(url, config.use_browser_cookies, item_limit + 1)
+        tools.analyze_playlist_url_detailed(url, config.use_browser_cookies, item_limit)
     } else {
-        tools.analyze_url_detailed(url, config.use_browser_cookies)
+        match analyze_current_source(&tools, url, config.use_browser_cookies)? {
+            super::yt_dlp_source_analysis::DesktopSourceAnalysis::Single(output) => Ok(output),
+            super::yt_dlp_source_analysis::DesktopSourceAnalysis::Playlist => {
+                return Ok(json!({ "items": [], "sourceScope": "playlist", "playlistRequired": true, "itemCount": 0, "itemLimit": item_limit }));
+            }
+        }
     }
     .map_err(|error| error.message)?;
     let truncated = playlist_analysis_is_truncated(&output.json, playlist_scope, item_limit);
@@ -735,6 +765,7 @@ fn analyze(request: &Value) -> Result<Value, String> {
         "items": items,
         "itemLimit": item_limit,
         "truncated": truncated,
+        "analysisWarning": output.json.get("analysisWarning"),
         "outputDirectory": output_directory.to_string_lossy(),
         "thumbnailMode": config.thumbnail_mode,
         "subtitleMode": config.subtitle_mode,
@@ -744,18 +775,140 @@ fn analyze(request: &Value) -> Result<Value, String> {
     }))
 }
 
+/// Gallery images are compact media records, never yt-dlp format records.
+/// Downloading whole posts is a separate native operation; the analysis stream
+/// does not echo cookies back into individual media records.
+fn stream_gallery_analysis(
+    request: &Value,
+    writer: &mut impl Write,
+    cancelled: &AtomicBool,
+) -> Result<Value, String> {
+    use super::gallery_dl::GalleryDlBackend;
+    let url = validated_url(request.get("url").unwrap_or(&Value::Null))?;
+    let (config, tools) = AppConfig::load_runtime();
+    let use_cookies = config.use_browser_cookies;
+    let output_directory = configured_download_directory(&config)?;
+    write_response(
+        &mut *writer,
+        &NativeResponse {
+            ok: true,
+            message: "gallery-dl analysis started",
+            data: Some(json!({
+                "event": "started", "phase": "startingGalleryDl",
+                "backend": "g",
+                "outputDirectory": output_directory.to_string_lossy(),
+                "protocol": host_protocol_info()
+            })),
+        },
+    )?;
+    if cancelled.load(Ordering::Acquire) {
+        return Ok(json!({ "event": "stopped", "backend": "g" }));
+    }
+    let reading = request["action"] == "galleryRead";
+    let backend = GalleryDlBackend::from_tool_paths(&tools);
+    let root_extractor = super::extractor_index::matching_gallery_extractor(url)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let source_scope = match crate::domain::gallery_source_scope(&root_extractor) {
+        crate::domain::GallerySourceScope::Timeline => "timeline",
+        crate::domain::GallerySourceScope::SinglePost => "single-post",
+        crate::domain::GallerySourceScope::Unknown => "unknown",
+    };
+    let range = if reading {
+        Some(super::browser_gallery_timeline::range(request, url)?)
+    } else {
+        None
+    };
+    let (start, end, page_size) = if let Some(range) = &range {
+        let window = super::browser_gallery_timeline::window(request, range)?;
+        (window.start, window.end, window.page_size)
+    } else {
+        (1, 2, 10)
+    };
+    if reading && !backend.supports_bounded_timeline_feed(url, &tools, use_cookies)? {
+        return Err(
+            "This source delegates multiple feeds; bounded timeline reading is unsupported.".into(),
+        );
+    }
+    let mut streamed_delivered = 0;
+    let gallery = backend.analyze_browser_window_stream(
+        url, &tools, use_cookies, range.as_ref(), start, end, |analysis, index| {
+            if cancelled.load(Ordering::Acquire) { return Err("Gallery analysis was cancelled.".into()); }
+            if reading {
+                if index >= page_size as usize { return Ok(()); } // No metadata lookahead in UI.
+                let items = analysis.media.iter().filter(|media| media.post_index == Some(index))
+                    .map(|media| super::browser_gallery_media::browser_item(media, analysis.posts.get(index), url, index))
+                    .collect::<Result<Vec<_>, _>>()?;
+                streamed_delivered += items.len();
+                return write_response(&mut *writer, &NativeResponse { ok: true, message: "gallery-dl post ready",
+                    data: Some(json!({"event":"post", "backend":"g", "items":items,
+                        "postIndex":index, "timelineRange":range, "nextStart":start + index as u32 + 1})) });
+            }
+            if source_scope == "timeline" && index >= 2 { return Ok(()); }
+            // Flush only after gallery-dl's post-after marker. A later extractor
+            // error must not discard media that are already complete and usable.
+            for media in analysis.media.iter().filter(|media| media.post_index == Some(index)) {
+                let item = super::browser_gallery_media::browser_analysis_item(
+                    media, analysis.posts.get(index), url, source_scope, index + 1,
+                )?;
+                write_response(&mut *writer, &NativeResponse { ok: true, message: "gallery-dl media ready",
+                    data: Some(json!({"event":"item", "backend":"g", "index":streamed_delivered, "item":item})) })?;
+                streamed_delivered += 1;
+            }
+            Ok(())
+        },
+    )?
+    .analysis;
+    if cancelled.load(Ordering::Acquire) {
+        return Ok(json!({ "event": "stopped", "backend": "g" }));
+    }
+    if gallery.media.is_empty() && !reading {
+        return Err("gallery-dl found no downloadable images or videos for this URL.".to_owned());
+    }
+    // Keep extractor totals separate from the UI's per-post grouping. If a
+    // carousel looks incomplete, this distinguishes missing extractor URLs
+    // from a browser-side delivery or grouping error without exposing media URLs.
+    let extractor_media_count = gallery.media.len();
+    let extractor_post_count = gallery.posts.len();
+    let extractor_queued_count = gallery.queued_urls.len();
+    let extractor_declared_count = gallery
+        .posts
+        .iter()
+        .filter_map(|post| post.source_metadata.get("count").and_then(Value::as_u64))
+        .max()
+        .unwrap_or(0);
+    let delivered = streamed_delivered;
+    Ok(json!({
+        "event": "complete", "backend": "g", "itemCount": delivered,
+        "sourceScope": source_scope, "rootExtractor": gallery.root_extractor,
+        "timelineRange": range, "nextStart": start + page_size,
+        "hasMore": reading && gallery.posts.len() > page_size as usize,
+        "extractorMediaCount": extractor_media_count,
+        "extractorPostCount": extractor_post_count,
+        "extractorQueuedCount": extractor_queued_count,
+        "extractorDeclaredCount": extractor_declared_count,
+        "outputDirectory": output_directory.to_string_lossy()
+    }))
+}
+
 fn stream_analysis(
     request: &Value,
     writer: &mut impl Write,
     cancelled: &AtomicBool,
 ) -> Result<Value, String> {
+    match request.get("backend").and_then(Value::as_str) {
+        Some("g") => return stream_gallery_analysis(request, writer, cancelled),
+        None | Some("y") => {} // Older installed extensions retain the yt-dlp route.
+        Some(_) => return Err("Unknown analysis backend; expected y or g.".to_owned()),
+    }
     write_response(
         &mut *writer,
         &NativeResponse {
             ok: true,
             message: "Validating analysis request and tools",
             data: Some(json!({
-                "event": "phase",
+                "event": "phase", "backend": "y",
                 "phase": "validatingHost",
                 "protocol": host_protocol_info()
             })),
@@ -766,17 +919,18 @@ fn stream_analysis(
     let playlist_scope = browser_playlist_scope(request)?;
     let item_limit = browser_analysis_item_limit(request)?;
     let (config, mut tools) = AppConfig::load_runtime();
-    let cookies = super::browser_native_cookies::NativeCookies::from_request(request)?;
-    let youtube_authenticated = cookies
-        .as_ref()
-        .is_some_and(|cookies| cookies.youtube_authenticated());
+    let allow_anonymous_clients =
+        super::browser_native_cookies::shared_source_allows_anonymous_youtube_clients(
+            &tools,
+            config.use_browser_cookies,
+            url,
+        )?;
     apply_browser_youtube_format_coverage(
         &mut tools,
         url,
-        youtube_authenticated,
+        allow_anonymous_clients,
         playlist_scope != "playlist",
     );
-    tools.native_cookie_override = cookies.as_ref().map(|cookies| cookies.path());
     tools.validate_cookie_setup(config.use_browser_cookies)?;
     let output_directory = configured_download_directory(&config)?;
 
@@ -786,7 +940,7 @@ fn stream_analysis(
             ok: true,
             message: "Analysis started",
             data: Some(json!({
-                "event": "started",
+                "event": "started", "backend": "y",
                 "phase": "startingYtDlp",
                 "itemLimit": item_limit,
                 "outputDirectory": output_directory.to_string_lossy(),
@@ -805,7 +959,7 @@ fn stream_analysis(
             ok: true,
             message: "yt-dlp is reading media information",
             data: Some(json!({
-                "event": "phase",
+                "event": "phase", "backend": "y",
                 "phase": if playlist_scope == "playlist" {
                     "readingPlaylist"
                 } else {
@@ -818,19 +972,13 @@ fn stream_analysis(
     let mut delivered = 0;
     let mut truncated = false;
     if playlist_scope == "playlist" {
-        let mut received = 0;
-        tools
+        let summary = tools
             .analyze_playlist_url_streaming_detailed(
                 url,
                 config.use_browser_cookies,
-                item_limit + 1,
+                item_limit,
                 cancelled,
                 |item| {
-                    received += 1;
-                    if received > item_limit {
-                        truncated = true;
-                        return Ok(());
-                    }
                     delivered += 1;
                     write_response(
                         &mut *writer,
@@ -838,7 +986,7 @@ fn stream_analysis(
                             ok: true,
                             message: "Analysis item ready",
                             data: Some(json!({
-                                "event": "item",
+                                "event": "item", "backend": "y",
                                 "index": delivered - 1,
                                 "item": compact_item(&item, url)
                             })),
@@ -847,10 +995,22 @@ fn stream_analysis(
                 },
             )
             .map_err(|error| error.message)?;
+        delivered = summary.item_count;
+        truncated = summary.truncated;
+        if let Some(warning) = summary.warning {
+            // Already delivered complete-format items remain available; this
+            // backend's existing failed-only retry can retry the missing part.
+            return Err(warning);
+        }
     } else {
-        let output = tools
-            .analyze_url_detailed(url, config.use_browser_cookies)
-            .map_err(|error| error.message)?;
+        let output = match analyze_current_source(&tools, url, config.use_browser_cookies)? {
+            super::yt_dlp_source_analysis::DesktopSourceAnalysis::Single(output) => output,
+            super::yt_dlp_source_analysis::DesktopSourceAnalysis::Playlist => {
+                return Ok(
+                    json!({ "event": "complete", "backend": "y", "sourceScope": "playlist", "playlistRequired": true, "itemCount": 0, "itemLimit": item_limit }),
+                );
+            }
+        };
         let values = output
             .json
             .get("entries")
@@ -871,7 +1031,7 @@ fn stream_analysis(
                     ok: true,
                     message: "Analysis item ready",
                     data: Some(json!({
-                        "event": "item",
+                        "event": "item", "backend": "y",
                         "index": delivered,
                         "item": compact_item(item, url)
                     })),
@@ -882,7 +1042,7 @@ fn stream_analysis(
     }
 
     Ok(json!({
-        "event": "complete",
+        "event": "complete", "backend": "y",
         "itemCount": delivered,
         "itemLimit": item_limit,
         "truncated": truncated,
@@ -893,6 +1053,90 @@ fn stream_analysis(
         "useAria2": config.use_aria2,
         "aria2Available": tools.aria2_is_available()
     }))
+}
+
+// One popup action maps to one Native Messaging process. Y and G run in that
+// process and stream independent, backend-tagged results. A failed extractor
+// does not suppress the other extractor's result.
+fn analyze_current_source(
+    tools: &ToolPaths,
+    url: &str,
+    use_cookies: bool,
+) -> Result<super::yt_dlp_source_analysis::DesktopSourceAnalysis, String> {
+    // Mixed YouTube URL: preserve explicit current-video intent, not feed routing.
+    let single = super::youtube_url_has_video_and_playlist(url)
+        .then(|| super::youtube_url_force_single_video(url))
+        .flatten();
+    super::yt_dlp_source_analysis::analyze_desktop_source(
+        tools,
+        single.as_deref().unwrap_or(url),
+        use_cookies,
+    )
+    .map_err(|error| error.message)
+}
+
+fn stream_combined_analysis(
+    request: &Value,
+    writer: &mut impl Write,
+    cancelled: &AtomicBool,
+) -> Result<Value, String> {
+    let backends = request
+        .get("backends")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "The combined analysis requires a backend list.".to_owned())?;
+    if backends.is_empty()
+        || backends.len() > 2
+        || backends
+            .iter()
+            .any(|backend| !matches!(backend.as_str(), Some("y" | "g")))
+        || (backends.len() == 2 && backends[0] == backends[1])
+    {
+        return Err("Invalid combined analysis backends.".to_owned());
+    }
+    // Validate the unchanged page URL before starting either extractor.
+    validated_url(request.get("url").unwrap_or(&Value::Null))?;
+    for backend in backends {
+        let name = backend.as_str().unwrap_or_default();
+        if cancelled.load(Ordering::Acquire) {
+            write_response(
+                &mut *writer,
+                &NativeResponse {
+                    ok: true,
+                    message: "Analysis stopped",
+                    data: Some(json!({ "event": "stopped", "backend": name })),
+                },
+            )?;
+            continue;
+        }
+        let mut per_backend = request.clone();
+        per_backend["backend"] = json!(name);
+        match stream_analysis(&per_backend, &mut *writer, cancelled) {
+            Ok(mut final_event) => {
+                final_event["backend"] = json!(name);
+                write_response(
+                    &mut *writer,
+                    &NativeResponse {
+                        ok: true,
+                        message: "Analysis backend complete",
+                        data: Some(final_event),
+                    },
+                )?;
+            }
+            Err(error) => {
+                // An extractor failure is a result for this backend, not a
+                // connection-level failure: continue with the next backend.
+                write_response(
+                    &mut *writer,
+                    &NativeResponse {
+                        ok: true,
+                        message: "Analysis backend failed",
+                        data: Some(json!({ "event": "failed", "backend": name, "message": error })),
+                    },
+                )?;
+            }
+        }
+    }
+    Ok(json!({ "event": "allComplete" }))
 }
 
 fn sanitized_file_name(value: &str) -> String {
@@ -1116,20 +1360,8 @@ fn browser_output_format(
     }
 }
 
-fn browser_chapter_output_argument(output_dir: &Path, file_name: &str) -> String {
-    format!(
-        "chapter:{}",
-        output_dir
-            .join(yt_dlp_output_literal(file_name))
-            .join("%(section_number)02d - %(section_title)s.%(ext)s")
-            .display()
-    )
-}
-
 fn apply_browser_post_process_choices(
     command: &mut std::process::Command,
-    output_dir: &Path,
-    file_name: &str,
     subtitle_language: Option<&str>,
     subtitle_automatic: bool,
     subtitle_mode: PostProcessMode,
@@ -1154,18 +1386,12 @@ fn apply_browser_post_process_choices(
         }
     }
 
-    command.arg("--no-split-chapters");
-    if chapter_mode_is_explicit {
-        command.arg("--no-embed-chapters");
-    }
-    if chapter_mode.writes() {
-        command
-            .arg("--split-chapters")
-            .arg("--output")
-            .arg(browser_chapter_output_argument(output_dir, file_name));
-    }
-    if chapter_mode.embeds() {
-        command.arg("--embed-chapters");
+    if chapter_mode_is_explicit || chapter_mode.writes() {
+        super::yt_dlp_chapters::apply_chapter_choices(
+            command,
+            chapter_mode.writes(),
+            chapter_mode.embeds(),
+        );
     }
 }
 
@@ -1337,11 +1563,108 @@ fn browser_format_selector(request: &Value) -> Result<String, String> {
     }
 }
 
+/// A popup item is one gallery post, not one CDN image. Use gallery-dl's
+/// normal post download command so V2's configured directory, site cookies,
+/// archive and metadata handling apply exactly as in the desktop GUI.
+fn stream_gallery_post_download(
+    request: &Value,
+    writer: &mut impl Write,
+    cancelled: &AtomicBool,
+) -> Result<Value, String> {
+    use super::gallery_dl::GalleryDlBackend;
+    let url = validated_url(request.get("url").unwrap_or(&Value::Null))?;
+    let (config, tools) = AppConfig::load_runtime();
+    let destination = configured_download_directory(&config)?;
+    let archive_mode = request
+        .get("archiveMode")
+        .and_then(Value::as_str)
+        .unwrap_or("files");
+    if archive_mode != "files" && archive_mode != "zip" {
+        return Err("The gallery download archive mode is invalid.".to_owned());
+    }
+    let staging = if archive_mode == "zip" {
+        Some(browser_gallery_zip::GalleryZipWorkspace::new(&destination)?)
+    } else {
+        None
+    };
+    let download_destination = staging
+        .as_ref()
+        .map(|workspace| workspace.path())
+        .unwrap_or(&destination);
+    let use_cookies = config.use_browser_cookies;
+    let gallery = GalleryDlBackend::from_tool_paths(&tools);
+    let mut prepared =
+        gallery.prepare_item_download(url, download_destination, &tools, use_cookies)?;
+    let root = super::extractor_index::matching_gallery_extractor(url)?.unwrap_or_default();
+    let is_timeline =
+        crate::domain::gallery_source_scope(&root) == crate::domain::GallerySourceScope::Timeline;
+    if is_timeline || request.get("timelineRange").is_some() {
+        let range = super::browser_gallery_timeline::range(request, url)?;
+        if !gallery.supports_bounded_timeline_feed(url, &tools, use_cookies)? {
+            return Err(
+                "This source delegates multiple feeds; bounded timeline download is unsupported."
+                    .into(),
+            );
+        }
+        super::gallery_dl::apply_timeline_download_range(&mut prepared, &range)?;
+    }
+    if cancelled.load(Ordering::Acquire) {
+        return Ok(json!({ "event": "stopped" }));
+    }
+    write_response(
+        &mut *writer,
+        &NativeResponse {
+            ok: true,
+            message: "gallery-dl download started",
+            data: Some(json!({
+                "event": "started", "backend": "g", "protocol": host_protocol_info()
+            })),
+        },
+    )?;
+    // Wait for the actual process and completed/skipped image XMP work before
+    // announcing completion or publishing a ZIP. Cancellation remains host-owned.
+    browser_native_gallery_download::run_gallery_download(prepared, cancelled)?;
+    if cancelled.load(Ordering::Acquire) {
+        return Ok(json!({ "event": "stopped" }));
+    }
+    if let Some(staging) = staging.as_ref() {
+        write_response(
+            &mut *writer,
+            &NativeResponse {
+                ok: true,
+                message: "gallery-dl download finished; packing ZIP",
+                data: Some(json!({"event": "progress", "backend": "g", "percent": 95})),
+            },
+        )?;
+        let archive = browser_gallery_zip::pack_gallery_directory(
+            staging.path(),
+            &destination,
+            &string_field(request, "title"),
+            cancelled,
+        )?;
+        if cancelled.load(Ordering::Acquire) {
+            let _ = fs::remove_file(&archive);
+            return Ok(json!({ "event": "stopped" }));
+        }
+        return Ok(json!({
+            "event": "complete", "backend": "g",
+            "outputPath": archive.to_string_lossy(),
+        }));
+    }
+    Ok(json!({
+        "event": "complete", "backend": "g",
+        "outputPath": destination.to_string_lossy()
+    }))
+}
+
 fn stream_download(
     request: &Value,
     writer: &mut impl Write,
     cancelled: &AtomicBool,
 ) -> Result<Value, String> {
+    if request.get("backend").and_then(Value::as_str) == Some("g") {
+        return stream_gallery_post_download(request, writer, cancelled);
+    }
     let url = validated_url(request.get("url").unwrap_or(&Value::Null))?.to_owned();
     let video_id = string_field(request, "videoFormatId");
     let audio_id = string_field(request, "audioFormatId");
@@ -1357,12 +1680,13 @@ fn stream_download(
     let download_section_args = validated_browser_download_section_args(request)?;
     let (config, mut tools) = AppConfig::load_runtime();
     let output_dir = configured_download_directory(&config)?;
-    let cookies = super::browser_native_cookies::NativeCookies::from_request(request)?;
-    let youtube_authenticated = cookies
-        .as_ref()
-        .is_some_and(|cookies| cookies.youtube_authenticated());
-    apply_browser_youtube_format_coverage(&mut tools, &url, youtube_authenticated, true);
-    tools.native_cookie_override = cookies.as_ref().map(|cookies| cookies.path());
+    let allow_anonymous_clients =
+        super::browser_native_cookies::shared_source_allows_anonymous_youtube_clients(
+            &tools,
+            config.use_browser_cookies,
+            &url,
+        )?;
+    apply_browser_youtube_format_coverage(&mut tools, &url, allow_anonymous_clients, true);
     tools.validate_cookie_setup(config.use_browser_cookies)?;
     if !download_section_args.is_empty() && tools.effective_config_owns_download_sections() {
         return Err(
@@ -1407,14 +1731,10 @@ fn stream_download(
     let subtitle_mode = browser_subtitle_mode(request, subtitle_language.is_some())?;
     let chapter_mode_is_explicit = !matches!(request.get("chapterMode"), None | Some(Value::Null));
     let chapter_mode = browser_chapter_mode(request)?;
-    if chapter_mode.writes() && !download_section_args.is_empty() {
-        return Err(
-            "Chapter splitting and a custom download range cannot be used together.".to_owned(),
-        );
-    }
     let download = DownloadRequest {
         target_kind,
         url,
+        playlist_index: None,
         format_selector,
         video_selector: video_id,
         audio_selector: audio_id,
@@ -1440,8 +1760,9 @@ fn stream_download(
         subtitle_is_auto_translated: false,
         write_subtitles: subtitle_mode.writes(),
         embed_subtitles: subtitle_mode.embeds(),
-        write_chapters: chapter_mode.writes(),
-        embed_chapters: chapter_mode.embeds(),
+        // The browser override below owns chapter arguments, avoiding duplicate print events.
+        write_chapters: false,
+        embed_chapters: false,
         write_thumbnail: thumbnail_mode.writes(),
         embed_thumbnail: thumbnail_mode.embeds(),
         use_cookies: config.use_browser_cookies,
@@ -1478,8 +1799,6 @@ fn stream_download(
     }
     apply_browser_post_process_choices(
         &mut prepared.command,
-        &output_dir,
-        &download.file_name,
         subtitle_language.as_deref(),
         subtitle_automatic,
         subtitle_mode,
@@ -1540,7 +1859,16 @@ fn stream_download(
     let mut final_path = None;
     let mut last_error = String::new();
     let mut last_percent = None;
+    let mut chapter_lines = Vec::new();
     for (is_stderr, line) in line_rx {
+        if !is_stderr
+            && line
+                .trim()
+                .starts_with(super::yt_dlp_chapters::CHAPTER_OUTPUT_PREFIX)
+        {
+            chapter_lines.push(line);
+            continue;
+        }
         if is_stderr && !line.trim().is_empty() {
             last_error = line.clone();
         }
@@ -1581,6 +1909,7 @@ fn stream_download(
         };
         return Err(format!("yt-dlp download failed: {detail}"));
     }
+    super::yt_dlp_chapters::write_chapter_sidecars(&chapter_lines)?;
     Ok(json!({
         "event": "complete",
         "outputPath": final_path.unwrap_or(expected)
@@ -1625,6 +1954,7 @@ fn handle_request(raw: &str) -> Result<(&'static str, Value), String> {
                 json!({
                     "host": HOST_NAME,
                     "ytDlpAvailable": tools.validate_yt_dlp_available().is_ok(),
+                    "galleryDlAvailable": super::gallery_dl::GalleryDlBackend::from_tool_paths(&tools).is_available(),
                     "defaultDownloadType": if config.app_mode == "audio" { "audio" } else { "settings" },
                     "cookiesEnabled": config.use_browser_cookies,
                     "outputDirectory": output_directory.to_string_lossy(),
@@ -1634,6 +1964,18 @@ fn handle_request(raw: &str) -> Result<(&'static str, Value), String> {
                     "useAria2": config.use_aria2,
                     "aria2Available": tools.aria2_is_available(),
                     "protocol": host_protocol_info()
+                }),
+            ))
+        }
+        Some("saveBrowserCookies") => {
+            let saved = super::browser_cookie_persistence::save_and_enable(&request)?;
+            Ok((
+                "Website cookies saved",
+                json!({
+                    "siteId": saved.site_id,
+                    "displayName": saved.display_name,
+                    "cookieCount": saved.cookie_count,
+                    "autoUpdateEnabled": true
                 }),
             ))
         }
@@ -1660,7 +2002,10 @@ fn read_message(mut reader: impl Read) -> Result<String, String> {
 }
 
 fn write_response(mut writer: impl Write, response: &NativeResponse<'_>) -> Result<(), String> {
-    let body = serde_json::to_vec(response)
+    let mut envelope = serde_json::to_value(response)
+        .map_err(|error| format!("Could not serialize the response: {error}"))?;
+    envelope["traceId"] = json!(super::operation_diagnostics::current_trace());
+    let body = serde_json::to_vec(&envelope)
         .map_err(|error| format!("Could not serialize the response: {error}"))?;
     if body.len() > MAX_RESPONSE_BYTES {
         return Err("The Native Messaging response is too large.".to_owned());
@@ -1698,6 +2043,8 @@ pub fn run_native_host_if_requested() -> bool {
         return false;
     };
     let mut writer = std::io::stdout().lock();
+    let started = std::time::Instant::now();
+    let mut request_trace = None;
     let result = (|| -> Result<(), String> {
         configure_binary_stdio()?;
         if origin != EXTENSION_ORIGIN {
@@ -1705,9 +2052,32 @@ pub fn run_native_host_if_requested() -> bool {
         }
         super::runtime_paths::set_application_current_dir()?;
         let raw = read_message(std::io::stdin().lock())?;
-        let request: Value = serde_json::from_str(&raw)
+        let mut request: Value = serde_json::from_str(&raw)
             .map_err(|error| format!("The Native Messaging request is not valid JSON: {error}"))?;
-        let action = request.get("action").and_then(Value::as_str);
+        let action_name = request
+            .get("action")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let action = action_name.as_deref();
+        let trace = request
+            .get("traceId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(super::operation_diagnostics::new_trace);
+        let _trace = super::operation_diagnostics::enter(&trace);
+        request_trace = Some(super::operation_diagnostics::current_trace());
+        super::operation_diagnostics::record(
+            "host.request",
+            json!({"cookieCount": request["browserCookies"].as_array().map(Vec::len).unwrap_or(0), "analysis": matches!(action, Some("analyze" | "analyzeSelected" | "analyzeSources" | "analyzeIndexedSources")), "timeline": action == Some("galleryRead"), "download": action == Some("download")}),
+        );
+        // Save once, then remove live credentials before any analyzer/download
+        // worker can override the shared v2-configured Cookie source.
+        if let Err(error) =
+            super::browser_cookie_persistence::prepare_shared_source_request(&mut request)
+        {
+            super::operation_diagnostics::record("cookies.save.failed", json!({"automatic": true}));
+            return Err(format!("Could not refresh saved website Cookies: {error}"));
+        }
         if action == Some("download") {
             let cancelled = Arc::new(AtomicBool::new(false));
             let cancellation = Arc::clone(&cancelled);
@@ -1736,7 +2106,16 @@ pub fn run_native_host_if_requested() -> bool {
                     data: Some(data),
                 },
             )
-        } else if action == Some("analyze") {
+        } else if matches!(
+            action,
+            Some(
+                "analyze"
+                    | "analyzeSelected"
+                    | "analyzeSources"
+                    | "analyzeIndexedSources"
+                    | "galleryRead"
+            )
+        ) {
             let cancelled = Arc::new(AtomicBool::new(false));
             let cancellation = Arc::clone(&cancelled);
             thread::spawn(move || {
@@ -1755,7 +2134,23 @@ pub fn run_native_host_if_requested() -> bool {
                     super::force_cleanup_tracked_processes();
                 }
             });
-            let data = stream_analysis(&request, &mut writer, &cancelled)?;
+            let data = if action == Some("galleryRead") {
+                stream_gallery_analysis(&request, &mut writer, &cancelled)?
+            } else if matches!(
+                action,
+                Some("analyzeSelected" | "analyzeSources" | "analyzeIndexedSources")
+            ) || request.get("backend").is_none()
+            {
+                browser_native_analysis_unified::stream_unified_analysis(
+                    &request,
+                    &mut writer,
+                    &cancelled,
+                )?
+            } else if request.get("backend").and_then(Value::as_str) == Some("both") {
+                stream_combined_analysis(&request, &mut writer, &cancelled)?
+            } else {
+                stream_analysis(&request, &mut writer, &cancelled)?
+            };
             write_response(
                 &mut writer,
                 &NativeResponse {
@@ -1776,6 +2171,15 @@ pub fn run_native_host_if_requested() -> bool {
             )
         }
     })();
+    let _trace = request_trace
+        .as_deref()
+        .map(super::operation_diagnostics::enter);
+    if request_trace.is_some() {
+        super::operation_diagnostics::record(
+            "host.request.finish",
+            json!({"elapsedMs": started.elapsed().as_millis(), "success": result.is_ok()}),
+        );
+    }
     if let Err(error) = result {
         let _ = write_response(
             &mut writer,
@@ -1787,409 +2191,4 @@ pub fn run_native_host_if_requested() -> bool {
         );
     }
     true
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn manifest_limits_access_to_the_fixed_extension() {
-        let manifest = NativeHostManifest {
-            name: HOST_NAME,
-            description: "test",
-            path: "app.exe".to_owned(),
-            host_type: "stdio",
-            allowed_origins: [EXTENSION_ORIGIN],
-        };
-        let value = serde_json::to_value(manifest).unwrap();
-        assert_eq!(value["allowed_origins"][0], EXTENSION_ORIGIN);
-        assert_eq!(EXTENSION_ID, "jnhdidpednnfdphbcbeignbhceemminn");
-    }
-
-    #[test]
-    fn framing_preserves_utf8_and_rejects_large_messages() {
-        let body = br#"{"action":"status","title":"\u6e2c\u8a66"}"#;
-        let mut frame = (body.len() as u32).to_le_bytes().to_vec();
-        frame.extend_from_slice(body);
-        assert_eq!(read_message(Cursor::new(frame)).unwrap().as_bytes(), body);
-        let frame = ((MAX_REQUEST_BYTES + 1) as u32).to_le_bytes();
-        assert!(read_message(Cursor::new(frame)).is_err());
-    }
-
-    #[test]
-    fn progress_events_accept_template_lines_with_and_without_format_id() {
-        let current = progress_event("[yt-dlp],137, 53.1%,00:05,1024,8192,2048,5").unwrap();
-        assert!((current["percent"].as_f64().unwrap() - 53.1).abs() < 0.001);
-        assert_eq!(current["downloaded"], "1024");
-        let legacy = progress_event("[yt-dlp], 12.5%,00:05,1024,8192,2048,5").unwrap();
-        assert!((legacy["percent"].as_f64().unwrap() - 12.5).abs() < 0.001);
-        assert!(progress_event("[download] Destination: file.webm").is_none());
-    }
-
-    #[test]
-    fn resolved_v2_directory_removes_current_directory_components() {
-        let normalized = Path::new(r"D:\portable\.\download")
-            .components()
-            .collect::<PathBuf>();
-        assert_eq!(normalized, PathBuf::from(r"D:\portable\download"));
-    }
-    #[test]
-    fn compact_analysis_detects_multiple_items_and_strips_media_urls() {
-        let raw = json!({"entries": [{"id":"one","title":"One","webpage_url":"https://x/1","formats":[{"format_id":"v","vcodec":"avc1","acodec":"none","url":"https://secret"}]},{"id":"two","title":"Two","webpage_url":"https://x/2"}]});
-        let items = raw["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|entry| compact_item(entry, "https://x"))
-            .collect::<Vec<_>>();
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0]["formats"][0]["id"], "v");
-        assert!(items[0]["formats"][0].get("url").is_none());
-    }
-
-    #[test]
-    fn compact_formats_infers_redgifs_video_when_codec_names_are_absent() {
-        let raw = json!({
-            "formats": [
-                {
-                    "format_id": "sd", "vcodec": null, "acodec": null,
-                    "video_ext": "mp4", "audio_ext": "none",
-                    "width": 270, "height": 480
-                },
-                {
-                    "format_id": "hd", "vcodec": null, "acodec": null,
-                    "video_ext": "mp4", "audio_ext": "none",
-                    "width": 1080, "height": 1920
-                }
-            ]
-        });
-
-        let formats = compact_formats(&raw);
-        assert_eq!(formats.len(), 2);
-        assert_eq!(formats[0]["id"], "sd");
-        assert_eq!(formats[0]["kind"], "video");
-        assert_eq!(formats[0]["audioPresence"], "unknown");
-        assert_eq!(formats[1]["id"], "hd");
-        assert_eq!(formats[1]["kind"], "video");
-        assert_eq!(formats[1]["audioPresence"], "unknown");
-    }
-
-    #[test]
-    fn compact_formats_does_not_treat_empty_codecs_as_media_streams() {
-        let raw = json!({
-            "formats": [
-                {
-                    "format_id": "empty", "vcodec": "", "acodec": "",
-                    "ext": "mp4"
-                },
-                {
-                    "format_id": "audio", "vcodec": "none", "acodec": "mp4a.40.2",
-                    "audio_ext": "m4a", "asr": 44100
-                }
-            ]
-        });
-
-        let formats = compact_formats(&raw);
-        assert_eq!(formats.len(), 1);
-        assert_eq!(formats[0]["id"], "audio");
-        assert_eq!(formats[0]["kind"], "audio");
-        assert_eq!(formats[0]["audioPresence"], "present");
-    }
-
-    #[test]
-    fn compact_formats_preserves_explicit_absent_audio() {
-        let raw = json!({
-            "formats": [{
-                "format_id": "video", "vcodec": "avc1", "acodec": "none",
-                "video_ext": "mp4", "audio_ext": "none"
-            }]
-        });
-
-        let formats = compact_formats(&raw);
-        assert_eq!(formats[0]["kind"], "video");
-        assert_eq!(formats[0]["audioPresence"], "absent");
-    }
-
-    #[test]
-    fn compact_formats_falls_back_to_approximate_filesize_and_exposes_bitrate() {
-        let raw = json!({
-            "formats": [{
-                "format_id": "137", "vcodec": "avc1.640028", "acodec": "none",
-                "video_ext": "mp4", "width": 1920, "height": 1080,
-                "vbr": 4123.5, "filesize": null, "filesize_approx": 12345678.0
-            }]
-        });
-
-        let formats = compact_formats(&raw);
-        assert_eq!(formats[0]["filesize"], 12_345_678);
-        assert_eq!(formats[0]["filesizeApproximate"], true);
-        assert_eq!(formats[0]["bitrate"], 4123.5);
-    }
-
-    #[test]
-    fn browser_youtube_coverage_adds_muxed_client_without_overriding_user_args() {
-        let mut defaults = ToolPaths::default();
-        apply_browser_youtube_format_coverage(
-            &mut defaults,
-            "https://www.youtube.com/watch?v=video",
-            false,
-            true,
-        );
-        assert_eq!(
-            defaults.youtube_extractor_args,
-            BROWSER_YOUTUBE_PLAYER_CLIENTS
-        );
-
-        let mut custom = ToolPaths {
-            youtube_extractor_args: "player_client=tv".to_owned(),
-            ..ToolPaths::default()
-        };
-        apply_browser_youtube_format_coverage(&mut custom, "https://youtu.be/video", false, true);
-        assert_eq!(custom.youtube_extractor_args, "player_client=tv");
-
-        let mut other_site = ToolPaths::default();
-        apply_browser_youtube_format_coverage(
-            &mut other_site,
-            "https://example.com/watch?v=video",
-            false,
-            true,
-        );
-        assert!(other_site.youtube_extractor_args.is_empty());
-
-        let mut authenticated = ToolPaths::default();
-        apply_browser_youtube_format_coverage(
-            &mut authenticated,
-            "https://www.youtube.com/watch?v=video",
-            true,
-            true,
-        );
-        assert!(authenticated.youtube_extractor_args.is_empty());
-
-        let mut playlist = ToolPaths::default();
-        apply_browser_youtube_format_coverage(
-            &mut playlist,
-            "https://www.youtube.com/playlist?list=playlist",
-            false,
-            false,
-        );
-        assert!(playlist.youtube_extractor_args.is_empty());
-    }
-
-    #[test]
-    fn playlist_analysis_reports_when_configured_item_limit_is_exceeded() {
-        let entries = (0..=DEFAULT_MULTI_ITEMS)
-            .map(|index| json!({"id": index}))
-            .collect::<Vec<_>>();
-        assert!(playlist_analysis_is_truncated(
-            &json!({"entries": entries}),
-            "playlist",
-            DEFAULT_MULTI_ITEMS
-        ));
-        assert!(playlist_analysis_is_truncated(
-            &json!({"entries": [], "playlist_count": 100}),
-            "playlist",
-            DEFAULT_MULTI_ITEMS
-        ));
-        assert!(!playlist_analysis_is_truncated(
-            &json!({"entries": [1]}),
-            "current",
-            DEFAULT_MULTI_ITEMS
-        ));
-    }
-
-    #[test]
-    fn browser_analysis_item_limit_defaults_and_rejects_unbounded_values() {
-        assert_eq!(
-            browser_analysis_item_limit(&json!({})).unwrap(),
-            DEFAULT_MULTI_ITEMS
-        );
-        assert_eq!(
-            browser_analysis_item_limit(&json!({"itemLimit": 64})).unwrap(),
-            64
-        );
-        assert!(browser_analysis_item_limit(&json!({"itemLimit": 0})).is_err());
-        assert!(browser_analysis_item_limit(&json!({"itemLimit": 101})).is_err());
-        assert!(browser_analysis_item_limit(&json!({"itemLimit": 1.5})).is_err());
-    }
-
-    #[test]
-    fn native_protocol_metadata_is_additive_and_future_client_fields_are_ignored() {
-        let host = host_protocol_info();
-        assert_eq!(host["wireVersion"], NATIVE_WIRE_VERSION);
-        assert!(
-            host["capabilities"]
-                .as_array()
-                .is_some_and(|values| values.iter().any(|value| value == "analysis.stream.v1"))
-        );
-        assert_eq!(host["limits"]["playlistItems"], MAX_MULTI_ITEMS);
-
-        let future_client = json!({
-            "client": {
-                "wireVersion": 99,
-                "capabilities": ["future.unknown.v9"],
-                "futureField": true
-            },
-            "unknownTopLevel": {"value": 1}
-        });
-        assert_eq!(
-            browser_analysis_item_limit(&future_client).unwrap(),
-            DEFAULT_MULTI_ITEMS
-        );
-        assert_eq!(browser_playlist_scope(&future_client).unwrap(), "current");
-    }
-
-    #[test]
-    fn compact_item_exposes_subtitle_and_chapter_choices_without_media_urls() {
-        let raw = json!({
-            "id": "one",
-            "formats": [{
-                "format_id": "muxed", "vcodec": "avc1", "acodec": "mp4a.40.2",
-                "ext": "mp4", "url": "https://secret"
-            }],
-            "subtitles": {
-                "zh-Hant": [{"name": "繁體中文", "url": "https://secret/sub"}],
-                "live_chat": [{"name": "Live chat", "url": "https://secret/chat"}]
-            },
-            "automatic_captions": {
-                "zh-Hant": [{"name": "duplicate"}],
-                "en": [{"name": "English"}]
-            },
-            "chapters": [{"title": "One"}, {"title": "Two"}]
-        });
-
-        let item = compact_item(&raw, "https://example.test/video");
-
-        assert_eq!(item["chapterCount"], 2);
-        assert_eq!(item["subtitles"].as_array().unwrap().len(), 2);
-        assert_eq!(item["subtitles"][0]["language"], "zh-Hant");
-        assert_eq!(item["subtitles"][0]["automatic"], false);
-        assert_eq!(item["subtitles"][1]["automatic"], true);
-        assert_eq!(item["formats"][0]["audioExt"], "m4a");
-        assert!(item["formats"][0].get("url").is_none());
-    }
-
-    #[test]
-    fn browser_post_process_choices_override_config_owned_defaults() {
-        let mut command = std::process::Command::new("yt-dlp");
-        let output_dir = Path::new(r"D:\Downloads");
-
-        apply_browser_post_process_choices(
-            &mut command,
-            output_dir,
-            "custom file name",
-            Some("zh-Hant"),
-            false,
-            PostProcessMode::Download,
-            PostProcessMode::Download,
-            true,
-        );
-
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        assert!(args.iter().any(|arg| arg == "--no-write-subs"));
-        assert!(args.iter().any(|arg| arg == "--write-subs"));
-        assert!(args.iter().any(|arg| arg == "zh-Hant"));
-        assert!(args.iter().any(|arg| arg == "--no-split-chapters"));
-        assert!(args.iter().any(|arg| arg == "--split-chapters"));
-        assert!(args.iter().any(|arg| {
-            arg.starts_with("chapter:")
-                && arg.contains("%(section_number)02d - %(section_title)s.%(ext)s")
-        }));
-    }
-
-    #[test]
-    fn browser_audio_mode_extracts_selected_or_muxed_source_audio() {
-        let mut command = std::process::Command::new("yt-dlp");
-        apply_browser_audio_extraction(&mut command, "m4a").unwrap();
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        assert_eq!(args, ["--extract-audio", "--audio-format", "m4a"]);
-
-        let mut best = std::process::Command::new("yt-dlp");
-        apply_browser_audio_extraction(&mut best, "").unwrap();
-        assert_eq!(
-            best.get_args()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
-            ["--extract-audio"]
-        );
-        assert!(apply_browser_audio_extraction(&mut best, "../../mp3").is_err());
-    }
-
-    #[test]
-    fn browser_item_output_format_is_kind_scoped_and_allowlisted() {
-        assert_eq!(
-            browser_output_format(&json!({"outputFormat":"mkv"}), DownloadTargetKind::Normal)
-                .unwrap(),
-            Some("mkv".to_owned())
-        );
-        assert_eq!(
-            browser_output_format(&json!({"outputFormat":".mp3"}), DownloadTargetKind::Audio)
-                .unwrap(),
-            Some("mp3".to_owned())
-        );
-        assert!(
-            browser_output_format(&json!({"outputFormat":"mp3"}), DownloadTargetKind::Normal)
-                .is_err()
-        );
-        assert!(
-            browser_output_format(&json!({"outputFormat":"mkv"}), DownloadTargetKind::Audio)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn browser_playlist_scope_is_explicit_and_validated() {
-        let mut current = std::process::Command::new("yt-dlp");
-        apply_browser_playlist_scope(&mut current, &json!({"playlistScope": "current"})).unwrap();
-        assert_eq!(
-            current
-                .get_args()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
-            ["--no-playlist"]
-        );
-
-        let mut playlist = std::process::Command::new("yt-dlp");
-        apply_browser_playlist_scope(&mut playlist, &json!({"playlistScope": "playlist"})).unwrap();
-        assert_eq!(
-            playlist
-                .get_args()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
-            ["--yes-playlist"]
-        );
-        assert!(
-            apply_browser_playlist_scope(&mut playlist, &json!({"playlistScope": "all"})).is_err()
-        );
-    }
-
-    #[test]
-    fn browser_format_selector_accepts_silent_video_and_preserves_separate_audio_merge() {
-        assert_eq!(
-            browser_format_selector(&json!({
-                "contentKind": "video",
-                "videoFormatId": "hd",
-                "audioFormatId": "",
-                "videoIsMuxed": false
-            }))
-            .unwrap(),
-            "hd"
-        );
-        assert_eq!(
-            browser_format_selector(&json!({
-                "contentKind": "video",
-                "videoFormatId": "video",
-                "audioFormatId": "audio",
-                "videoIsMuxed": false
-            }))
-            .unwrap(),
-            "video+audio"
-        );
-    }
 }

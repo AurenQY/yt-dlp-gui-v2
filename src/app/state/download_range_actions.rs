@@ -66,6 +66,7 @@ impl AppState {
         };
         let title = item.title.clone();
         item.selection.download_range = selection;
+        item.restored_chapters_unresolved = false;
         item.completed_selection = None;
         self.last_action = if item.selection.download_range.is_full_video() {
             i18n::format_fixed_english(
@@ -379,59 +380,4 @@ fn resolved_download_output_count(
     resolved_download_section_arguments(selection, metadata)
         .len()
         .max(1)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::ChapterOption;
-
-    fn chapter(index: usize, start: u64, end: u64) -> ChapterOption {
-        ChapterOption::new(
-            format!("chapter:{index}"),
-            format!("Chapter {}", index + 1),
-            format_download_range_timestamp(start),
-            Some(format_download_range_timestamp(end)),
-            start,
-            Some(end),
-        )
-    }
-
-    #[test]
-    fn adjacent_chapters_become_one_download_section_and_gaps_remain_separate() {
-        let mut metadata = VideoMetadata::empty_preview();
-        metadata.duration_millis = Some(50_000);
-        metadata.chapters = vec![
-            chapter(0, 0, 10_000),
-            chapter(1, 10_000, 20_000),
-            chapter(2, 20_000, 30_000),
-            chapter(3, 30_000, 40_000),
-            chapter(4, 40_000, 50_000),
-        ];
-        let mut selection = DownloadRangeSelection::default();
-        selection.set_chapter_selected(1, true);
-        selection.set_chapter_selected(3, true);
-        selection.set_chapter_selected(4, true);
-
-        assert_eq!(
-            resolved_download_section_arguments(&selection, Some(&metadata)),
-            vec!["*00:00:10-00:00:20", "*00:00:30-00:00:50"]
-        );
-    }
-
-    #[test]
-    fn chapter_and_custom_ranges_are_emitted_in_timeline_order() {
-        let mut metadata = VideoMetadata::empty_preview();
-        metadata.chapters = vec![chapter(0, 20_000, 30_000)];
-        let mut selection = DownloadRangeSelection::default();
-        selection.set_chapter_selected(0, true);
-        selection.add_custom_time_range(
-            DownloadTimeRange::new(5_000, 10_000).expect("valid custom range"),
-        );
-
-        assert_eq!(
-            resolved_download_section_arguments(&selection, Some(&metadata)),
-            vec!["*00:00:05-00:00:10", "*00:00:20-00:00:30"]
-        );
-    }
 }

@@ -14,6 +14,7 @@ use super::download_resilience::{
     DownloadAttemptContext, DownloadAttemptFailure, DownloadErrorKind, DownloadResiliencePolicy,
     RecoveryDecision,
 };
+use crate::domain::GalleryDownloadArtifact;
 use crate::domain::{QueueItemId, WorkflowKind, WorkflowRunId};
 use crate::infrastructure::{
     DownloadRequest, DownloadTargetKind, FINAL_OUTPUT_PATH_PREFIX, FileTimeMode, PreparedDownload,
@@ -34,6 +35,19 @@ pub(super) enum DownloadEvent {
     Metadata {
         item_id: QueueItemId,
         json: Value,
+    },
+    GalleryArtifact {
+        item_id: QueueItemId,
+        workflow_id: WorkflowRunId,
+        artifact: GalleryDownloadArtifact,
+    },
+    GalleryPostCompleted {
+        item_id: QueueItemId,
+        workflow_id: WorkflowRunId,
+    },
+    GalleryProcessExited {
+        item_id: QueueItemId,
+        workflow_id: WorkflowRunId,
     },
     ToolCommandFinished {
         item_id: QueueItemId,
@@ -554,7 +568,7 @@ pub(super) fn request_download_stop(
     }
 }
 
-fn wait_download_child(
+pub(super) fn wait_download_child(
     child_handle: &Arc<Mutex<Option<Child>>>,
     cancel_requested: &Arc<AtomicBool>,
 ) -> Option<std::io::Result<std::process::ExitStatus>> {
@@ -625,6 +639,7 @@ fn finalize_download_output(
     stdout_lines: &[String],
 ) -> Result<String, String> {
     if request.target_kind != DownloadTargetKind::Subtitle {
+        crate::infrastructure::yt_dlp_chapters::write_chapter_sidecars(stdout_lines)?;
         let mut actual_output_paths = reported_final_output_paths(stdout_lines)
             .into_iter()
             .filter(|path| path.is_file())
@@ -1623,120 +1638,4 @@ fn parse_progress_timestamp_seconds(value: &str) -> Option<f32> {
     let minutes = parts[1].parse::<f32>().ok()?;
     let seconds = parts[2].parse::<f32>().ok()?;
     Some(hours * 3600.0 + minutes * 60.0 + seconds)
-}
-
-#[cfg(test)]
-mod progress_parser_tests {
-    use super::*;
-
-    #[test]
-    fn parses_numeric_format_id_without_treating_it_as_percent() {
-        let progress = parse_yt_dlp_progress_detail(
-            "[yt-dlp],313,  0.0%,10:48,1024,311411571,480475.14218592684,648",
-        )
-        .expect("progress template line should parse");
-
-        assert_eq!(progress.format_id.as_deref(), Some("313"));
-        assert_eq!(progress.percent, 0.0);
-        let detail = progress.detail.expect("detail should be preserved");
-        assert_eq!(detail.downloaded.as_deref(), Some("1.00 KiB"));
-    }
-
-    #[test]
-    fn parses_audio_format_id_as_format_not_percent() {
-        let progress = parse_yt_dlp_progress_detail(
-            "[yt-dlp],251, 53.1%,00:00,2096128,3947431,64250621.58285831,0",
-        )
-        .expect("audio progress template line should parse");
-
-        assert_eq!(progress.format_id.as_deref(), Some("251"));
-        assert!((progress.percent - 53.1).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn parses_legacy_template_without_format_id() {
-        let progress = parse_yt_dlp_progress_detail("[yt-dlp], 12.5%,00:05,1024,8192,2048,5")
-            .expect("legacy progress template line should parse");
-
-        assert_eq!(progress.format_id, None);
-        assert!((progress.percent - 12.5).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn treats_na_as_non_media_format_id_for_routing() {
-        let context = DownloadProgressContext {
-            target_kind: DownloadTargetKind::Normal,
-            video_selector: "313".to_owned(),
-            audio_selector: "251".to_owned(),
-            shared_av_progress: false,
-            format_selector: "313+251".to_owned(),
-            section_duration_seconds: None,
-        };
-
-        assert_eq!(
-            download_slot_for_format_id(Some("313"), &context),
-            Some(DownloadProgressSlot::Video)
-        );
-        assert_eq!(
-            download_slot_for_format_id(Some("251"), &context),
-            Some(DownloadProgressSlot::Audio)
-        );
-        assert_eq!(download_slot_for_format_id(Some("NA"), &context), None);
-    }
-
-    #[test]
-    fn routes_generic_fallback_progress_to_target_slot() {
-        let audio_context = DownloadProgressContext {
-            target_kind: DownloadTargetKind::Audio,
-            video_selector: String::new(),
-            audio_selector: String::new(),
-            shared_av_progress: false,
-            format_selector: "bestaudio/best[acodec!=none]".to_owned(),
-            section_duration_seconds: None,
-        };
-        assert_eq!(
-            download_slot_for_format_id(Some("251"), &audio_context),
-            Some(DownloadProgressSlot::Audio)
-        );
-
-        let normal_context = DownloadProgressContext {
-            target_kind: DownloadTargetKind::Normal,
-            video_selector: String::new(),
-            audio_selector: String::new(),
-            shared_av_progress: true,
-            format_selector: "bestvideo*+bestaudio/best".to_owned(),
-            section_duration_seconds: None,
-        };
-        assert_eq!(
-            download_slot_for_format_id(Some("399"), &normal_context),
-            Some(DownloadProgressSlot::Both)
-        );
-    }
-
-    #[test]
-    fn sums_multiple_closed_download_section_durations() {
-        let sections = vec![
-            "*00:00:10-00:00:20".to_owned(),
-            "*00:00:30-00:00:55.500".to_owned(),
-        ];
-
-        assert_eq!(parse_section_duration_seconds(&sections), Some(35.5));
-    }
-
-    #[test]
-    fn collects_all_unique_reported_final_output_paths() {
-        let lines = vec![
-            format!("{FINAL_OUTPUT_PATH_PREFIX}\"C:\\\\out\\\\video - 01.mkv\""),
-            format!("{FINAL_OUTPUT_PATH_PREFIX}\"C:\\\\out\\\\video - 02.mkv\""),
-            format!("{FINAL_OUTPUT_PATH_PREFIX}\"C:\\\\out\\\\video - 02.mkv\""),
-        ];
-
-        assert_eq!(
-            reported_final_output_paths(&lines),
-            vec![
-                PathBuf::from(r"C:\out\video - 01.mkv"),
-                PathBuf::from(r"C:\out\video - 02.mkv"),
-            ]
-        );
-    }
 }

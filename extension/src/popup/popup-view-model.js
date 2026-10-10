@@ -14,6 +14,7 @@ import {
 } from '../shared/download-time-range.js';
 import { selectedChapterIndicesFromChoice } from '../shared/download-chapter-range.js';
 import { t } from '../shared/i18n.js';
+import { protocolSupports } from '../shared/native-protocol.js';
 
 export function analysisStatusText(state) {
   const key = {
@@ -21,6 +22,7 @@ export function analysisStatusText(state) {
     connectingHost: 'analysisConnectHost',
     validatingHost: 'analysisValidateTools',
     startingYtDlp: 'analysisLaunchYtDlp',
+    startingGalleryDl: 'analysisLaunchGalleryDl',
     readingMedia: 'analysisReadMedia',
     readingPlaylist: 'analysisReadPlaylist',
   }[state.analysisPhase] || 'analysisPrepareBrowser';
@@ -30,8 +32,14 @@ export function analysisStatusText(state) {
 }
 
 export function analysisCountText(state) {
-  const data = state.analysis;
+  const data = Object.values(state.analysisByBackend).find(result => result?.analyzing)
+    || state.analysisByBackend.y || state.analysisByBackend.g;
   if (!data) return '';
+  // gallery-dl media count is independent of the yt-dlp playlist limit.
+  if (data.backend === 'g') {
+    if (data.stopped) return t('stoppedCount', { count: data.items.length });
+    return data.items.length ? t('galleryMediaCount', { count: data.items.length }) : '';
+  }
   const limit = data.itemLimit || state.playlistItemLimit || 32;
   if (data.analyzing) return t('analyzedCount', { count: data.items.length, limit });
   if (data.stopped) return t('stoppedCount', { count: data.items.length });
@@ -142,21 +150,54 @@ export function detailViewModel(state, index) {
   };
 }
 
-export function itemTaskState(state, index) {
-  const task = state.currentTask;
+/** Main cards only expose active extras; off/full-file defaults stay in Detail. */
+export function itemSettingsSummary(state, index, storedChoice) {
+  const vm = detailViewModel(state, index);
+  if (!vm) return [];
+  const choice = storedChoice(vm.item, vm.choice);
+  const host = state.analysis?.host;
+  const rows = [];
+  const modeLabel = (prefix, mode) => t(`${prefix}${mode === 'embed' ? 'Embed' : mode === 'download' ? 'Download' : 'Off'}`);
+  if (['download', 'embed'].includes(choice.thumbnailMode)
+      && protocolSupports(host, 'postprocess.thumbnail-mode.v1')) {
+    rows.push({ label: t('thumbnailMode'), value: modeLabel('thumbnail', choice.thumbnailMode) });
+  }
+  if (choice.contentKind === 'video' && vm.subtitles.length
+      && ['download', 'embed'].includes(choice.subtitleMode)) {
+    const subtitle = vm.subtitles.find(item => item.language === choice.subtitleLanguage);
+    rows.push({ label: t('subtitles'), value: `${subtitle?.label || choice.subtitleLanguage} · ${modeLabel('subtitle', choice.subtitleMode)}` });
+  }
+  if (vm.item.chapterCount > 0 && ['download', 'embed'].includes(choice.chapterMode)
+      && protocolSupports(host, 'postprocess.chapter-mode.v1')) {
+    rows.push({ label: t('chapterMode'), value: modeLabel('chapter', choice.chapterMode) });
+  }
+  if (choice.chapterIndices?.length || vm.timeRange) {
+    rows.push({ label: t('downloadRange'), value: choice.chapterIndices?.length ? vm.chapterRangeSummary : vm.timeRangeSummary });
+  }
+  return rows;
+}
+
+export function itemTaskState(state, index, key = `y:${index}`) {
+  const browserTask = state.browserDownloadTask;
+  const task = key.startsWith('g:') && browserTask
+    && (key === browserTask.currentSourceItemKey || browserTask.completedSourceItemKeys?.includes(key))
+    ? browserTask : state.currentTask;
   const applies = Number.isInteger(task.sourceTabId)
     ? task.sourceTabId === state.sourceTabId
     : task.sourcePageUrl === state.sourceUrl;
   if (!applies) return null;
+  if (task.sourceAnalysisStartedAt
+      && task.sourceAnalysisStartedAt !== state.unifiedAnalysis?.request?.startedAt) return null;
   const active = ['running', 'stopping'].includes(task.state);
-  const completed = new Set(task.completedSourceItemIndices || []);
-  if (active && completed.has(index)) {
+  const completed = new Set(task.completedSourceItemKeys || []);
+  if (completed.has(key)) {
     return { state: 'completed', percent: 100, label: t('completed') };
   }
-  if (active && index === task.currentSourceItemIndex) {
+  if (key === task.currentSourceItemKey && (active || ['failed', 'stopped'].includes(task.state))) {
     const percent = Math.max(0, Math.min(100, Number(task.itemPercent) || 0));
-    const label = task.state === 'stopping'
-      ? t('stopping')
+    const label = task.state === 'failed' ? t('downloadFailed')
+      : task.state === 'stopped' ? t('downloadStopped')
+      : task.state === 'stopping' ? t('stopping')
       : [
           `${percent.toFixed(0)}%`,
           task.speed,

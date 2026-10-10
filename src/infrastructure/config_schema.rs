@@ -28,6 +28,11 @@ pub(super) const FIELDS: &[Field] = &[
         comment: "Custom yt-dlp executable. Omit to detect automatically.",
     },
     Field {
+        source: "gallery_dl_path",
+        path: "tools.gallery_dl.path",
+        comment: "Custom gallery-dl executable. Omit to detect automatically.",
+    },
+    Field {
         source: "yt_dlp_config_path",
         path: "tools.yt_dlp.config_file",
         comment: "Additional yt-dlp configuration file. Empty means none.",
@@ -61,6 +66,11 @@ pub(super) const FIELDS: &[Field] = &[
         source: "no_check_certificates",
         path: "network.no_check_certificates",
         comment: "Skip HTTPS certificate verification.",
+    },
+    Field {
+        source: "impersonate",
+        path: "network.impersonate",
+        comment: "yt-dlp impersonation target, for example chrome. Empty disables it.",
     },
     Field {
         source: "limit_rate",
@@ -203,6 +213,21 @@ pub(super) const FIELDS: &[Field] = &[
         comment: "Automatically analyze added items.",
     },
     Field {
+        source: "force_analysis",
+        path: "workflow.force_analysis",
+        comment: "Ignore the embedded URL index and try all installed analysis tools.",
+    },
+    Field {
+        source: "analysis_choice_yt_dlp",
+        path: "workflow.analysis_choice.yt_dlp",
+        comment: "Last confirmed yt-dlp checkbox; restores the choice without confirming it.",
+    },
+    Field {
+        source: "analysis_choice_gallery_dl",
+        path: "workflow.analysis_choice.gallery_dl",
+        comment: "Last confirmed gallery-dl checkbox; restores the choice without confirming it.",
+    },
+    Field {
         source: "direct_download_on_add",
         path: "workflow.direct_download_on_add",
         comment: "Start downloading directly when adding an item.",
@@ -306,6 +331,11 @@ pub(super) const FIELDS: &[Field] = &[
         source: "prepare_skipped",
         path: "state.prepare_skipped",
         comment: "Whether the user skipped the preparation workflow.",
+    },
+    Field {
+        source: "component_update_cache",
+        path: "state.component_updates",
+        comment: "Last checked component versions and time (informational; not update authorization).",
     },
     Field {
         source: "options_scroll_offset",

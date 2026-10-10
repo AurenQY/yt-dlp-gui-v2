@@ -1,5 +1,18 @@
 import { get, writable } from 'svelte/store';
 import { validateUrl } from '../shared/url-validation.js';
+import { builtinSiteIconPath } from '../shared/builtin-site-icons.js';
+import { galleryPostGroups, galleryAlbumPayload } from '../shared/gallery-post-groups.js';
+import { pageCacheUrl } from '../shared/page-cache-key.js';
+import { ANALYSIS_CACHE_VERSION, preferFreshUnifiedAnalysisResponse } from '../shared/analysis-cache.js';
+import {
+  GALLERY_DOWNLOAD_STORAGE_KEY,
+  normalizeGalleryDownloadMode,
+  isBrowserGalleryDownload,
+  galleryDownloadOrigins,
+  galleryNativeRequests,
+} from '../shared/gallery-download-mode.js';
+import { normalizeRecognitionForAnalysis } from '../shared/analysis-backend-routing.js';
+import { completeBackendFailure, pendingBackendAnalyses, shouldAcceptBackendUpdate } from '../shared/analysis-state.js';
 import {
   availableContentKinds,
   buildDownloadRequest,
@@ -10,13 +23,20 @@ import {
   recommendedDownloadChoice,
   resolvedOutputFormat,
 } from '../shared/media-download-options.js';
-import { collectPageSnapshot } from '../shared/page-snapshot.js';
+import { capturePagePreview } from '../shared/capture-page-preview.js';
+import { createPopupPageSource } from './popup-page-source.js';
 import { downloadTimeRangeFromChoice } from '../shared/download-time-range.js';
 import { selectedChapterIndicesFromChoice } from '../shared/download-chapter-range.js';
 import { NATIVE_HOST_HELP_URL } from '../shared/native-host-errors.js';
 import { t } from '../shared/i18n.js';
+import { sitePermissionOrigins } from '../shared/site-domain.js';
+import { ensureSitePermissions } from '../shared/site-permission-request.js';
+import { popupResultItems, selectedPopupResults } from './popup-result-list.js';
+import { ANALYSIS_TOOLS_KEY, ANALYSIS_DETECTION_KEY, normalizedAnalysisTools,
+  enabledAnalysisTools, detectedAnalysisTools, initialToolsFromDetection } from '../shared/analysis-tool-preferences.js';
+import { ALBUM_WHEEL_KEY, normalizedAlbumWheelMode } from '../shared/album-preferences.js';
+import { rangeForTimeline, timelineRange } from '../shared/gallery-timeline-range.js';
 
-const ANALYSIS_CACHE_VERSION = 9;
 const ANALYSIS_EVENT = 'YT_DLP_GUI_ANALYSIS_EVENT';
 
 function initialState() {
@@ -25,29 +45,51 @@ function initialState() {
     recognized: null,
     recognitionPending: true,
     analysis: null,
+    unifiedAnalysis: null,
+    analysisStorageScope: null,
+    analysisByBackend: { y: null, g: null },
+    analysisErrors: { y: '', g: '' },
+    selectionsByBackend: { y: new Set(), g: new Set() },
+    knownCountsByBackend: { y: 0, g: 0 },
     busy: false,
     analysisRunning: false,
     downloadRunning: false,
     currentTask: { state: 'idle' },
+    browserDownloadTask: { state: 'idle' },
     sourceUrl: '',
     sourceSiteName: t('recognizing'),
     sourceSiteIconUrl: '',
     sourcePageTitle: '',
     sourcePageSnapshot: null,
+    pageResetRevision: 0,
     sourceTabId: null,
     choices: {},
-    selectedIndices: new Set(),
-    knownSelectionItemCount: 0,
     playlistScope: 'current',
     playlistSelectable: false,
     playlistItemLimit: 32,
     outputDirectory: '',
+    galleryDownloadMode: 'browser-files',
+    galleryModes: {},
+    galleryRanges: {},
     recognitionText: t('recognizing'),
     recognitionVisible: true,
     messageText: '',
     messageError: false,
     helpUrl: '',
     analysisPhase: 'preparing',
+    cookieSaveRunning: false,
+    cookieSaveMessage: '',
+    cookieSaveError: false,
+    preferencesLoaded: false,
+    albumWheelMode: 'zoom',
+    albumPreferenceSaving: false,
+    albumSettingsMessage: '',
+    analysisTools: normalizedAnalysisTools(),
+    toolDetection: null,
+    toolDetectionRunning: false,
+    toolPreferenceSaving: false,
+    toolSettingsMessage: '',
+    toolSettingsError: false,
   };
 }
 
@@ -80,14 +122,44 @@ function nativeRequest(request) {
 export function createPopupController() {
   const state = writable(initialState());
   const matcherWorker = new Worker(chrome.runtime.getURL('build/matcher-worker.js'), { type: 'module' });
+  const matcherIndexUrl = chrome.runtime.getURL('resources/extractor-index.json');
   let recognitionRevision = 0;
+  let restoreRevision = 0;
   let matcherFailure = '';
+  let destroyed = false;
 
   const patch = values => state.update(current => ({ ...current, ...values }));
+  const pageSource = createPopupPageSource({
+    captureSnapshot: capturePagePreview,
+    onPage(tab, changed, documentReset) {
+      patch({ sourceTabId: tab.id, sourceUrl: tab.url || '' });
+      if (!changed) return;
+      const current = get(state);
+      patch({
+        pageResetRevision: current.pageResetRevision + (documentReset ? 1 : 0),
+        sourcePageSnapshot: null,
+        sourcePageTitle: '',
+        sourceSiteIconUrl: chrome.runtime.getURL(builtinSiteIconPath(tab.url || '') || 'resources/site-icons/Web.svg'),
+        analysisRunning: false,
+        busy: current.analysisRunning ? false : current.busy,
+        messageText: '', messageError: false, helpUrl: '',
+      });
+      void recognizeUrl(tab.url || '').catch(error => {
+        if (!destroyed && get(state).sourceUrl === (tab.url || '')) message(error.message, true);
+      });
+    },
+    onSnapshot(tab, snapshot) {
+      patch({ sourcePageSnapshot: snapshot,
+        sourcePageTitle: String(snapshot?.title || tab.title || '').trim() });
+    },
+    onError(error) { message(error.message, true); },
+  });
 
   matcherWorker.onerror = event => {
     matcherFailure = event.message || t('matcherIndexLoadFailed');
+    if (destroyed) return;
     patch({
+      recognized: null,
       recognitionPending: false,
       recognitionText: matcherFailure,
       recognitionVisible: true,
@@ -122,7 +194,7 @@ export function createPopupController() {
     );
   };
   const scopedStorageKey = (prefix, current = get(state)) =>
-    `${prefix}:tab:${current.sourceTabId}:${current.playlistScope}:${current.sourceUrl}`;
+    `${prefix}:tab:${current.sourceTabId}:${current.analysisStorageScope ?? current.playlistScope}:${pageCacheUrl(current.sourceUrl)}`;
 
   function subtitleIsAutomatic(item, language) {
     return Boolean(language && (item.subtitles || []).find(
@@ -288,12 +360,21 @@ export function createPopupController() {
     }
   }
 
-  function selectedDownloadIndices(current = get(state)) {
-    const itemCount = current.analysis?.items?.length || 0;
-    if (itemCount === 1) return [0];
-    return [...current.selectedIndices]
-      .filter(index => index >= 0 && index < itemCount)
-      .sort((left, right) => left - right);
+  function toggleGalleryGroup(index, selected) {
+    const current = get(state);
+    const group = galleryPostGroups(current.analysisByBackend.g?.items, current.sourceUrl)[index];
+    if (!group) return;
+    const selectedIndices = new Set(current.selectionsByBackend.g);
+    for (const sourceIndex of group.sourceItemIndices) {
+      if (selected) selectedIndices.add(sourceIndex);
+      else selectedIndices.delete(sourceIndex);
+    }
+    patch({ selectionsByBackend: {
+      ...current.selectionsByBackend, g: new Set(selectedIndices),
+    } });
+    chrome.storage.session.set({
+      [`${scopedStorageKey('selection', current)}:g`]: [...selectedIndices].sort((a, b) => a - b),
+    });
   }
 
   function applyPageSnapshotFallback(data, current = get(state)) {
@@ -315,54 +396,143 @@ export function createPopupController() {
     }
   }
 
-  function renderAnalysis(data) {
+  // One Native Host analysis document; backend views below are projections for
+  // existing video-format and gallery-post UI, never separate analysis jobs.
+  function renderUnifiedAnalysisResponse(response) {
+    if (!response?.ok || !response.data?.request) {
+      if (response?.message) showAnalysisFailure(response.message, response.helpUrl);
+      return;
+    }
+    const document = response.data;
     const current = get(state);
-    applyPageSnapshotFallback(data, current);
-    const selectedIndices = new Set(current.selectedIndices);
-    for (let index = current.knownSelectionItemCount; index < data.items.length; index += 1) {
+    const live = current.unifiedAnalysis ? { ok: true, data: current.unifiedAnalysis } : null;
+    if (preferFreshUnifiedAnalysisResponse(live, response)?.data !== document) return;
+    patch({ unifiedAnalysis: document,
+      analysisStorageScope: document.request.playlistScope ?? current.analysisStorageScope ?? current.playlistScope });
+    for (const backend of ['y', 'g']) {
+      const group = document[backend === 'y' ? 'yt-dlp' : 'gallery-dl'];
+      const status = group?.status || 'pending';
+      const info = group?.info || {};
+      const pending = ['pending', 'analyzing'].includes(status);
+      const mapped = {
+        ...info, items: group?.items || [], backend,
+        status, analyzing: pending,
+        phase: info.phase || (pending ? 'preparing' : 'complete'),
+        host: document.request.host,
+        schemaVersion: ANALYSIS_CACHE_VERSION,
+        startedAt: document.request.startedAt,
+        updatedAt: document.request.updatedAt,
+      };
+      renderBackendAnalysis(backend, mapped);
+      patch({ analysisErrors: { ...get(state).analysisErrors,
+        [backend]: ['failed', 'interrupted'].includes(status)
+          ? info.message || document.request.message || t('nativeAnalysisFailed') : '' } });
+    }
+    const available = ['y', 'g'].filter(backend =>
+      !['notMatched', 'disabled', 'pending'].includes(document[backend === 'y' ? 'yt-dlp' : 'gallery-dl']?.status));
+    const running = document.request.status === 'analyzing';
+    patch({ analysisRunning: running });
+    if (!running && document['yt-dlp']?.info?.playlistRequired) {
+      patch({ playlistScope: 'playlist', playlistSelectable: false, scopeLabel: t('fullPlaylist') });
+    }
+    if (!running && !available.length) {
+      patch({ analysis: null, analysisView: 'idle', analysisPhase: 'complete' });
+      message(t('noMatchingExtractor'), true);
+    } else if (!running && available.length && !available.some(backend =>
+      get(state).analysisByBackend[backend]?.items?.length)) {
+      const detail = available.map(backend => {
+        const group = document[backend === 'y' ? 'yt-dlp' : 'gallery-dl'];
+        return group?.info?.message || '';
+      }).filter(Boolean).join(' / ');
+      if (detail && !Object.values(get(state).analysisErrors).some(Boolean)) showAnalysisFailure(detail, response.helpUrl);
+    }
+  }
+
+  function renderBackendAnalysis(backend, data) {
+    if (!['y', 'g'].includes(backend)) return;
+    const current = get(state);
+    if (!shouldAcceptBackendUpdate(current, backend, data)) return;
+    if (backend === 'y') applyPageSnapshotFallback(data, current);
+    const analysisByBackend = { ...current.analysisByBackend, [backend]: data };
+    const selectedIndices = new Set(current.selectionsByBackend[backend]);
+    const knownCount = current.knownCountsByBackend[backend] || 0;
+    for (let index = knownCount; index < data.items.length; index += 1) {
       selectedIndices.add(index);
     }
-    for (const index of [...selectedIndices]) {
+    for (const index of selectedIndices) {
       if (index >= data.items.length) selectedIndices.delete(index);
     }
-    const analysisView = data.items.length
-      ? 'results'
-      : data.analyzing ? 'loading' : 'idle';
+    const running = Object.values(analysisByBackend).some(result => Boolean(result?.analyzing));
     patch({
-      analysis: data,
-      analysisRunning: Boolean(data.analyzing),
-      analysisPhase: data.phase || current.analysisPhase,
-      selectedIndices,
-      knownSelectionItemCount: Math.max(current.knownSelectionItemCount, data.items.length),
-      analysisView,
+      analysisByBackend,
+      // Existing yt-dlp settings pages keep an explicit yt-dlp-only projection.
+      analysis: analysisByBackend.y,
+      selectionsByBackend: { ...current.selectionsByBackend, [backend]: selectedIndices },
+      knownCountsByBackend: { ...current.knownCountsByBackend, [backend]: Math.max(knownCount, data.items.length) },
+      analysisPhase: Object.values(analysisByBackend).find(result => result?.analyzing)?.phase || 'complete',
+      analysisView: Object.values(analysisByBackend).some(result => result?.items?.length)
+        ? 'results' : running ? 'loading' : 'idle',
+      analysisRunning: running,
     });
+    if (!data.analyzing && !data.stopped) {
+      const key = `${scopedStorageKey('selection')}${backend === 'g' ? ':g' : ''}`;
+      chrome.storage.session.set({ [key]: [...selectedIndices].sort((a, b) => a - b) });
+    }
   }
 
   async function restoreScopedPageState(expectedRevision = recognitionRevision) {
+    const expectedRestore = ++restoreRevision;
     const current = get(state);
-    const analysisKey = scopedStorageKey('analysis', current);
+    if (!Number.isInteger(current.sourceTabId) || !current.sourceUrl) return;
     const choicesKey = scopedStorageKey('choices', current);
     const selectionKey = scopedStorageKey('selection', current);
-    const saved = await chrome.storage.session.get([analysisKey, choicesKey, selectionKey]);
-    if (expectedRevision !== recognitionRevision) return;
-    const cached = saved[analysisKey];
-    const itemCount = cached?.data?.items?.length || 0;
+    const galleryModesKey = scopedStorageKey('galleryModes', current);
+    // The background is the single authority for analysis state. There is no
+    // popup-owned cache and no second copy of a completed result in local.
+    const [saved, snapshot] = await Promise.all([
+      chrome.storage.session.get([
+        choicesKey, selectionKey, `${selectionKey}:g`, galleryModesKey, scopedStorageKey('galleryRanges', current),
+      ]),
+      chrome.runtime.sendMessage({
+        type: 'YT_DLP_GUI_ANALYSIS_SNAPSHOT',
+        request: {
+          sourceTabId: current.sourceTabId,
+          playlistScope: current.analysisStorageScope ?? current.playlistScope,
+          url: current.sourceUrl,
+        },
+      }).catch(() => null),
+    ]);
+    if (destroyed || expectedRevision !== recognitionRevision || expectedRestore !== restoreRevision) return;
+    const previous = get(state);
+    if (previous.unifiedAnalysis !== current.unifiedAnalysis) return; // A live frame already owns newer state.
+    if (previous.sourceTabId !== current.sourceTabId
+        || previous.playlistScope !== current.playlistScope
+        || pageCacheUrl(previous.sourceUrl) !== pageCacheUrl(current.sourceUrl)) return;
+
+    const restoredSelected = {
+      y: new Set(saved[selectionKey] || []),
+      g: new Set(saved[`${selectionKey}:g`] || []),
+    };
     patch({
       choices: saved[choicesKey] || {},
-      selectedIndices: new Set(Array.isArray(saved[selectionKey])
-        ? saved[selectionKey]
-        : Array.from({ length: itemCount }, (_, index) => index)),
-      knownSelectionItemCount: itemCount,
+      galleryModes: saved[galleryModesKey] || {},
+      galleryRanges: saved[scopedStorageKey('galleryRanges', current)] || {},
+      selectionsByBackend: restoredSelected,
+      knownCountsByBackend: {
+        y: Array.isArray(saved[selectionKey]) ? snapshot?.data?.data?.['yt-dlp']?.items?.length || 0 : 0,
+        g: Array.isArray(saved[`${selectionKey}:g`]) ? snapshot?.data?.data?.['gallery-dl']?.items?.length || 0 : 0,
+      },
+      analysisStorageScope: current.analysisStorageScope ?? current.playlistScope,
+      analysisByBackend: { y: null, g: null },
+      unifiedAnalysis: null,
+      analysisErrors: { y: '', g: '' },
     });
-    if (cached?.ok && cached.data?.schemaVersion === ANALYSIS_CACHE_VERSION) {
-      renderAnalysis(cached.data);
-    } else if (cached) {
-      showAnalysisFailure(cached.message, cached.helpUrl);
-    }
+    if (snapshot?.ok && snapshot.data) renderUnifiedAnalysisResponse(snapshot.data);
   }
 
   function renderTask(task = { state: 'idle' }) {
-    const downloadRunning = ['running', 'stopping'].includes(task.state);
+    const downloadRunning = ['running', 'stopping'].includes(task.state)
+      || ['running', 'stopping'].includes(get(state).browserDownloadTask.state);
     patch({ currentTask: task, downloadRunning });
     if (task.state === 'running') {
       const percent = Math.max(0, Math.min(100, Number(task.percent) || 0));
@@ -387,20 +557,6 @@ export function createPopupController() {
     }
   }
 
-  async function captureSnapshot(tabId) {
-    if (!Number.isInteger(tabId) || !chrome.scripting?.executeScript) return null;
-    try {
-      const [execution] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: collectPageSnapshot,
-      });
-      const schemaVersion = Number(execution?.result?.schemaVersion);
-      return schemaVersion >= 1 && schemaVersion <= 3 ? execution.result : null;
-    } catch {
-      return null;
-    }
-  }
-
   function scopeLabelKey(url, scope) {
     if (scope.value === 'playlist') return 'fullPlaylist';
     try {
@@ -419,9 +575,15 @@ export function createPopupController() {
       recognized: null,
       recognitionPending: true,
       analysis: null,
+      unifiedAnalysis: null,
+      analysisStorageScope: null,
+      analysisByBackend: { y: null, g: null },
+      analysisErrors: { y: '', g: '' },
+      selectionsByBackend: { y: new Set(), g: new Set() },
+      knownCountsByBackend: { y: 0, g: 0 },
       choices: {},
-      selectedIndices: new Set(),
-      knownSelectionItemCount: 0,
+      galleryModes: {},
+      galleryRanges: {},
       sourceUrl,
       sourceSiteName: t('recognizing'),
       recognitionText: t('recognizing'),
@@ -435,14 +597,6 @@ export function createPopupController() {
       const hostname = parsedHostname.startsWith('www.') ? parsedHostname.slice(4) : parsedHostname;
       const snapshotSiteName = String(get(state).sourcePageSnapshot?.siteName || '').trim();
       patch({
-        recognized: {
-          url: sourceUrl,
-          kind: 'unknown',
-          key: 'Generic',
-          name: t('genericDownload'),
-          operation: 'generic',
-          approximate: true,
-        },
         sourceSiteName: snapshotSiteName || hostname || t('genericDownload'),
         playlistScope: scope.value,
         playlistSelectable: scope.selectable,
@@ -465,25 +619,29 @@ export function createPopupController() {
         recognitionVisible: true,
       });
     } else {
-      matcherWorker.postMessage({ id, url: sourceUrl });
+      matcherWorker.postMessage({ id, url: sourceUrl, indexUrl: matcherIndexUrl });
     }
     await restoreScopedPageState(id);
   }
 
-  matcherWorker.onmessage = ({ data }) => {
-    if (data.id !== recognitionRevision) return;
+  matcherWorker.onmessage = async ({ data }) => {
+    if (destroyed || data.id !== recognitionRevision) return;
     if (data.error) {
       patch({
+        recognized: null,
         recognitionPending: false,
         recognitionText: data.error,
         recognitionVisible: true,
       });
       return;
     }
-    const recognized = data.result;
+    const recognized = normalizeRecognitionForAnalysis(data.result, get(state).sourceUrl);
     const matchedName = String(recognized.name || '').trim();
     const current = get(state);
     const snapshotSiteName = String(current.sourcePageSnapshot?.siteName || '').trim();
+    const scope = current.unifiedAnalysis?.['yt-dlp']?.info?.playlistRequired
+      ? { value: 'playlist', selectable: false }
+      : pageDownloadScope(current.sourceUrl, recognized.y?.sourceScope);
     let hostname = '';
     try {
       hostname = new URL(current.sourceUrl).hostname.toLowerCase().replace(/^www\./, '');
@@ -494,85 +652,230 @@ export function createPopupController() {
       : snapshotSiteName || hostname || t('genericDownload');
     patch({
       recognized,
+      playlistScope: scope.value,
+      playlistSelectable: scope.selectable,
+      scopeLabel: t(scopeLabelKey(current.sourceUrl, scope)),
       recognitionPending: false,
       sourceSiteName,
       recognitionText: recognized.kind === 'known' ? '' : t('generic'),
       recognitionVisible: recognized.kind !== 'known',
     });
+    if (scope.value !== current.playlistScope && !current.unifiedAnalysis) {
+      patch({ analysisStorageScope: scope.value });
+      await restoreScopedPageState(data.id);
+    }
   };
+
+  function renderBrowserDownloadTask(task = { state: 'idle' }) {
+    const current = get(state);
+    if ((task.revision || 0) < (current.browserDownloadTask.revision || 0)) return;
+    patch({ browserDownloadTask: task, downloadRunning: ['running', 'stopping'].includes(task.state)
+      || ['running', 'stopping'].includes(current.currentTask.state) });
+    if (task.state === 'failed') message(task.message || t('downloadFailed'), true);
+  }
 
   const runtimeListener = value => {
     if (value?.type === 'YT_DLP_GUI_TASK_EVENT') {
       renderTask(value.task);
-    } else if (value?.type === ANALYSIS_EVENT && value.key === scopedStorageKey('analysis')) {
-      if (value.response?.ok) renderAnalysis(value.response.data);
-      else if (value.response) {
-        patch({
-          analysisRunning: false,
-          analysisView: get(state).analysis?.items?.length ? 'results' : 'idle',
-        });
-        showAnalysisFailure(value.response.message, value.response.helpUrl);
+    } else if (value?.type === 'YT_DLP_GUI_BROWSER_DOWNLOAD_EVENT') {
+      renderBrowserDownloadTask(value.task);
+    } else if (value?.type === ANALYSIS_EVENT) {
+      if (value.key === scopedStorageKey('analysis')) {
+        renderUnifiedAnalysisResponse(value.response);
       }
     }
   };
 
   const storageListener = (changes, area) => {
-    if (area === 'local' && changes.v2DownloadDirectory) loadPreferences();
+    if (area === 'local' && (changes.v2DownloadDirectory || changes[GALLERY_DOWNLOAD_STORAGE_KEY]
+        || changes[ANALYSIS_TOOLS_KEY] || changes[ANALYSIS_DETECTION_KEY] || changes[ALBUM_WHEEL_KEY])) {
+      loadPreferences();
+    }
   };
 
   async function loadPreferences() {
-    const saved = await chrome.storage.local.get(['v2DownloadDirectory', 'playlistItemLimit']);
+    const saved = await chrome.storage.local.get([
+      'v2DownloadDirectory', 'playlistItemLimit', GALLERY_DOWNLOAD_STORAGE_KEY,
+      ANALYSIS_TOOLS_KEY, ANALYSIS_DETECTION_KEY, ALBUM_WHEEL_KEY,
+    ]);
     patch({
       playlistItemLimit: normalizedPlaylistItemLimit(saved.playlistItemLimit),
       outputDirectory: saved.v2DownloadDirectory || '',
+      galleryDownloadMode: normalizeGalleryDownloadMode(saved[GALLERY_DOWNLOAD_STORAGE_KEY]),
+      analysisTools: normalizedAnalysisTools(saved[ANALYSIS_TOOLS_KEY]),
+      albumWheelMode: normalizedAlbumWheelMode(saved[ALBUM_WHEEL_KEY]),
+      toolDetection: saved[ANALYSIS_DETECTION_KEY] || null,
+      preferencesLoaded: true,
     });
   }
 
-  async function loadCurrentTab() {
+  async function setAlbumWheelMode(value) {
+    const current = get(state);
+    if (!current.preferencesLoaded || current.albumPreferenceSaving) return;
+    const albumWheelMode = normalizedAlbumWheelMode(value);
+    patch({ albumWheelMode, albumPreferenceSaving: true, albumSettingsMessage: '' });
+    try { await chrome.storage.local.set({ [ALBUM_WHEEL_KEY]: albumWheelMode }); }
+    catch (error) { patch({ albumWheelMode: current.albumWheelMode,
+      albumSettingsMessage: t('albumSettingsFailed', { message: error.message }) }); }
+    finally { patch({ albumPreferenceSaving: false }); }
+  }
+
+  async function setAnalysisTool(tool, enabled) {
+    const current = get(state);
+    if (!['y', 'g'].includes(tool) || !current.preferencesLoaded || current.busy
+        || current.analysisRunning || current.downloadRunning || current.toolDetectionRunning || current.toolPreferenceSaving) return;
+    const analysisTools = { ...current.analysisTools, [tool]: Boolean(enabled) };
+    patch({ analysisTools, toolPreferenceSaving: true });
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const sourceTabId = Number.isInteger(tab?.id) ? tab.id : null;
-      const sourcePageSnapshot = await captureSnapshot(sourceTabId);
-      patch({
-        sourceTabId,
-        sourcePageSnapshot,
-        sourceSiteIconUrl: String(tab?.favIconUrl || sourcePageSnapshot?.iconUrl || '').trim(),
-        sourcePageTitle: String(sourcePageSnapshot?.title || tab?.title || '').trim(),
-      });
-      await recognizeUrl(tab?.url || '');
+      await chrome.storage.local.set({ [ANALYSIS_TOOLS_KEY]: analysisTools });
+      patch({ analysisTools, toolSettingsMessage: '', toolSettingsError: false });
     } catch (error) {
-      message(error.message, true);
+      patch({ analysisTools: current.analysisTools, toolSettingsMessage: t('toolSettingsFailed', { message: error.message }), toolSettingsError: true });
+    } finally {
+      patch({ toolPreferenceSaving: false });
+    }
+  }
+
+  async function detectAnalysisTools() {
+    const current = get(state);
+    if (!current.preferencesLoaded || current.busy || current.analysisRunning
+        || current.downloadRunning || current.toolDetectionRunning || current.toolPreferenceSaving) return;
+    patch({ toolDetectionRunning: true, toolSettingsMessage: '', toolSettingsError: false });
+    try {
+      const response = await nativeRequest({ action: 'status' });
+      const detection = detectedAnalysisTools(response.data);
+      const saved = await chrome.storage.local.get(ANALYSIS_TOOLS_KEY);
+      await chrome.storage.local.set({
+        [ANALYSIS_DETECTION_KEY]: detection,
+        ...(saved[ANALYSIS_TOOLS_KEY] == null
+          ? { [ANALYSIS_TOOLS_KEY]: initialToolsFromDetection(detection) } : {}),
+      });
+      await loadPreferences();
+      patch({ toolSettingsMessage: detection.g == null ? t('toolDetectionLegacy') : t('toolDetectionDone') });
+    } catch (error) {
+      patch({ toolSettingsMessage: t('toolSettingsFailed', { message: error.message }), toolSettingsError: true });
+    } finally {
+      patch({ toolDetectionRunning: false });
+    }
+  }
+
+  function galleryModeForGroup(group, current = get(state)) {
+    return normalizeGalleryDownloadMode(current.galleryModes[group.key] ?? current.galleryDownloadMode);
+  }
+
+  async function setGalleryRange(key, value) {
+    const current = get(state);
+    if (current.busy || current.downloadRunning || current.analysisRunning) return;
+    const galleryRanges = { ...current.galleryRanges, [key]: timelineRange(value) };
+    patch({ galleryRanges });
+    try { await chrome.storage.session.set({ [scopedStorageKey('galleryRanges', current)]: galleryRanges }); }
+    catch (error) { patch({ galleryRanges: current.galleryRanges }); message(error.message, true); }
+  }
+
+  function albumForGroup(group, current) {
+    const gallery = galleryAlbumPayload([group], current.sourceSiteName, current.sourceUrl);
+    if (gallery.timeline) gallery.timeline = { ...gallery.timeline,
+      range: rangeForTimeline(group, current), sourceTabId: current.sourceTabId };
+    return gallery;
+  }
+
+  async function setGalleryDownloadMode(mode, postKey) {
+    const current = get(state);
+    const group = galleryPostGroups(current.analysisByBackend.g?.items, current.sourceUrl)
+      .find(item => item.key === postKey);
+    if (!group || current.downloadRunning || current.analysisRunning || current.busy) return;
+    const value = normalizeGalleryDownloadMode(mode);
+    // Keep the displayed methods of other current posts unchanged when the
+    // extension-wide default is updated for the next analyzed post.
+    const galleryModes = { ...current.galleryModes };
+    for (const item of galleryPostGroups(current.analysisByBackend.g?.items, current.sourceUrl)) {
+      galleryModes[item.key] = galleryModeForGroup(item, current);
+    }
+    galleryModes[postKey] = value;
+    patch({ galleryDownloadMode: value, galleryModes });
+    try {
+      await Promise.all([
+        chrome.storage.local.set({ [GALLERY_DOWNLOAD_STORAGE_KEY]: value }),
+        chrome.storage.session.set({ [scopedStorageKey('galleryModes', current)]: galleryModes }),
+      ]);
+    } catch (error) {
+      message(t('galleryDownloadChoiceSaveFailed', { message: error.message }), true);
     }
   }
 
   async function restoreTask() {
-    const response = await chrome.runtime.sendMessage({ type: 'YT_DLP_GUI_TASK_STATUS' });
-    if (response?.ok) renderTask(response.data.task);
+    await Promise.all([
+      chrome.runtime.sendMessage({ type: 'YT_DLP_GUI_TASK_STATUS' })
+        .then(response => { if (response?.ok) renderTask(response.data.task); }),
+      chrome.runtime.sendMessage({ type: 'YT_DLP_GUI_BROWSER_DOWNLOAD_STATUS' })
+        .then(response => { if (response?.ok) renderBrowserDownloadTask(response.task); }),
+    ]);
   }
 
-  async function analyze() {
+  async function analyze(retryBackend = null) {
     const current = get(state);
-    if (current.busy || current.analysisRunning || current.downloadRunning || !current.recognized) return;
-    if (!await chrome.permissions.request({ origins: [new URL(current.sourceUrl).origin + '/*'] })) {
+    const expectedRevision = recognitionRevision;
+    if (!current.preferencesLoaded || current.toolDetectionRunning || current.toolPreferenceSaving || current.busy
+        || current.analysisRunning || current.downloadRunning || current.recognitionPending || !current.recognized) return;
+    if (retryBackend != null && (!['y', 'g'].includes(retryBackend) || !current.analysisErrors[retryBackend])) return;
+    const analysisTools = retryBackend ? [retryBackend] : enabledAnalysisTools(current.analysisTools);
+    if (!analysisTools.length) { message(t('selectAnalysisTool'), true); return; }
+    if (!await ensureSitePermissions([new URL(current.sourceUrl).origin + '/*'])) {
       message(t('permissionRequired'), true);
       return;
     }
-    patch({ busy: true, analysisView: 'loading', analysisPhase: 'preparing' });
+    if (destroyed || expectedRevision !== recognitionRevision) return;
+    const latest = get(state);
+    if (latest.busy || latest.analysisRunning || latest.downloadRunning
+        || latest.recognitionPending || latest.recognized !== current.recognized
+        || latest.playlistScope !== current.playlistScope
+        || (retryBackend && latest.unifiedAnalysis !== current.unifiedAnalysis)) return;
+    const requestScope = retryBackend
+      ? current.analysisStorageScope ?? current.playlistScope : current.playlistScope;
+    restoreRevision += 1; // A new command supersedes any in-flight initial snapshot.
+    const pending = pendingBackendAnalyses(analysisTools, current.playlistItemLimit);
+    const analysisByBackend = retryBackend
+      ? { ...current.analysisByBackend, [retryBackend]: pending[retryBackend] } : pending;
+    patch({
+      busy: true,
+      analysisStorageScope: requestScope,
+      unifiedAnalysis: retryBackend ? current.unifiedAnalysis : null,
+      analysis: analysisByBackend.y,
+      analysisByBackend,
+      analysisRunning: true,
+      analysisErrors: retryBackend ? { ...current.analysisErrors, [retryBackend]: '' } : { y: '', g: '' },
+      selectionsByBackend: retryBackend
+        ? { ...current.selectionsByBackend, [retryBackend]: new Set() } : { y: new Set(), g: new Set() },
+      knownCountsByBackend: retryBackend
+        ? { ...current.knownCountsByBackend, [retryBackend]: 0 } : { y: 0, g: 0 },
+      analysisView: 'loading',
+      analysisPhase: 'preparing',
+    });
     message();
     try {
       const response = await nativeRequest({
-        action: 'analyze',
+        action: 'analyzeIndexedSources',
+        analysisTools,
+        ...(retryBackend ? { retryBackend, retryStartedAt: current.unifiedAnalysis?.request?.startedAt } : {}),
         url: current.sourceUrl,
-        playlistScope: current.playlistScope,
+        playlistScope: requestScope,
         itemLimit: current.playlistItemLimit,
         sourceTabId: current.sourceTabId,
       });
-      if (current.sourceUrl === get(state).sourceUrl) renderAnalysis(response.data);
+      if (!destroyed && expectedRevision === recognitionRevision && current.sourceUrl === get(state).sourceUrl) {
+        renderUnifiedAnalysisResponse(response.data);
+      }
     } catch (error) {
-      patch({ analysisView: 'idle' });
-      showAnalysisFailure(error.message, error.helpUrl);
+      if (!destroyed && expectedRevision === recognitionRevision && current.sourceUrl === get(state).sourceUrl) {
+        if (retryBackend) {
+          const { switchTo: _switchTo, ...failed } = completeBackendFailure(get(state), retryBackend, error.message);
+          patch(failed);
+        } else showAnalysisFailure(error.message, error.helpUrl);
+      }
     } finally {
-      patch({ busy: false });
+      if (!destroyed && expectedRevision === recognitionRevision && current.sourceUrl === get(state).sourceUrl) {
+        patch({ busy: false });
+      }
     }
   }
 
@@ -581,16 +884,17 @@ export function createPopupController() {
     if (current.busy || !current.analysisRunning) return;
     patch({ busy: true });
     try {
-      const response = await nativeRequest({
-        action: 'cancelAnalysis',
-        url: current.sourceUrl,
-        playlistScope: current.playlistScope,
-        sourceTabId: current.sourceTabId,
-      });
-      renderAnalysis(response.data);
-      message(t('analysisStopped', { count: response.data.items.length }));
-    } catch (error) {
-      message(t('stopFailed', { message: error.message }), true);
+      try {
+        const response = await nativeRequest({
+          action: 'cancelAnalysis',
+          url: current.sourceUrl,
+          playlistScope: current.analysisStorageScope ?? current.playlistScope,
+          sourceTabId: current.sourceTabId,
+        });
+        renderUnifiedAnalysisResponse(response.data);
+      } catch (error) {
+        showAnalysisFailure(error.message, error.helpUrl);
+      }
     } finally {
       patch({ busy: false });
     }
@@ -598,34 +902,114 @@ export function createPopupController() {
 
   async function downloadSelected() {
     const current = get(state);
-    if (current.busy || current.downloadRunning) return;
-    const indices = selectedDownloadIndices(current);
-    if (!indices.length) return;
-    const requests = indices.map(index => ({
-      ...buildDownloadRequest(
-        current.analysis.items[index],
-        storedDownloadChoice(current.analysis.items[index], current.choices[index]),
-      ),
-      sourcePageUrl: current.sourceUrl,
-      sourceTabId: current.sourceTabId,
-      sourceItemIndex: index,
-    }));
-    const origins = [...new Set(requests.map(request => new URL(request.url).origin + '/*'))];
-    if (!await chrome.permissions.request({ origins })) {
-      message(t('permissionRequired'), true);
-      return;
-    }
-    patch({ busy: true });
-    message(requests.length > 1
-      ? t('preparingDownloads', { count: requests.length })
-      : t('preparingDownload', { title: requests[0].title || requests[0].url }));
+    if (current.busy || current.downloadRunning || current.analysisRunning) return;
+    const selected = selectedPopupResults(current);
+    if (!selected.length) return;
     try {
-      const response = await nativeRequest({ action: 'downloadBatch', requests });
-      renderTask(response.data.task);
+      const byMode = selected.filter(result => result.backend === 'g')
+        .map(result => ({ group: result.item, mode: galleryModeForGroup(result.item, current), key: result.key, index: result.index }));
+      const nativeGroups = byMode.filter(({ mode }) => !isBrowserGalleryDownload(mode));
+      const browserDownloads = byMode.filter(({ mode }) => isBrowserGalleryDownload(mode));
+      const capabilities = current.analysisByBackend.g?.host?.capabilities || [];
+      if (byMode.some(({ group }) => group.sourceScope === 'timeline') && !capabilities.includes('gallery.timeline.v1')) {
+        message(t('galleryTimelineUpgradeRequired'), true);
+        return;
+      }
+      if (nativeGroups.length && !capabilities.includes('download.gallery-post.v1')) {
+        message(t('nativeGalleryDownloadUpgradeRequired'), true);
+        return;
+      }
+      const galleryRequests = nativeGroups.flatMap(({ group, key, index }) =>
+        galleryNativeRequests([{ ...group, index }], current)
+          .map(request => ({ ...request, sourceItemKey: key,
+            sourceAnalysisStartedAt: current.unifiedAnalysis?.request?.startedAt })));
+      if (galleryRequests.length !== nativeGroups.length) {
+        message(t('galleryDownloadUrlUnavailable'), true);
+        return;
+      }
+      const videoRequests = selected.filter(result => result.backend === 'y').map(result => ({
+        ...buildDownloadRequest(result.item, storedDownloadChoice(result.item, current.choices[result.index])),
+        sourcePageUrl: current.sourceUrl,
+        sourceTabId: current.sourceTabId,
+        sourceItemIndex: result.index,
+        sourceItemKey: result.key,
+        sourceAnalysisStartedAt: current.unifiedAnalysis?.request?.startedAt,
+      }));
+      const requests = [...videoRequests, ...galleryRequests];
+      if (requests.length > 100) {
+        message(t('downloadListInvalid'), true);
+        return;
+      }
+      const browserGroups = browserDownloads.map(({ group }) => group);
+      const origins = [...new Set([
+        ...galleryDownloadOrigins(browserGroups),
+        ...videoRequests.map(request => `${new URL(request.url).origin}/*`),
+      ])];
+      if (!await ensureSitePermissions(origins)) {
+        message(t('permissionRequired'), true);
+        return;
+      }
+      const asAlbum = group => albumForGroup(group, current);
+      patch({ busy: true });
+      try {
+        if (browserDownloads.length) {
+          const response = await chrome.runtime.sendMessage({
+            type: 'YT_DLP_GUI_BROWSER_DOWNLOAD_START',
+            jobs: browserDownloads.map(({ group, mode, key }) => ({ gallery: asAlbum(group), mode, key })),
+            sourceTabId: current.sourceTabId, sourcePageUrl: current.sourceUrl,
+            sourceAnalysisStartedAt: current.unifiedAnalysis?.request?.startedAt,
+          });
+          if (!response?.ok) throw new Error(response?.message || t('browserDownloadUnavailable'));
+          renderBrowserDownloadTask(response.task);
+        }
+        if (requests.length) {
+          const response = await nativeRequest({ action: 'downloadBatch', requests });
+          renderTask(response.data.task);
+        }
+      } catch (error) {
+        message(error.message || t('browserDownloadUnavailable'), true, error.helpUrl);
+      } finally { patch({ busy: false }); }
     } catch (error) {
       message(error.message, true, error.helpUrl);
-    } finally {
-      patch({ busy: false });
+    }
+  }
+
+  async function openGalleryAlbum(index) {
+    const current = get(state);
+    const item = galleryPostGroups(current.analysisByBackend.g?.items, current.sourceUrl)[index];
+    if (!item) return;
+    try {
+      if (item.sourceScope === 'timeline' && !current.analysisByBackend.g?.host?.capabilities?.includes('gallery.timeline.v1')) throw Error(t('galleryTimelineUpgradeRequired'));
+      if (!await ensureSitePermissions(galleryDownloadOrigins([item]))) {
+        message(t('permissionRequired'), true);
+        return;
+      }
+      const response = await chrome.runtime.sendMessage({
+        type: 'YT_DLP_GUI_OPEN_GALLERY',
+        gallery: albumForGroup(item, current),
+      });
+      if (!response?.ok) throw new Error(response?.message || t('galleryAlbumOpenFailed'));
+    } catch (error) {
+      message(error.message || t('galleryAlbumOpenFailed'), true);
+    }
+  }
+
+  async function openGalleryAlbumAll() {
+    const current = get(state);
+    const groups = galleryPostGroups(current.analysisByBackend.g?.items, current.sourceUrl);
+    if (groups.length < 2 || current.busy || current.analysisRunning) return;
+    try {
+      if (!await ensureSitePermissions(galleryDownloadOrigins(groups))) {
+        message(t('permissionRequired'), true);
+        return;
+      }
+      const response = await chrome.runtime.sendMessage({
+        type: 'YT_DLP_GUI_OPEN_GALLERY',
+        gallery: galleryAlbumPayload(groups, current.sourceSiteName, current.sourceUrl),
+      });
+      if (!response?.ok) throw new Error(response?.message || t('galleryAlbumOpenFailed'));
+    } catch (error) {
+      message(error.message || t('galleryAlbumOpenFailed'), true);
     }
   }
 
@@ -634,8 +1018,15 @@ export function createPopupController() {
     if (current.busy || !current.downloadRunning || current.currentTask?.state === 'stopping') return;
     patch({ busy: true });
     try {
-      const response = await nativeRequest({ action: 'cancelDownload' });
-      renderTask(response.data.task);
+      if (['running', 'stopping'].includes(current.browserDownloadTask.state)) {
+        const response = await chrome.runtime.sendMessage({ type: 'YT_DLP_GUI_BROWSER_DOWNLOAD_STOP' });
+        if (!response?.ok) throw Error(response?.message || t('downloadStopFailed'));
+        renderBrowserDownloadTask(response.task);
+      }
+      if (['running', 'stopping'].includes(current.currentTask.state)) {
+        const response = await nativeRequest({ action: 'cancelDownload' });
+        renderTask(response.data.task);
+      }
     } catch (error) {
       message(t('downloadStopFailed', { message: error.message }), true);
     } finally {
@@ -645,13 +1036,19 @@ export function createPopupController() {
 
   async function setPlaylistScope(playlistScope) {
     const current = get(state);
-    if (current.busy || current.downloadRunning || current.playlistScope === playlistScope) return;
+    if (current.busy || current.analysisRunning || current.downloadRunning || current.playlistScope === playlistScope) return;
     patch({
       playlistScope,
+      analysisStorageScope: playlistScope,
       analysis: null,
+      unifiedAnalysis: null,
+      analysisByBackend: { y: null, g: null },
+      analysisErrors: { y: '', g: '' },
       choices: {},
-      selectedIndices: new Set(),
-      knownSelectionItemCount: 0,
+      galleryModes: {},
+      selectionsByBackend: { y: new Set(), g: new Set() },
+      galleryRanges: {},
+      knownCountsByBackend: { y: 0, g: 0 },
       analysisView: 'idle',
     });
     message();
@@ -666,12 +1063,16 @@ export function createPopupController() {
 
   function toggleSelection(index, selected) {
     const current = get(state);
-    const selectedIndices = new Set(current.selectedIndices);
+    const selectedIndices = new Set(current.selectionsByBackend.y);
     if (selected) selectedIndices.add(index);
     else selectedIndices.delete(index);
-    patch({ selectedIndices });
+    patch({ selectionsByBackend: {
+      ...current.selectionsByBackend,
+      y: new Set(selectedIndices),
+    } });
     chrome.storage.session.set({
-      [scopedStorageKey('selection')]: [...selectedIndices].sort((a, b) => a - b),
+      [scopedStorageKey('selection')]:
+        [...selectedIndices].sort((a, b) => a - b),
     });
   }
 
@@ -679,6 +1080,37 @@ export function createPopupController() {
     const choice = normalizeChoice(index);
     if (!choice) return;
     persistChoices({ ...get(state).choices, [index]: choice });
+  }
+
+
+  async function saveSiteCookies() {
+    const current = get(state);
+    if (current.busy || current.analysisRunning || current.downloadRunning || current.cookieSaveRunning) return;
+    if (!current.sourceUrl || !Number.isInteger(current.sourceTabId)) {
+      patch({ cookieSaveMessage: t('cookieSaveNoPage'), cookieSaveError: true });
+      return;
+    }
+    patch({ cookieSaveRunning: true, cookieSaveMessage: '', cookieSaveError: false });
+    try {
+      const origins = await sitePermissionOrigins(current.sourceUrl);
+      if (!await ensureSitePermissions(origins)) {
+        patch({ cookieSaveMessage: t('permissionRequired'), cookieSaveError: true });
+        return;
+      }
+      const response = await nativeRequest({
+        action: 'saveBrowserCookies',
+        url: current.sourceUrl,
+        sourceTabId: current.sourceTabId,
+      });
+      patch({
+        cookieSaveMessage: t(response.data?.autoUpdateEnabled === true ? 'cookieSaveSuccess' : 'cookieSaveAutoUpdateUnavailable'),
+        cookieSaveError: response.data?.autoUpdateEnabled !== true,
+      });
+    } catch (error) {
+      patch({ cookieSaveMessage: error.message || t('cookieSaveFailed'), cookieSaveError: true });
+    } finally {
+      patch({ cookieSaveRunning: false });
+    }
   }
 
   async function chooseDirectory() {
@@ -714,6 +1146,9 @@ export function createPopupController() {
   }
 
   function destroy() {
+    destroyed = true;
+    recognitionRevision += 1;
+    pageSource.destroy();
     matcherWorker.terminate();
     chrome.runtime.onMessage.removeListener(runtimeListener);
     chrome.storage.onChanged.removeListener(storageListener);
@@ -723,7 +1158,7 @@ export function createPopupController() {
     document.documentElement.lang = chrome.i18n.getUILanguage?.() || 'en';
     chrome.runtime.onMessage.addListener(runtimeListener);
     chrome.storage.onChanged.addListener(storageListener);
-    await Promise.all([loadPreferences(), loadCurrentTab(), restoreTask()]);
+    await Promise.all([loadPreferences(), pageSource.start(), restoreTask()]);
   }
 
   return {
@@ -731,8 +1166,15 @@ export function createPopupController() {
     init,
     destroy,
     analyze,
+    retryAnalysis: backend => analyze(backend),
     stopAnalysis,
+    setGalleryDownloadMode,
+    setGalleryRange,
+    galleryModeForGroup,
+    toggleGalleryGroup,
     downloadSelected,
+    openGalleryAlbum,
+    openGalleryAlbumAll,
     stopDownload,
     setPlaylistScope,
     setPlaylistItemLimit,
@@ -741,7 +1183,10 @@ export function createPopupController() {
     setChoice,
     chooseDirectory,
     openDirectory,
-    selectedDownloadIndices,
+    saveSiteCookies,
+    setAnalysisTool,
+    setAlbumWheelMode,
+    detectAnalysisTools,
     storedDownloadChoice,
     downloadChoiceAvailable,
   };

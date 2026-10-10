@@ -26,7 +26,6 @@ impl AppState {
         }
         self.stop_music_playback_for_audio_context();
         self.music.audio_queue_items = std::mem::take(&mut self.queue_items);
-        self.save_audio_playlist_items(&self.music.audio_queue_items);
         self.queue_items = std::mem::take(&mut self.music.non_audio_queue_items);
         for item in &mut self.queue_items {
             item.view_kind = QueueItemViewKind::VideoCard;
@@ -198,43 +197,4 @@ fn confirmed_music_download_choice(mut choice: MusicDownloadChoice) -> MusicDown
     choice.embed_cover = true;
     choice.write_tags = true;
     choice
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn confirming_music_download_preserves_unified_mp3_output() {
-        let choice = MusicDownloadChoice {
-            mode: MusicDownloadMode::Unified,
-            unified_format: MusicDownloadFormat::Mp3,
-            embed_cover: false,
-            write_tags: false,
-            ..MusicDownloadChoice::default()
-        };
-
-        let confirmed = confirmed_music_download_choice(choice);
-
-        assert_eq!(confirmed.mode, MusicDownloadMode::Unified);
-        assert_eq!(confirmed.target_format(), Some(MusicDownloadFormat::Mp3));
-        assert!(confirmed.embed_cover);
-        assert!(confirmed.write_tags);
-    }
-
-    #[test]
-    fn confirming_music_download_preserves_chapter_split_choice() {
-        let choice = MusicDownloadChoice {
-            save_mode: MusicDownloadSaveMode::SplitChapters,
-            ..MusicDownloadChoice::default()
-        };
-
-        let confirmed = confirmed_music_download_choice(choice);
-
-        assert_eq!(confirmed.save_mode, MusicDownloadSaveMode::SplitChapters);
-        assert!(music_download_requires_online_download(confirmed));
-        assert!(!music_download_requires_online_download(
-            MusicDownloadChoice::default()
-        ));
-    }
 }

@@ -14,7 +14,7 @@ pub(super) fn single_mode_format_row_count(state: &AppState) -> usize {
     };
 
     let index = 0;
-    let mut rows = 2usize; // video + audio, matching the normal item baseline.
+    let mut rows = 1usize + usize::from(state.item_shows_audio_format_row(index));
     if state.item_shows_subtitle_row(index) {
         rows += 1;
     }
@@ -34,11 +34,19 @@ pub(super) fn render_format_rows(tui: &mut Tui, state: &mut AppState) {
     let item_id = state.queue_items[index].id;
     let item_locked = state.item_is_busy(index);
     let audio_locked = state.item_uses_muxed_video(index);
+    let show_audio_row = state.item_shows_audio_format_row(index);
     let show_subtitle_row = state.item_shows_subtitle_row(index);
     let show_section_row = state.item_shows_download_section_row(index);
     let label_width = {
         let ui = tui.egui_ui();
-        item_card::visible_item_label_width(ui, state, false, show_subtitle_row, show_section_row)
+        item_card::visible_item_label_width(
+            ui,
+            state,
+            false,
+            show_audio_row,
+            show_subtitle_row,
+            show_section_row,
+        )
     };
 
     let video_label = state.ui_i18n_text_for_key(UiText::VIDEO).to_owned();
@@ -79,18 +87,20 @@ pub(super) fn render_format_rows(tui: &mut Tui, state: &mut AppState) {
         || state.open_format_picker(index, FormatPickerKind::Video),
         || pending_export = Some((item_id, DownloadTargetKind::Video)),
     );
-    item_card::item_format_summary_row(
-        tui,
-        label_width,
-        &audio_label,
-        &audio_summary,
-        audio_progress,
-        show_av_progress,
-        !audio_locked && !item_locked,
-        audio_export_enabled,
-        || state.open_format_picker(index, FormatPickerKind::Audio),
-        || pending_export = Some((item_id, DownloadTargetKind::Audio)),
-    );
+    if show_audio_row {
+        item_card::item_format_summary_row(
+            tui,
+            label_width,
+            &audio_label,
+            &audio_summary,
+            audio_progress,
+            show_av_progress,
+            !audio_locked && !item_locked,
+            audio_export_enabled,
+            || state.open_format_picker(index, FormatPickerKind::Audio),
+            || pending_export = Some((item_id, DownloadTargetKind::Audio)),
+        );
+    }
     if show_subtitle_row {
         item_card::item_format_summary_row(
             tui,
@@ -124,7 +134,7 @@ pub(super) fn render_format_rows(tui: &mut Tui, state: &mut AppState) {
 fn render_empty_format_rows(tui: &mut Tui, state: &mut AppState) {
     let label_width = {
         let ui = tui.egui_ui();
-        item_card::visible_item_label_width(ui, state, false, false, false)
+        item_card::visible_item_label_width(ui, state, false, true, false, false)
     };
     let video_waiting = state
         .ui_i18n_text_for_key("item.after_adding_choose_the_video_format_here")

@@ -1,5 +1,11 @@
 use super::*;
 
+pub(super) struct AudioSourcePreflightResult {
+    source: String,
+    result:
+        Result<crate::infrastructure::yt_dlp_source_analysis::DesktopSourcePreflight, AnalyzeError>,
+}
+
 impl AppState {
     pub(super) fn is_current_music_session(&self, item_id: QueueItemId, session_id: u64) -> bool {
         self.music.music_player_current_item_id == Some(item_id)
@@ -11,6 +17,91 @@ impl AppState {
     }
 
     pub(super) fn add_current_url_to_music_compact_batch(&mut self) {
+        if self.url_input_locked() {
+            self.last_action = "Wait for URL analysis to finish.".to_owned();
+            return;
+        }
+        let source = self.url_input.trim().to_owned();
+        if source.is_empty() {
+            self.last_action = "There is no URL to add.".to_owned();
+            return;
+        }
+        self.audio_url_preflight_pending = true;
+        self.last_action = format!("Checking yt-dlp URL rules: {source}");
+        let tx = self.audio_url_preflight_tx.clone();
+        let force = self.config.force_analysis;
+        let paths = self.tool_paths.clone();
+        let use_cookies = self.item_defaults.use_cookies;
+        thread::spawn(move || {
+            let result = (|| {
+                if !force
+                    && !crate::infrastructure::extractor_index::match_embedded_yt_dlp_url(&source)
+                        .map_err(|message| AnalyzeError {
+                        message,
+                        command_line: None,
+                    })?
+                {
+                    return Err(AnalyzeError { message: "No matching yt-dlp URL rule for Audio mode. Enable Force analysis in Advanced settings to try yt-dlp.".to_owned(), command_line: None });
+                }
+                crate::infrastructure::yt_dlp_source_analysis::preflight_desktop_source(
+                    &paths,
+                    &source,
+                    use_cookies,
+                )
+            })();
+            let _ = tx.send(AudioSourcePreflightResult { source, result });
+        });
+    }
+
+    pub fn audio_url_preflight_running(&self) -> bool {
+        self.audio_url_preflight_pending
+    }
+
+    pub(super) fn poll_audio_url_preflight(&mut self) {
+        while let Ok(AudioSourcePreflightResult { source, result }) =
+            self.audio_url_preflight_rx.try_recv()
+        {
+            if !self.audio_url_preflight_pending {
+                continue;
+            }
+            self.audio_url_preflight_pending = false;
+            let (command, error) = match &result {
+                Ok(
+                    crate::infrastructure::yt_dlp_source_analysis::DesktopSourcePreflight::Single(
+                        Some(output),
+                    ),
+                ) => (Some(output.command_line.clone()), None),
+                Err(error) => (error.command_line.clone(), Some(error.message.clone())),
+                _ => (None, None),
+            };
+            if let Some(command) = command {
+                let action_id = self.push_tool_log_action("audio", "source preflight");
+                self.push_tool_log_step_internal(
+                    action_id,
+                    if result.is_ok() {
+                        ToolLogStatus::Success
+                    } else {
+                        ToolLogStatus::Failed
+                    },
+                    "yt-dlp",
+                    "source preflight",
+                    command,
+                    error,
+                    true,
+                );
+            }
+            match result {
+                Ok(scope) => self.add_music_compact_url_after_preflight(source, scope),
+                Err(error) => self.last_action = error.message,
+            }
+        }
+    }
+
+    fn add_music_compact_url_after_preflight(
+        &mut self,
+        source: String,
+        scope: crate::infrastructure::yt_dlp_source_analysis::DesktopSourcePreflight,
+    ) {
         if self.is_adding_batch {
             self.last_action = "Batch add is still running.".to_owned();
             return;
@@ -21,13 +112,7 @@ impl AppState {
             return;
         }
 
-        let source = self.url_input.trim();
-        if source.is_empty() {
-            self.last_action = "There is no URL to add.".to_owned();
-            return;
-        }
-
-        let source = source.to_owned();
+        // The source is the exact URL approved by the asynchronous yt-dlp-only preflight.
         if youtube_url_has_video_and_playlist(&source) {
             match self.config.youtube_video_playlist_mode {
                 YoutubeVideoPlaylistMode::Ask => {
@@ -57,10 +142,16 @@ impl AppState {
         }
 
         self.music.music_player_error = None;
-        if !looks_like_playlist_url(&source) {
+        if let crate::infrastructure::yt_dlp_source_analysis::DesktopSourcePreflight::Single(
+            output,
+        ) = scope
+        {
             // Align with Add: single items enter the list immediately.
             // Music compact then uses a fast flat metadata update because it does not expose format choices.
-            self.add_single_music_compact_url(source);
+            let seed = output.and_then(|output| {
+                playlist_entry_seed_from_json(&output.json, "Untitled task", "Imported {tail}")
+            });
+            self.add_single_music_compact_url_with_seed(source, seed);
             return;
         }
 
@@ -82,10 +173,24 @@ impl AppState {
 
         // Align with Add: playlist import locks the URL row and streams items in one-by-one.
         // The only difference is the inserted item view kind.
-        self.begin_music_batch_add(source);
+        self.youtube_playlist_prompt = Some(YoutubePlaylistPrompt {
+            source,
+            kind: YoutubePlaylistPromptKind::GenericPlaylist,
+            risk: None,
+            music_compact: true,
+        });
+        self.last_action = "This URL is a playlist. Confirm import to add its tracks.".to_owned();
     }
 
     pub(super) fn add_single_music_compact_url(&mut self, source: String) {
+        self.add_single_music_compact_url_with_seed(source, None);
+    }
+
+    fn add_single_music_compact_url_with_seed(
+        &mut self,
+        source: String,
+        seed: Option<PlaylistEntrySeed>,
+    ) {
         let source_key = canonical_queue_source_key(&source);
         if let Some(existing_id) = self
             .queue_items
@@ -109,7 +214,11 @@ impl AppState {
                     .queue_item_by_id(existing_id)
                     .map(|item| item.selection.use_cookies)
                     .unwrap_or(self.item_defaults.use_cookies);
-                self.spawn_music_flat_update_worker(existing_id, source.clone(), use_cookies);
+                if let Some(seed) = seed {
+                    self.update_music_compact_item_from_seed(existing_id, seed);
+                } else {
+                    self.spawn_music_flat_update_worker(existing_id, source.clone(), use_cookies);
+                }
             }
             self.url_input.clear();
             return;
@@ -146,7 +255,11 @@ impl AppState {
                 .queue_item_by_id(item_id)
                 .map(|item| item.selection.use_cookies)
                 .unwrap_or(self.item_defaults.use_cookies);
-            self.spawn_music_flat_update_worker(item_id, source, use_cookies);
+            if let Some(seed) = seed {
+                self.update_music_compact_item_from_seed(item_id, seed);
+            } else {
+                self.spawn_music_flat_update_worker(item_id, source, use_cookies);
+            }
         } else {
             self.last_action = i18n::format_fixed_english(
                 "Added music from local cache: {title}",

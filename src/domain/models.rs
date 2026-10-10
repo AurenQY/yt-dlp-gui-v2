@@ -1,7 +1,9 @@
 use super::{DownloadContainerPreference, DownloadRangeSelection};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VideoMetadata {
+    pub extractor_key: String,
     pub title: String,
     pub channel: String,
     pub channel_url: String,
@@ -26,6 +28,7 @@ pub struct VideoMetadata {
 impl VideoMetadata {
     pub fn empty_preview() -> Self {
         Self {
+            extractor_key: String::new(),
             title: String::new(),
             channel: String::new(),
             channel_url: String::new(),
@@ -49,7 +52,7 @@ impl VideoMetadata {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChapterOption {
     pub id: String,
     pub title: String,
@@ -92,7 +95,7 @@ impl ChapterOption {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubtitleOption {
     pub id: String,
     pub source: SubtitleSource,
@@ -102,6 +105,7 @@ pub struct SubtitleOption {
     pub target_language_code: Option<String>,
     pub target_language_label: Option<String>,
     pub ext: String,
+    #[serde(skip)]
     pub url: String,
 }
 
@@ -153,7 +157,7 @@ impl SubtitleOption {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SubtitleSource {
     None,
     Original,
@@ -178,7 +182,7 @@ impl SubtitleSource {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FormatOption {
     pub id: String,
     pub label: String,
@@ -270,7 +274,7 @@ impl FormatOption {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MediaKind {
     Video,
     Audio,
@@ -291,7 +295,7 @@ impl MediaKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QualityPreset {
     Best,
     P1080,
@@ -359,10 +363,35 @@ impl Default for DownloadOptions {
 pub type QueueItemId = u64;
 pub type WorkflowRunId = u64;
 
+// Gallery media information stays independent from yt-dlp's format/stream selections.
+#[derive(Clone)]
+pub struct GalleryQueueItem {
+    pub download_range: super::GalleryDownloadRange,
+    pub processed_posts: usize,
+    pub analysis: Option<crate::domain::GalleryAnalysis>,
+    pub download_artifacts: Vec<crate::domain::GalleryDownloadArtifact>,
+}
+
+#[derive(Clone)]
+pub enum QueueBackend {
+    YtDlp,
+    GalleryDl(GalleryQueueItem),
+}
+
 #[derive(Clone)]
 pub struct QueueItem {
     pub id: QueueItemId,
+    /// Permanent task identity; id above is only an in-process UI/event handle.
+    pub persistent_id: super::PersistentItemId,
+    /// Restored intent has only a display preview, never authoritative formats/media.
+    pub needs_analysis_refresh: bool,
+    pub(crate) saved_download_display: super::queue_preview::DownloadQueueDisplay,
+    pub restored_chapters_unresolved: bool,
+    pub backend: QueueBackend,
     pub source_url: String,
+    /// One-based yt-dlp playlist position when a playable entry shares its parent's URL.
+    pub playlist_index: Option<usize>,
+    pub source_media_id: Option<String>,
     pub title: String,
     pub music_album_title: String,
     pub thumbnail_hint: String,
@@ -390,9 +419,25 @@ pub struct QueueItem {
 
 impl QueueItem {
     pub fn new(id: QueueItemId, source_url: impl Into<String>, title: impl Into<String>) -> Self {
+        Self::with_persistent_id(id, super::PersistentItemId::new(), source_url, title)
+    }
+
+    pub(crate) fn with_persistent_id(
+        id: QueueItemId,
+        persistent_id: super::PersistentItemId,
+        source_url: impl Into<String>,
+        title: impl Into<String>,
+    ) -> Self {
         Self {
             id,
+            persistent_id,
+            needs_analysis_refresh: false,
+            saved_download_display: Default::default(),
+            restored_chapters_unresolved: false,
+            backend: QueueBackend::YtDlp,
             source_url: source_url.into(),
+            playlist_index: None,
+            source_media_id: None,
             title: title.into(),
             music_album_title: String::new(),
             thumbnail_hint: "item.thumbnail".to_owned(),
@@ -493,25 +538,62 @@ pub enum MetadataState {
     Failed(String),
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DownloadSelection {
+    #[serde(skip_serializing_if = "quality_is_best")]
     pub quality: QualityPreset,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub video_selector: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub audio_selector: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub subtitle_selector: String,
+    #[serde(skip_serializing_if = "subtitle_is_none")]
     pub subtitle_source: SubtitleSource,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub write_thumbnail: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub embed_thumbnail: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub write_subtitles: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub embed_subtitles: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub write_chapters: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub embed_chapters: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub use_cookies: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
     pub use_aria2: bool,
+    #[serde(skip_serializing_if = "output_is_desktop")]
     pub output_dir: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub file_name: String,
+    #[serde(skip_serializing_if = "container_is_auto")]
     pub container_preference: DownloadContainerPreference,
+    #[serde(
+        with = "super::queue_snapshot::range_serde",
+        skip_serializing_if = "DownloadRangeSelection::is_full_video"
+    )]
     pub download_range: DownloadRangeSelection,
+}
+
+fn bool_is_false(value: &bool) -> bool {
+    !*value
+}
+fn quality_is_best(value: &QualityPreset) -> bool {
+    *value == QualityPreset::Best
+}
+fn subtitle_is_none(value: &SubtitleSource) -> bool {
+    *value == SubtitleSource::None
+}
+fn output_is_desktop(value: &str) -> bool {
+    value == "Desktop"
+}
+fn container_is_auto(value: &DownloadContainerPreference) -> bool {
+    *value == DownloadContainerPreference::Auto
 }
 
 #[derive(Clone, PartialEq, Eq)]

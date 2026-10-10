@@ -81,24 +81,6 @@ pub(super) fn restore_music_compact_item_from_cache_hit(
     item.last_error = None;
 }
 
-pub(super) fn audio_playlist_item_snapshot(item: &QueueItem) -> AudioPlaylistItemSnapshot {
-    AudioPlaylistItemSnapshot {
-        source_url: item.source_url.clone(),
-        title: item.title.clone(),
-        album_title: item.music_album_title.clone(),
-        thumbnail_hint: item.thumbnail_hint.clone(),
-        thumbnail_url: item.thumbnail_url.clone(),
-        duration_text: item.duration_text.clone(),
-        duration_seconds: item.music_duration_seconds,
-        stream_ext: item.music_stream_ext.clone(),
-        stream_format_id: item.music_stream_format_id.clone(),
-        stream_acodec: item.music_stream_acodec.clone(),
-        expected_bytes: item.music_stream_expected_bytes,
-        cache_key: item.music_cache_key.clone(),
-        use_cookies: item.selection.use_cookies,
-    }
-}
-
 pub(super) const BACKGROUND_DOWNLOAD_EVENT_BUDGET_PER_POLL: usize = 96;
 pub(super) const BACKGROUND_MUSIC_DOWNLOAD_EVENT_BUDGET_PER_POLL: usize = 24;
 

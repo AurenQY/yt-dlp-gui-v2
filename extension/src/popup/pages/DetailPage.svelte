@@ -3,7 +3,6 @@
     Block,
     Button,
     List,
-    ListInput,
     ListItem,
     Navbar,
     Page,
@@ -15,8 +14,11 @@
   import { durationLabel } from '../../shared/format-display.js';
   import { t } from '../../shared/i18n.js';
   import { protocolSupports } from '../../shared/native-protocol.js';
+  import SourcePreview from '../components/SourcePreview.svelte';
+  import ActionIcon from '../components/ActionIcon.svelte';
 
   export let itemIndex;
+  let fileNameInput;
 
   $: index = Number(itemIndex);
   $: state = $controller;
@@ -39,7 +41,18 @@
   }
 
   function setFileName(event) {
-    controller.setChoice(index, { fileName: event.currentTarget.value }, false);
+    const fileName = event.currentTarget.value.replace(/[\r\n]+/g, ' ');
+    if (fileName !== event.currentTarget.value) event.currentTarget.value = fileName;
+    controller.setChoice(index, { fileName }, false);
+  }
+
+  function fileNameKeyDown(event) {
+    if (event.key === 'Enter' && !event.isComposing) event.preventDefault();
+  }
+
+  function clearFileName() {
+    controller.setChoice(index, { fileName: '' }, false);
+    fileNameInput?.focus();
   }
 
   function setOutput(event) {
@@ -94,23 +107,14 @@
   <Navbar title={t('downloadContent')} backLink={true} />
 
   {#if vm}
-    <List mediaList strong dividers outline inset>
-      <ListItem
-        mediaItem
-        title={vm.item.title || vm.item.url}
-        subtitle={durationLabel(vm.item.duration)}
-      >
-        {#snippet media()}
-          {#if vm.item.thumbnail}
-            <img class="detail-thumbnail" src={vm.item.thumbnail} width="96" height="54" alt="" />
-          {/if}
-        {/snippet}
-      </ListItem>
-    </List>
+    <article class="source-card">
+      <SourcePreview sources={[vm.item.thumbnail].filter(Boolean)} siteIcon={state.sourceSiteIconUrl} />
+      <div class="source-card-content"><div class="source-card-title">{vm.item.title || vm.item.url}</div><span class="result-date">{durationLabel(vm.item.duration)}</span></div>
+    </article>
 
     {#if vm.contentKinds.length > 1}
       <Block inset>
-        <Segmented raised round>
+        <Segmented strong>
           <Button
             active={vm.choice.contentKind === 'video'}
             onClick={() => setContentKind('video')}
@@ -123,17 +127,18 @@
       </Block>
     {/if}
 
-    <List strong inset>
-  <ListInput
-    class="file-name-input"
-    label={t('fileName')}
-        type="text"
-        value={vm.choice.fileName}
-        maxlength="200"
-        clearButton
-        info={t('fileNameBaseHint')}
-        onInput={setFileName}
-      />
+    <List strong inset class="option-list">
+      <ListItem class="file-name-option" title={t('fileName')}>
+        {#snippet after()}
+          <div class="file-name-value">
+            <div class="file-name-editor">
+              <textarea bind:this={fileNameInput} id={`file-name-${index}`} aria-label={t('fileName')} aria-describedby={`file-name-hint-${index}`} rows="3" wrap="soft" maxlength="200" spellcheck="false" value={vm.choice.fileName} oninput={setFileName} onkeydown={fileNameKeyDown}></textarea>
+              <button type="button" class="file-name-clear" aria-label={t('clearFileName')} aria-controls={`file-name-${index}`} disabled={!vm.choice.fileName} onclick={clearFileName}><ActionIcon name="close" /></button>
+            </div>
+            <span id={`file-name-hint-${index}`} class="file-name-hint">{t('fileNameBaseHint')}</span>
+          </div>
+        {/snippet}
+      </ListItem>
 
       {#if vm.choice.contentKind === 'video'}
         <ListItem title={t('videoFormat')} link={`/item/${index}/format/video/`}>
@@ -237,34 +242,3 @@
     </List>
   {/if}
 </Page>
-
-<style>
-  :global(.file-name-input) {
-    --file-name-clear-action-width: 44px;
-  }
-
-  :global(.file-name-input .item-input-wrap input) {
-    padding-inline-end: var(--file-name-clear-action-width);
-  }
-
-  :global(.file-name-input .input-clear-button) {
-    width: var(--file-name-clear-action-width);
-  }
-
-  .detail-thumbnail {
-    display: block;
-    width: 96px;
-    height: 54px;
-    border-radius: 6px;
-    object-fit: cover;
-  }
-
-  .format-choice-summary {
-    display: block;
-    max-width: 240px;
-    overflow: hidden;
-    font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-</style>

@@ -12,11 +12,10 @@ impl AppState {
 
     pub(super) fn append_batch_seed(&mut self, _source: &str, seed: PlaylistEntrySeed) {
         let source_key = canonical_queue_source_key(&seed.source_url);
-        if self
-            .queue_items
-            .iter()
-            .any(|item| canonical_queue_source_key(&item.source_url) == source_key)
-        {
+        if self.queue_items.iter().any(|item| {
+            matches!(&item.backend, QueueBackend::YtDlp)
+                && canonical_queue_source_key(&item.source_url) == source_key
+        }) {
             return;
         }
 
@@ -38,6 +37,11 @@ impl AppState {
     pub(super) fn build_queue_item_from_url(&mut self, url: &str) -> QueueItem {
         let title = infer_title(url, "Untitled task", "Imported {tail}");
         let mut item = QueueItem::new(self.alloc_queue_item_id(), url, title);
+        self.apply_queue_item_defaults(&mut item);
+        item
+    }
+
+    pub(super) fn apply_queue_item_defaults(&self, item: &mut QueueItem) {
         item.selection.quality = self.item_defaults.quality;
         item.selection.write_thumbnail = self.item_defaults.write_thumbnail;
         item.selection.embed_thumbnail = self.item_defaults.embed_thumbnail;
@@ -49,7 +53,6 @@ impl AppState {
         item.selection.use_aria2 = self.item_defaults.use_aria2;
         item.selection.output_dir = self.item_defaults.output_dir.clone();
         item.selection.download_range.clear();
-        item
     }
 
     pub(super) fn build_queue_item_from_seed(&mut self, seed: PlaylistEntrySeed) -> QueueItem {
@@ -81,7 +84,11 @@ impl AppState {
         self.batch_input = self
             .queue_items
             .iter()
-            .filter(|item| !item.source_url.trim().is_empty())
+            // This text input belongs to yt-dlp; gallery-only URLs must not
+            // silently enter a video playlist or audio batch after a rebuild.
+            .filter(|item| {
+                matches!(&item.backend, QueueBackend::YtDlp) && !item.source_url.trim().is_empty()
+            })
             .map(|item| item.source_url.clone())
             .collect::<Vec<_>>()
             .join("\n");
@@ -134,6 +141,7 @@ impl AppState {
             i18n::format_fixed_english("Adding: {source}", &[("{source}", source.as_str())]);
 
         let tool_paths = self.tool_paths.clone();
+        let use_cookies = self.item_defaults.use_cookies;
         let source_for_worker = source.clone();
         let (tx, rx) = mpsc::channel();
         self.batch_add_result_rx = Some(rx);
@@ -158,6 +166,7 @@ impl AppState {
             run_batch_add_worker(
                 tool_paths,
                 source_for_worker,
+                use_cookies,
                 limit,
                 untitled_task,
                 imported_template,

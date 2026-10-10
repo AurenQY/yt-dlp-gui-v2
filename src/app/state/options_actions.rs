@@ -286,6 +286,11 @@ impl AppState {
         self.tool_paths.no_check_certificates = enabled;
         let _ = self.config.save();
     }
+    pub fn set_impersonate(&mut self, value: impl Into<String>) {
+        self.config.set_impersonate(value);
+        self.tool_paths.impersonate = self.config.impersonate.clone();
+        let _ = self.config.save();
+    }
     pub fn set_limit_rate(&mut self, value: impl Into<String>) {
         self.config.set_limit_rate(value);
         self.tool_paths.limit_rate = self.config.limit_rate.clone();
@@ -309,6 +314,10 @@ impl AppState {
     }
     pub fn set_auto_analyze(&mut self, enabled: bool) {
         self.config.auto_analyze = enabled;
+        let _ = self.config.save();
+    }
+    pub fn set_force_analysis(&mut self, enabled: bool) {
+        self.config.force_analysis = enabled;
         let _ = self.config.save();
     }
     pub fn set_keep_window_on_top(&mut self, enabled: bool) {

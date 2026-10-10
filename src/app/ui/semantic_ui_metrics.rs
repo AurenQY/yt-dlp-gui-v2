@@ -73,6 +73,7 @@ const OPTIONS_LANGUAGE_DETAIL_HEADER_TO_BODY_VERTICAL_SPACING: f32 = 10.0;
 const OPTIONS_LANGUAGE_CHECKMARK_COLUMN_WIDTH: f32 = 18.0;
 const TOOL_PATH_ROW_CONTROL_HORIZONTAL_SPACING: f32 = 6.0;
 const TOOL_PATH_ROW_MINIMUM_PATH_TEXT_FIELD_WIDTH: f32 = 120.0;
+const ABOUT_COMPONENT_ICON_SCALE_FROM_ITEM_HEIGHT: f32 = 44.0 / 52.0;
 
 const FORMAT_PICKER_HEADER_EXTRA_HEIGHT_FROM_CONTROL_METRICS: f32 = 12.0;
 const FORMAT_PICKER_HEADER_SUMMARY_EXTRA_WIDTH_MULTIPLIER_FROM_ITEM_SPACING: f32 = 1.5;
@@ -174,8 +175,6 @@ const FORMAT_PICKER_SUBTITLE_TABLE_ROW_HEIGHT: f32 = 24.0;
 const FORMAT_PICKER_TABLE_REMAINDER_COLUMN_MINIMUM_WIDTH: f32 = 0.0;
 const FORMAT_PICKER_TABLE_MINIMUM_SCROLLED_HEIGHT: f32 = 180.0;
 
-const URL_ROW_SPINNER_ACTION_CELL_HORIZONTAL_SPACING: f32 = 0.0;
-
 const MAIN_SECTION_VERTICAL_SPACING: f32 = 6.0;
 const MAIN_BOTTOM_TRAILING_VERTICAL_SPACING: f32 = 2.0;
 const MAIN_INLINE_CONTROL_GAP_SCALE_FROM_ITEM_SPACING: f32 = 0.5;
@@ -212,7 +211,6 @@ const MAIN_MUSIC_BUTTON_HOVER_STROKE_ALPHA: u8 = 88;
 const MAIN_MUSIC_BUTTON_ACTIVE_STROKE_ALPHA: u8 = 154;
 const MAIN_MUSIC_BUTTON_IDLE_FOREGROUND_ALPHA: u8 = 216;
 const MAIN_MUSIC_BUTTON_HOVER_FOREGROUND_ALPHA: u8 = 244;
-const MAIN_URL_ACTION_SPINNER_SIZE_SCALE_FROM_CONTROL_HEIGHT: f32 = 0.75;
 const MAIN_URL_ACTION_SPINNER_TO_TEXT_HORIZONTAL_SPACING: f32 = 4.0;
 const MAIN_MISSING_YT_DLP_CALLOUT_WIDTH: f32 = 320.0;
 const MAIN_MISSING_YT_DLP_CALLOUT_VIEWPORT_EDGE_SAFE_MARGIN: f32 = 8.0;
@@ -273,6 +271,8 @@ const ITEM_CARD_TITLE_SPINNER_TOP_PADDING: f32 = 2.0;
 const ITEM_CARD_TITLE_TEXT_TOP_PADDING: f32 = -3.0;
 const ITEM_CARD_TITLE_DELETE_TOP_PADDING: f32 = -2.0;
 const ITEM_CARD_TITLE_SPINNER_SIZE: f32 = 9.0;
+const ITEM_CARD_TITLE_SITE_ICON_SIZE: f32 = 16.0;
+const ITEM_CARD_TITLE_SITE_ICON_TO_TEXT_GAP: f32 = 4.0;
 const ITEM_CARD_TITLE_MAXIMUM_VISIBLE_LINES: usize = 2;
 const ITEM_CARD_TITLE_MAXIMUM_LINE_HEIGHT_EXTRA_SPACING: f32 = 2.0;
 const ITEM_CARD_THUMBNAIL_WIDTH: f32 = 128.0;
@@ -288,7 +288,7 @@ const ITEM_CARD_REMAINDER_COLUMN_MAXIMUM_WIDTH: f32 = 10_000.0;
 const ITEM_CARD_ZERO_REMAINDER_COLUMN_MINIMUM_WIDTH: f32 = 0.0;
 const ITEM_CARD_DELETE_ICON_SIZE: f32 = 14.0;
 const ITEM_CARD_ICON_BUTTON_CORNER_RADIUS: f32 = 2.0;
-const ITEM_CARD_DOWNLOAD_ICON_HEIGHT_REDUCTION_FROM_ROW_HEIGHT: f32 = 8.0;
+const ITEM_CARD_DOWNLOAD_ICON_HEIGHT_REDUCTION_FROM_ROW_HEIGHT: f32 = 2.0;
 const ITEM_CARD_DOWNLOAD_ICON_SIZE_MINIMUM: f32 = 10.0;
 const ITEM_CARD_DURATION_BADGE_PADDING_X: f32 = 2.0;
 const ITEM_CARD_DURATION_BADGE_PADDING_Y: f32 = 2.0;
@@ -361,10 +361,6 @@ pub(super) fn format_picker_table_remainder_column_minimum_width() -> f32 {
 
 pub(super) fn format_picker_table_minimum_scrolled_height() -> f32 {
     FORMAT_PICKER_TABLE_MINIMUM_SCROLLED_HEIGHT
-}
-
-pub(super) fn url_row_spinner_action_cell_horizontal_spacing() -> f32 {
-    URL_ROW_SPINNER_ACTION_CELL_HORIZONTAL_SPACING
 }
 
 pub(super) fn main_section_vertical_spacing() -> f32 {
@@ -550,10 +546,6 @@ pub(super) fn main_music_button_foreground(
         MAIN_MUSIC_BUTTON_IDLE_FOREGROUND_ALPHA
     };
     egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha)
-}
-
-pub(super) fn main_url_action_spinner_size_for_control_height(control_height: f32) -> f32 {
-    control_height * MAIN_URL_ACTION_SPINNER_SIZE_SCALE_FROM_CONTROL_HEIGHT
 }
 
 pub(super) fn main_url_action_spinner_to_text_horizontal_spacing() -> f32 {
@@ -823,6 +815,22 @@ pub(super) fn item_card_title_spinner_size() -> f32 {
 
 pub(super) fn item_card_title_spinner_width_from_current_spacing(ui: &Ui) -> f32 {
     ITEM_CARD_TITLE_SPINNER_SIZE + ui.spacing().item_spacing.x
+}
+
+pub(super) fn item_card_title_site_icon_size() -> f32 {
+    ITEM_CARD_TITLE_SITE_ICON_SIZE
+}
+
+pub(super) fn item_card_title_site_icon_column_width() -> f32 {
+    ITEM_CARD_TITLE_SITE_ICON_SIZE
+}
+
+pub(super) fn item_card_title_site_icon_to_text_gap() -> f32 {
+    ITEM_CARD_TITLE_SITE_ICON_TO_TEXT_GAP
+}
+
+pub(super) fn item_card_title_site_icon_occupied_width() -> f32 {
+    item_card_title_site_icon_column_width() + item_card_title_site_icon_to_text_gap()
 }
 
 pub(super) fn item_card_title_delete_button_width_from_current_control_metrics(ui: &Ui) -> f32 {
@@ -1307,6 +1315,55 @@ pub(super) fn tool_path_row_path_text_field_width_for_available_width_and_button
     let buttons_width = install_button_width + pick_button_width;
     let gap_width = horizontal_spacing * 2.0;
     (available_width - buttons_width - gap_width).max(TOOL_PATH_ROW_MINIMUM_PATH_TEXT_FIELD_WIDTH)
+}
+
+pub(super) fn about_component_icon_size_from_item_height(item_height: f32) -> f32 {
+    item_height * ABOUT_COMPONENT_ICON_SCALE_FROM_ITEM_HEIGHT
+}
+
+/// App identity is a compact two-line header; use its thumbnail size as the
+/// common visual size for every About dependency Item.
+pub(super) fn about_app_thumbnail_side() -> f32 {
+    44.0
+}
+
+/// The first row contains text only; keep its height independent of the
+/// path field's interactive control height.
+pub(super) fn about_component_header_row_height(ui: &Ui) -> f32 {
+    ui.text_style_height(&egui::TextStyle::Body)
+        + 2.0 * about_component_status_badge_vertical_padding()
+}
+
+/// The App's homepage and latest-version line contains text unless an update
+/// action is available; that case uses the existing standard button row.
+pub(super) fn about_app_detail_row_height(ui: &Ui) -> f32 {
+    about_component_link_row_height(ui)
+}
+
+/// Dependency logos match the App header logo instead of appearing larger.
+pub(super) fn about_component_thumbnail_side() -> f32 {
+    about_app_thumbnail_side()
+}
+
+/// Use the link's Body font metrics, so it stays single-line without
+/// allocating extra vertical space or making the clickable text too small.
+pub(super) fn about_component_link_row_height(ui: &Ui) -> f32 {
+    ui.text_style_height(&egui::TextStyle::Body)
+}
+
+/// Both About tool section headings share the existing Body font family and
+/// use a single semantic scale, independent of dependency Item text sizing.
+pub(super) fn about_section_heading_font_size(ui: &Ui) -> f32 {
+    egui::TextStyle::Body.resolve(ui.style()).size * 1.22
+}
+
+/// Keep About information rows compact, including extension descriptions.
+pub(super) fn about_component_detail_row_gap() -> f32 {
+    1.0
+}
+
+pub(super) fn about_component_card_vertical_gap() -> f32 {
+    6.0
 }
 
 pub(super) fn prepare_bottom_action_row_height_from_current_control_metrics(ui: &Ui) -> f32 {
@@ -2134,6 +2191,26 @@ pub(super) fn xaml_icon_text_button_ui_element_for_visible_text(
     )
 }
 
+pub(super) fn xaml_spinner_text_button_ui_element_for_measured_label(
+    ui: &Ui,
+    label_width: f32,
+    spinner_size: f32,
+    spinner_gap: f32,
+) -> super::xaml_layout_contracts::UiElement {
+    let width = (label_width
+        + spinner_size
+        + spinner_gap
+        + ui.spacing().button_padding.x * 2.0
+        + STANDARD_BUTTON_WIDTH_GUARD_FROM_TEXT_METRICS)
+        .max(ui.spacing().interact_size.x);
+    super::xaml_layout_contracts::UiElement::icon_text_button(
+        super::xaml_layout_contracts::LayoutSize::new(
+            width,
+            standard_interactive_control_height_from_current_ui_metrics(ui),
+        ),
+    )
+}
+
 pub(super) fn xaml_selectable_button_ui_element_for_visible_text(
     ui: &Ui,
     label: &str,
@@ -2224,4 +2301,14 @@ pub(super) fn xaml_settings_form_row_minimum_height_from_row_contract_and_vertic
     vertical_spacing: f32,
 ) -> f32 {
     row.height + vertical_spacing.max(0.0) * 2.0
+}
+
+/// Horizontal inset on each side of the About Item availability badge.
+/// The same intrinsic margin is used for drawing and for the XAML status cell.
+pub(super) fn about_component_status_badge_horizontal_padding() -> f32 {
+    6.0
+}
+
+pub(super) fn about_component_status_badge_vertical_padding() -> f32 {
+    2.0
 }

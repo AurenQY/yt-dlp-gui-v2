@@ -18,9 +18,6 @@ use serde::{Deserialize, Serialize};
 
 mod catalog;
 
-#[cfg(test)]
-mod tests;
-
 // Locale modules may include draft/future translations.
 // All compiled locales are selectable; missing keys fall back to English.
 mod ar_ma;

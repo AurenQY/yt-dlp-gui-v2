@@ -18,6 +18,8 @@ pub(super) enum BatchAddEvent {
         action_id: u64,
         command_line: String,
         success: bool,
+        partial_success: bool,
+        detail: Option<String>,
     },
     ItemAdded {
         source: String,
@@ -27,6 +29,7 @@ pub(super) enum BatchAddEvent {
         source: String,
         added: usize,
         stopped_by_limit: bool,
+        partial_success: bool,
     },
     Failed {
         error: String,
@@ -39,6 +42,7 @@ pub(super) enum BatchAddEvent {
 pub(super) fn run_batch_add_worker(
     tool_paths: ToolPaths,
     source: String,
+    use_cookies: bool,
     limit: Option<usize>,
     untitled_task: String,
     imported_template: String,
@@ -48,9 +52,16 @@ pub(super) fn run_batch_add_worker(
     child_handle: Arc<Mutex<Option<Child>>>,
     cancel_requested: Arc<AtomicBool>,
 ) {
-    let mut command = match tool_paths.prepare_batch_add_command(&source) {
+    let mut command = match tool_paths.prepare_batch_add_command(&source, use_cookies) {
         Ok(command) => command,
         Err(error) => {
+            let _ = tx.send(BatchAddEvent::ToolCommandFinished {
+                action_id: tool_log_action_id,
+                command_line: "yt-dlp batch import".to_owned(),
+                success: false,
+                partial_success: false,
+                detail: Some(error.clone()),
+            });
             let _ = tx.send(BatchAddEvent::Failed { error });
             return;
         }
@@ -69,6 +80,8 @@ pub(super) fn run_batch_add_worker(
                 action_id: tool_log_action_id,
                 command_line: command_line.clone(),
                 success: false,
+                partial_success: false,
+                detail: Some(format!("Could not start yt-dlp: {error}")),
             });
             let _ = tx.send(BatchAddEvent::Failed {
                 error: format!("Could not start yt-dlp: {error}"),
@@ -88,6 +101,8 @@ pub(super) fn run_batch_add_worker(
                 action_id: tool_log_action_id,
                 command_line: command_line.clone(),
                 success: false,
+                partial_success: false,
+                detail: Some("Could not read yt-dlp playlist output.".to_owned()),
             });
             let _ = tx.send(BatchAddEvent::Failed {
                 error: "Could not read yt-dlp playlist output.".to_owned(),
@@ -119,6 +134,8 @@ pub(super) fn run_batch_add_worker(
                     action_id: tool_log_action_id,
                     command_line: command_line.clone(),
                     success: false,
+                    partial_success: false,
+                    detail: Some(format!("Could not read yt-dlp playlist output: {error}")),
                 });
                 let _ = tx.send(BatchAddEvent::Failed {
                     error: format!("Could not read yt-dlp playlist output: {error}"),
@@ -180,12 +197,16 @@ pub(super) fn run_batch_add_worker(
     let status =
         take_and_wait_batch_add_child(&child_handle, cancel_requested.load(Ordering::Relaxed));
     let was_cancelled = cancel_requested.load(Ordering::Relaxed);
+    let mut command_detail = None;
 
     if let Some(mut stderr_reader) = stderr.take() {
         let mut stderr_text = String::new();
         let _ = stderr_reader.read_to_string(&mut stderr_text);
         if let Some(status) = status.as_ref() {
             if !status.success() && !was_cancelled && !stopped_by_limit {
+                command_detail = Some(batch_import_error_summary(&stderr_text, status.code()));
+            }
+            if !status.success() && !was_cancelled && !stopped_by_limit && added == 0 {
                 let detail = stderr_text.trim();
                 let error = if detail.is_empty() {
                     format!("yt-dlp batch import failed: exit code {:?}", status.code())
@@ -196,6 +217,8 @@ pub(super) fn run_batch_add_worker(
                     action_id: tool_log_action_id,
                     command_line: command_line.clone(),
                     success: false,
+                    partial_success: false,
+                    detail: command_detail,
                 });
                 let _ = tx.send(BatchAddEvent::Failed { error });
                 return;
@@ -205,10 +228,16 @@ pub(super) fn run_batch_add_worker(
 
     let command_succeeded = !was_cancelled
         && (stopped_by_limit || status.as_ref().is_some_and(|status| status.success()));
+    let partial_success = !was_cancelled
+        && !stopped_by_limit
+        && added > 0
+        && status.as_ref().is_some_and(|status| !status.success());
     let _ = tx.send(BatchAddEvent::ToolCommandFinished {
         action_id: tool_log_action_id,
         command_line: command_line.clone(),
         success: command_succeeded,
+        partial_success,
+        detail: command_detail,
     });
 
     let event = if was_cancelled {
@@ -219,9 +248,26 @@ pub(super) fn run_batch_add_worker(
             source,
             added,
             stopped_by_limit,
+            partial_success,
         }
     };
     let _ = tx.send(event);
+}
+
+fn batch_import_error_summary(stderr: &str, exit_code: Option<i32>) -> String {
+    let errors = stderr
+        .lines()
+        .filter(|line| line.contains("ERROR:"))
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !errors.is_empty() {
+        errors
+    } else if !stderr.trim().is_empty() {
+        stderr.trim().chars().take(1200).collect()
+    } else {
+        format!("yt-dlp exited with code {exit_code:?}.")
+    }
 }
 
 fn format_process_command_line(command: &std::process::Command) -> String {

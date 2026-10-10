@@ -1,5 +1,6 @@
 use crate::domain::{
-    CompletedSelection, DownloadSelection, MetadataState, QueueItem, WorkflowKind, WorkflowState,
+    CompletedSelection, DownloadSelection, MetadataState, QueueBackend, QueueItem, WorkflowKind,
+    WorkflowState,
 };
 
 pub(super) fn selection_matches_completed(
@@ -31,6 +32,11 @@ pub(super) fn item_latest_download_state(item: &QueueItem) -> Option<WorkflowSta
 pub(super) fn item_can_enter_download_queue(item: &QueueItem) -> bool {
     if item.source_url.trim().is_empty() {
         return false;
+    }
+    if let QueueBackend::GalleryDl(gallery) = &item.backend {
+        if gallery.analysis.is_none() {
+            return false;
+        }
     }
 
     match item_latest_download_state(item) {

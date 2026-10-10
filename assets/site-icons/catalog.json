@@ -1,0 +1,199 @@
+[
+  {
+    "id": "youtube",
+    "rustVariant": "YouTube",
+    "file": "youtube.ico",
+    "hosts": [
+      "youtube.com",
+      "youtu.be",
+      "youtube-nocookie.com"
+    ],
+    "extractors": [
+      "youtube"
+    ]
+  },
+  {
+    "id": "x",
+    "rustVariant": "X",
+    "file": "x.png",
+    "hosts": [
+      "x.com",
+      "twitter.com"
+    ],
+    "extractors": [
+      "twitter",
+      "x:"
+    ]
+  },
+  {
+    "id": "instagram",
+    "rustVariant": "Instagram",
+    "file": "instagram.png",
+    "hosts": [
+      "instagram.com"
+    ],
+    "extractors": [
+      "instagram"
+    ]
+  },
+  {
+    "id": "pixiv",
+    "rustVariant": "Pixiv",
+    "file": "pixiv.ico",
+    "hosts": [
+      "pixiv.net"
+    ],
+    "extractors": [
+      "pixiv"
+    ]
+  },
+  {
+    "id": "reddit",
+    "rustVariant": "Reddit",
+    "file": "reddit.svg",
+    "hosts": [
+      "reddit.com",
+      "redd.it"
+    ],
+    "extractors": [
+      "reddit"
+    ]
+  },
+  {
+    "id": "twitch",
+    "rustVariant": "Twitch",
+    "file": "twitch.svg",
+    "hosts": [
+      "twitch.tv"
+    ],
+    "extractors": [
+      "twitch"
+    ]
+  },
+  {
+    "id": "bilibili",
+    "rustVariant": "Bilibili",
+    "file": "bilibili.svg",
+    "hosts": [
+      "bilibili.com",
+      "b23.tv"
+    ],
+    "extractors": [
+      "bilibili"
+    ]
+  },
+  {
+    "id": "vimeo",
+    "rustVariant": "Vimeo",
+    "file": "vimeo.svg",
+    "hosts": [
+      "vimeo.com"
+    ],
+    "extractors": [
+      "vimeo"
+    ]
+  },
+  {
+    "id": "tiktok",
+    "rustVariant": "TikTok",
+    "file": "tiktok.svg",
+    "hosts": [
+      "tiktok.com"
+    ],
+    "extractors": [
+      "tiktok"
+    ]
+  },
+  {
+    "id": "facebook",
+    "rustVariant": "Facebook",
+    "file": "facebook.svg",
+    "hosts": [
+      "facebook.com",
+      "fb.watch"
+    ],
+    "extractors": [
+      "facebook"
+    ]
+  },
+  {
+    "id": "pinterest",
+    "rustVariant": "Pinterest",
+    "file": "pinterest.svg",
+    "hosts": [
+      "pinterest.com",
+      "pin.it"
+    ],
+    "extractors": [
+      "pinterest"
+    ]
+  },
+  {
+    "id": "soundcloud",
+    "rustVariant": "SoundCloud",
+    "file": "soundcloud.svg",
+    "hosts": [
+      "soundcloud.com"
+    ],
+    "extractors": [
+      "soundcloud"
+    ]
+  },
+  {
+    "id": "dailymotion",
+    "rustVariant": "Dailymotion",
+    "file": "dailymotion.svg",
+    "hosts": [
+      "dailymotion.com",
+      "dai.ly"
+    ],
+    "extractors": [
+      "dailymotion"
+    ]
+  },
+  {
+    "id": "tumblr",
+    "rustVariant": "Tumblr",
+    "file": "tumblr.svg",
+    "hosts": [
+      "tumblr.com"
+    ],
+    "extractors": [
+      "tumblr"
+    ]
+  },
+  {
+    "id": "bluesky",
+    "rustVariant": "Bluesky",
+    "file": "bluesky.svg",
+    "hosts": [
+      "bsky.app"
+    ],
+    "extractors": [
+      "bluesky"
+    ]
+  },
+  {
+    "id": "mastodon",
+    "rustVariant": "Mastodon",
+    "file": "mastodon.svg",
+    "hosts": [
+      "mastodon.social",
+      "mastodon.online"
+    ],
+    "extractors": [
+      "mastodon"
+    ]
+  },
+  {
+    "id": "spotify",
+    "rustVariant": "Spotify",
+    "file": "spotify.svg",
+    "hosts": [
+      "spotify.com"
+    ],
+    "extractors": [
+      "spotify"
+    ]
+  }
+]

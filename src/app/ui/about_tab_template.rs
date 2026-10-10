@@ -1,14 +1,15 @@
 use eframe::egui::Ui;
 use egui_taffy::Tui;
 
-use crate::app::state::AppState;
-use crate::infrastructure::ManagedComponentId;
-
-use super::about_tab_controls::{AboutComponentRow, AboutHeaderRow, AboutRowMetrics};
+use super::about_tab_controls::{AboutComponentCard, AboutFooterRow, AboutRowMetrics};
+use super::semantic_ui_metrics;
 use super::xaml_template_renderer::{
     TemplateBlockSlot, show_full_height_page_template, show_template_tui_block,
+    show_template_ui_block, show_vertical_scroll_template,
 };
-use super::xaml_ui_nodes::{self, TemplateChild, block, fill, fixed_px, gap, rows};
+use super::xaml_ui_nodes::{self, auto, block, fill, gap, rows};
+use crate::app::state::AppState;
+use crate::infrastructure::ManagedComponentId;
 
 // ABOUT TEMPLATE RULES — this file owns the TemplateTree shape only.
 //
@@ -22,16 +23,11 @@ use super::xaml_ui_nodes::{self, TemplateChild, block, fill, fixed_px, gap, rows
 // 2. Do not hand-build egui alignment here. No `ui.with_layout`, no spacer math.
 // 3. Row/cell UiElement details belong to `about_tab_controls.rs`.
 // 4. Slot painting belongs to `about_tab.rs`.
-// 5. Do not create a second taffy/template root inside any block.
+// 5. Scroll content and cards remain descendants of the one page root.
 //
 // 每次處理中，如有發現不符合地方應強力修正；不要只修表面症狀。
 
-const ABOUT_HEADER_TO_LIST_GAP_PX: f32 = 6.0;
-const ABOUT_ROW_GAP_PX: f32 = 3.0;
-const ABOUT_LIST_TO_NOTES_GAP_PX: f32 = 8.0;
-
 type AboutTabTemplateTree = xaml_ui_nodes::TemplateNode<AboutTabNode>;
-type AboutTabTemplateChild = TemplateChild<AboutTabNode>;
 
 pub(super) fn render_about_tab_template(ui: &mut Ui, state: &mut AppState) {
     let template = AboutTabTemplate::resolve(ui, state);
@@ -42,18 +38,34 @@ struct AboutTabTemplate {
     root: AboutTabTemplateTree,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum AboutTabNode {
-    HeaderRow(AboutHeaderRow),
-    ComponentRow(AboutComponentRow),
-    ReleaseNotes,
+    ComponentCard(AboutComponentCard),
+    ComponentPool(Box<AboutTabTemplateTree>),
+    SectionHeading(AboutSection),
+    FooterRow(AboutFooterRow),
+}
+
+#[derive(Clone, Copy)]
+enum AboutSection {
+    CoreTools,
+    ExtensionTools,
+}
+
+impl AboutSection {
+    fn title_key(self) -> &'static str {
+        match self {
+            Self::CoreTools => "about.core_tools",
+            Self::ExtensionTools => "about.extension_tools",
+        }
+    }
 }
 
 impl AboutTabTemplate {
     fn resolve(ui: &mut Ui, state: &mut AppState) -> Self {
-        let component_ids = super::about_tab::about_component_ids(state);
+        let component_ids = super::about_tab::about_component_ids();
         let row_metrics = AboutRowMetrics::resolve(ui, state, &component_ids);
-        let root = about_tab_root_template(row_metrics, &component_ids);
+        let root = about_tab_root_template(row_metrics, component_ids);
 
         Self { root }
     }
@@ -68,28 +80,40 @@ impl AboutTabTemplate {
 
 fn about_tab_root_template(
     row_metrics: AboutRowMetrics,
-    component_ids: &[ManagedComponentId],
+    component_ids: Vec<crate::infrastructure::ManagedComponentId>,
 ) -> AboutTabTemplateTree {
-    let mut root_rows: Vec<AboutTabTemplateChild> = vec![
-        fixed_px(
-            row_metrics.row_height(),
-            block(AboutTabNode::HeaderRow(row_metrics.header_row())),
-        ),
-        gap(ABOUT_HEADER_TO_LIST_GAP_PX),
+    let mut items = vec![
+        auto(block(AboutTabNode::SectionHeading(AboutSection::CoreTools))),
+        gap(semantic_ui_metrics::main_section_vertical_spacing()),
     ];
-
-    for id in component_ids.iter().copied() {
-        root_rows.push(fixed_px(
-            row_metrics.row_height(),
-            block(AboutTabNode::ComponentRow(row_metrics.component_row(id))),
-        ));
-        root_rows.push(gap(ABOUT_ROW_GAP_PX));
+    let mut component_ids = component_ids
+        .into_iter()
+        .filter(|id| *id != ManagedComponentId::App)
+        .peekable();
+    while let Some(id) = component_ids.next() {
+        if id == ManagedComponentId::GalleryDl {
+            items.push(auto(block(AboutTabNode::SectionHeading(
+                AboutSection::ExtensionTools,
+            ))));
+            items.push(gap(semantic_ui_metrics::main_section_vertical_spacing()));
+        }
+        items.push(auto(block(AboutTabNode::ComponentCard(
+            row_metrics.component_card(id),
+        ))));
+        if component_ids.peek().is_some() {
+            items.push(gap(semantic_ui_metrics::about_component_card_vertical_gap()));
+        }
     }
-
-    root_rows.push(gap(ABOUT_LIST_TO_NOTES_GAP_PX));
-    root_rows.push(fill(block(AboutTabNode::ReleaseNotes)));
-
-    rows(root_rows)
+    rows(vec![
+        auto(block(AboutTabNode::ComponentCard(
+            row_metrics.component_card(ManagedComponentId::App),
+        ))),
+        gap(semantic_ui_metrics::about_component_card_vertical_gap()),
+        fill(block(AboutTabNode::ComponentPool(Box::new(rows(items))))),
+        gap(semantic_ui_metrics::main_section_vertical_spacing()),
+        auto(block(AboutTabNode::FooterRow(row_metrics.footer_row()))),
+        gap(semantic_ui_metrics::main_bottom_trailing_vertical_spacing()),
+    ])
 }
 
 fn show_about_tab_block(
@@ -99,16 +123,19 @@ fn show_about_tab_block(
     state: &mut AppState,
 ) {
     match node {
-        AboutTabNode::HeaderRow(row) => show_template_tui_block(slot, tui, |tui| {
-            row.show(tui, state);
+        AboutTabNode::ComponentCard(card) => show_template_tui_block(slot, tui, |tui| {
+            card.show(tui, state);
         }),
-        AboutTabNode::ComponentRow(row) => show_template_tui_block(slot, tui, |tui| {
-            row.show(tui, state);
-        }),
-        AboutTabNode::ReleaseNotes => {
-            super::xaml_template_renderer::show_template_ui_block(slot, tui, |ui| {
-                super::about_tab::render_release_notes(ui, state);
+        AboutTabNode::ComponentPool(pool) => {
+            show_vertical_scroll_template(slot, tui, *pool, &mut |slot, node, tui| {
+                show_about_tab_block(slot, node, tui, state);
             });
         }
+        AboutTabNode::SectionHeading(section) => show_template_ui_block(slot, tui, |ui| {
+            super::about_tab::render_about_section_heading(ui, state, section.title_key());
+        }),
+        AboutTabNode::FooterRow(row) => show_template_tui_block(slot, tui, |tui| {
+            row.show(tui, state);
+        }),
     }
 }

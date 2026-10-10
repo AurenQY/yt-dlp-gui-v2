@@ -1,5 +1,66 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "Μέθοδος επιλογής εύρους",
+        "gallery.range.time" => "Κατά χρόνο",
+        "gallery.range.posts" => "Κατά πλήθος αναρτήσεων",
+        "gallery.range.date" => "Ημερομηνία έναρξης (UTC)",
+        "gallery.range.count" => "Πλήθος αναρτήσεων (θετικός ακέραιος)",
+        "gallery.range.custom" => "Προσαρμογή",
+        "gallery.range.positive" => "Θετικός ακέραιος",
+        "gallery.range.invalid" => "Εισαγάγετε έγκυρο εύρος λήψης.",
+        "gallery.range.invalid_date" => "Εισαγάγετε έγκυρη ημερομηνία UTC (YYYY-MM-DD).",
+        "gallery.range.help" => "Βοήθεια",
+        "gallery.range.title" => "Εύρος λήψης χρονολογίου",
+        "gallery.range.time_or_all" => "Επιλέξτε περίοδο ή όλα",
+        "gallery.range.latest" => "Τελευταίες {count} αναρτήσεις",
+        "gallery.range.recent24h" => "Τελευταίες 24 ώρες",
+        "gallery.range.days" => "Τελευταίες {days} ημέρες",
+        "gallery.range.since" => "Από {date} (UTC)",
+        "gallery.status.finishing" => "Ολοκλήρωση",
+        "gallery.status.waiting" => "Αναμονή λήψης",
+        "gallery.status.analyzing" => "Ανάλυση",
+        "gallery.posts_count" => "{count} αναρτήσεις",
+        "gallery.media_count" => "{count} πολυμέσα",
+        "music.volume" => "Ένταση",
+        "gallery.folder_pending" => "Αναμονή επιβεβαίωσης",
+        "gallery.folder_opened" => "Ο φάκελος άνοιξε.",
+        "gallery.choice.downloader" => "Επιλογή εργαλείου λήψης",
+        "gallery.choice.content" => "Επιλογή περιεχομένου",
+        "gallery.choice.add_title" => "Επιλογή περιεχομένου για προσθήκη",
+        "gallery.choice.dual_hint" => {
+            "Δύο εργαλεία υποστηρίζουν αυτό το URL. Επιλέξτε τουλάχιστον ένα."
+        }
+        "gallery.choice.origin_hint" => {
+            "Επιλέξτε περιεχόμενο για ανάλυση (κλασική λειτουργία: ένας τύπος κάθε φορά)."
+        }
+        "gallery.choice.add_hint" => "Επιλέξτε περιεχόμενο για προσθήκη",
+        "gallery.choice.dual_media" => "Μπορούν να προστεθούν μαζί βίντεο και εικόνες.",
+        "gallery.choice.one_required" => "Επιλέξτε ένα εργαλείο λήψης.",
+        "gallery.choice.tool_required" => "Επιλέξτε τουλάχιστον ένα εργαλείο λήψης.",
+        "gallery.choice.content_required" => "Επιλέξτε περιεχόμενο για ανάλυση ή προσθήκη.",
+        "gallery.choice.cancelled" => "Η επιλογή ακυρώθηκε.",
+        "gallery.range.help_steps" => {
+            "Επιλέξτε μέθοδο και όρια εύρους και επιβεβαιώστε για εφαρμογή."
+        }
+        "gallery.range.help_multiple" => {
+            "Η πηγή περιλαμβάνει πολλές ροές. Δεν υπάρχει συνολικό όριο αναρτήσεων· επιλέξτε περίοδο ή όλα."
+        }
+        "gallery.range.help_order" => {
+            "Οι αναρτήσεις ακολουθούν τη σειρά του ιστοτόπου και μπορεί να περιλαμβάνουν καρφιτσωμένες. Η επανεκκίνηση σαρώνει από την αρχή και παραλείπει υπάρχοντα αρχεία."
+        }
+        "gallery.range.help_time" => {
+            "Η περίοδος φιλτράρεται με βάση τις ημερομηνίες αναρτήσεων. Το Instagram παραλείπει παλιές καρφιτσωμένες και σταματά σε κανονική ανάρτηση εκτός εύρους. Άλλες πηγές μπορεί να σαρώσουν όλο το χρονολόγιο. Η απουσία έγκυρων ημερομηνιών προκαλεί σφάλμα."
+        }
+        "about.core_tools" => "Βασικά εργαλεία",
+        "about.extension_tools" => "Πρόσθετα εργαλεία",
+        "about.gallery_dl_description" => "Λήψη συλλογών εικόνων και πολυμέσων κοινωνικών δικτύων.",
+        "about.aria2_description" => {
+            "Εξωτερικό εργαλείο λήψης για το yt-dlp· η απόδοση εξαρτάται από τον ιστότοπο και τη σύνδεση."
+        }
+        "about.required" => "Απαιτείται",
+        "about.availability.ready" => "Έτοιμο",
+        "about.availability.missing" => "Δεν βρέθηκε",
+        "advance.use_aria2_external_downloader" => "Χρήση του aria2 ως εξωτερικού εργαλείου λήψης",
         "tab.advanced" => "Προχωρημένο",
         "advance.browser_integration" => "Ενσωμάτωση προγράμματος περιήγησης",
         "advance.browser_connection" => "Σύνδεση browser",
@@ -17,6 +78,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "Μήνυμα",
         "about.check_updates" => "Έλεγχος ενημερώσεων",
         "about.update_all" => "Ενημέρωση όλων",
+        "about.install_dependencies" => "Εγκατάσταση εξαρτήσεων",
         "about.restart" => "Επανεκκίνηση",
         "about.open_release" => "Άνοιγμα Release",
         "about.install" => "Εγκατάσταση",
@@ -97,9 +159,11 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.codec" => "Κωδικοποιητής",
         "picker.filter.sample_rate" => "ASR",
         "main.missing_yt_dlp_callout" => {
-            "Το yt-dlp λείπει. Εγκαταστήστε το ή επιλέξτε το yt-dlp.exe στις Επιλογές."
+            "Το yt-dlp λείπει. Εγκαταστήστε το ή επιλέξτε το yt-dlp.exe στο Σχετικά."
         }
         "advance.source" => "Πηγή",
+        "advance.analysis" => "Ανάλυση",
+        "advance.force_analysis" => "Εξαναγκασμένη ανάλυση",
         "advance.config" => "Ρύθμιση",
         "advance.none" => "Κανένα",
         "advance.network_access" => "Δίκτυο & πρόσβαση",
@@ -188,7 +252,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "Πρόγραμμα περιήγησης",
         "advance.default" => "Προεπιλογή",
         "advance.external_downloader" => "Εξωτερικός λήπτης",
-        "advance.use_aria2_for_faster_downloads" => "Χρήση Aria2 για ταχύτερες λήψεις",
         "advance.download_control" => "Έλεγχος λήψης",
         "advance.concurrent_fragments" => "Ταυτόχρονα τμήματα",
         "advance.live_streams" => "Ζωντανές μεταδόσεις",

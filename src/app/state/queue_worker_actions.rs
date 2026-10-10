@@ -83,9 +83,12 @@ impl AppState {
         let source_for_worker = source.clone();
 
         thread::spawn(move || {
-            let (result, command_line) = analyze_output_parts(
-                tool_paths.analyze_url_detailed(&source_for_worker, use_cookies),
-            );
+            let output = crate::infrastructure::yt_dlp_source_analysis::analyze_desktop_source(&tool_paths, &source_for_worker, use_cookies)
+                .and_then(|output| match output {
+                    crate::infrastructure::yt_dlp_source_analysis::DesktopSourceAnalysis::Single(output) => Ok(output),
+                    crate::infrastructure::yt_dlp_source_analysis::DesktopSourceAnalysis::Playlist => Err(AnalyzeError {message: "This URL is a playlist. Use Standard Mode Batch import instead of single-video analysis.".into(), command_line: None}),
+                });
+            let (result, command_line) = analyze_output_parts(output);
             let _ = tx.send(AnalyzeResult {
                 source: source_for_worker,
                 target_item_id,
@@ -116,6 +119,18 @@ impl AppState {
         item_id: QueueItemId,
         emit_json: bool,
     ) -> Result<(), String> {
+        if self.refresh_restored_queue_item(
+            item_id,
+            super::queue_reanalysis_actions::QueueRefreshAction::Download,
+        ) {
+            return Ok(());
+        }
+        if self
+            .queue_item_by_id(item_id)
+            .is_some_and(|item| matches!(&item.backend, QueueBackend::GalleryDl(_)))
+        {
+            return self.start_gallery_download(item_id);
+        }
         let Some(task_index) = self.queue_item_index_by_id(item_id) else {
             let error = "Target download item was not found.".to_owned();
             self.last_action = error.clone();
@@ -138,6 +153,15 @@ impl AppState {
             self.last_action = error.clone();
             return Err(error);
         };
+
+        if item.metadata_loaded() {
+            if let Err(error) = self.validate_queue_item_saved_selection(item_id) {
+                self.mark_download_preflight_failed(item_id, &error);
+                self.last_action = error.clone();
+                return Err(error);
+            }
+        }
+        let item = &self.queue_items[task_index];
 
         let title = item.title.clone();
         let source_url = item.source_url.clone();
@@ -206,6 +230,7 @@ impl AppState {
         let mut request = DownloadRequest {
             target_kind: DownloadTargetKind::Normal,
             url: source_url.clone(),
+            playlist_index: item.playlist_index,
             format_selector,
             video_selector: item.selection.video_selector.clone(),
             audio_selector: resolved_audio_selector,
@@ -486,6 +511,7 @@ impl AppState {
         let mut request = DownloadRequest {
             target_kind: kind,
             url: source_url.clone(),
+            playlist_index: item.playlist_index,
             format_selector: match kind {
                 DownloadTargetKind::Video => selected_video.clone(),
                 DownloadTargetKind::Audio => audio_selector.clone(),
@@ -643,7 +669,17 @@ impl AppState {
             return;
         };
 
-        if self.item_is_busy(index) {
+        if self.item_has_cancellable_download_workflow(item_id) {
+            if !self.pending_queue_removals.contains(&item_id) {
+                self.pending_queue_removals.push(item_id);
+            }
+            self.cancel_item_download(item_id);
+            // Removal intent is durable before safe worker cleanup finishes.
+            // Closing immediately after X must not restore the removed task.
+            self.save_queue_if_changed();
+            return;
+        }
+        if !self.item_can_remove(index) {
             self.last_action = "Running items cannot be removed.".to_owned();
             return;
         }
@@ -661,20 +697,41 @@ impl AppState {
         {
             self.cancel_music_radio_cue_pending();
         }
-        let removed_source_key = canonical_queue_source_key(&removed.source_url);
-        self.batch_input = self
-            .batch_input
-            .lines()
-            .map(str::trim)
-            .filter(|line| {
-                !line.is_empty() && canonical_queue_source_key(line) != removed_source_key
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        // batch_input belongs to yt-dlp, not to a gallery item with the same URL.
+        // Keep the source if another yt-dlp item still owns it.
+        if matches!(&removed.backend, QueueBackend::YtDlp) {
+            let removed_source_key = canonical_queue_source_key(&removed.source_url);
+            if !self.queue_items.iter().any(|item| {
+                matches!(&item.backend, QueueBackend::YtDlp)
+                    && canonical_queue_source_key(&item.source_url) == removed_source_key
+            }) {
+                self.batch_input = self
+                    .batch_input
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| {
+                        !line.is_empty() && canonical_queue_source_key(line) != removed_source_key
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+        }
         self.last_action =
             i18n::format_fixed_english("Removed: {title}", &[("{title}", removed.title.as_str())]);
         self.prune_music_navigation_state();
         self.save_active_audio_playlist_if_needed();
+    }
+
+    pub(super) fn finish_pending_queue_removal(&mut self, item_id: QueueItemId) {
+        if self.pending_queue_removals.contains(&item_id)
+            && !self
+                .active_workflows
+                .values()
+                .any(|run| run.item_id == item_id)
+        {
+            self.pending_queue_removals.retain(|id| *id != item_id);
+            self.remove_queue_item(item_id);
+        }
     }
 
     pub fn primary_candidate_url(&self) -> Option<String> {

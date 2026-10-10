@@ -483,7 +483,7 @@ fn status_color(ui: &Ui, status: PrepareStatus) -> Color32 {
     }
 }
 
-fn ok_color(ui: &Ui) -> Color32 {
+pub(super) fn ok_color(ui: &Ui) -> Color32 {
     if ui.visuals().dark_mode {
         Color32::from_rgb(120, 210, 150)
     } else {
@@ -499,7 +499,7 @@ fn warn_color(ui: &Ui) -> Color32 {
     }
 }
 
-fn error_color(ui: &Ui) -> Color32 {
+pub(super) fn error_color(ui: &Ui) -> Color32 {
     if ui.visuals().dark_mode {
         Color32::from_rgb(240, 110, 110)
     } else {

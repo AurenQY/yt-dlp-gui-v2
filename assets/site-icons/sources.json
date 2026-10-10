@@ -1,0 +1,123 @@
+{
+  "provider": "Simple Icons",
+  "version": "13.0.0",
+  "adaptation": "Original paths preserved; root fill set to upstream brand hex. TikTok, Dailymotion and Tumblr add a white circular backdrop for dark/light contrast. Brand marks retain their own rights; package CC0 is not a blanket trademark grant.",
+  "icons": [
+    {
+      "id": "reddit",
+      "asset": "reddit.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/reddit.svg",
+      "title": "Reddit",
+      "hex": "FF4500",
+      "source": "https://www.redditinc.com/brand",
+      "guidelines": "https://www.redditinc.com/brand"
+    },
+    {
+      "id": "twitch",
+      "asset": "twitch.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/twitch.svg",
+      "title": "Twitch",
+      "hex": "9146FF",
+      "source": "https://brand.twitch.tv",
+      "guidelines": "https://brand.twitch.tv"
+    },
+    {
+      "id": "bilibili",
+      "asset": "bilibili.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/bilibili.svg",
+      "title": "Bilibili",
+      "hex": "00A1D6",
+      "source": "https://www.bilibili.com"
+    },
+    {
+      "id": "vimeo",
+      "asset": "vimeo.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/vimeo.svg",
+      "title": "Vimeo",
+      "hex": "1AB7EA",
+      "source": "https://press.vimeo.com/brand-guidelines",
+      "guidelines": "https://press.vimeo.com/brand-guidelines"
+    },
+    {
+      "id": "tiktok",
+      "asset": "tiktok.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/tiktok.svg",
+      "title": "TikTok",
+      "hex": "000000",
+      "source": "https://tiktok.com"
+    },
+    {
+      "id": "facebook",
+      "asset": "facebook.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/facebook.svg",
+      "title": "Facebook",
+      "hex": "0866FF",
+      "source": "https://about.meta.com/brand/resources/facebook/logo",
+      "guidelines": "https://about.meta.com/brand/resources/facebook/logo"
+    },
+    {
+      "id": "pinterest",
+      "asset": "pinterest.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/pinterest.svg",
+      "title": "Pinterest",
+      "hex": "BD081C",
+      "source": "https://business.pinterest.com/en/brand-guidelines",
+      "guidelines": "https://business.pinterest.com/en/brand-guidelines"
+    },
+    {
+      "id": "soundcloud",
+      "asset": "soundcloud.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/soundcloud.svg",
+      "title": "SoundCloud",
+      "hex": "FF5500",
+      "source": "https://press.soundcloud.com"
+    },
+    {
+      "id": "dailymotion",
+      "asset": "dailymotion.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/dailymotion.svg",
+      "title": "Dailymotion",
+      "hex": "0A0A0A",
+      "source": "https://careers.dailymotion.com"
+    },
+    {
+      "id": "tumblr",
+      "asset": "tumblr.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/tumblr.svg",
+      "title": "Tumblr",
+      "hex": "36465D",
+      "source": "https://www.tumblr.com/logo",
+      "guidelines": "https://www.tumblr.com/logo"
+    },
+    {
+      "id": "bluesky",
+      "asset": "bluesky.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/bluesky.svg",
+      "title": "Bluesky",
+      "hex": "0285FF",
+      "source": "https://github.com/FortAwesome/Font-Awesome/issues/19810#issuecomment-1854999604",
+      "aliases": {
+        "aka": [
+          "bsky"
+        ]
+      }
+    },
+    {
+      "id": "mastodon",
+      "asset": "mastodon.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/mastodon.svg",
+      "title": "Mastodon",
+      "hex": "6364FF",
+      "source": "https://github.com/mastodon/mastodon/blob/7ccf7a73f1c47a8c03712c39f7c591e837cf6d08/app/javascript/images/logo-symbol-icon.svg"
+    },
+    {
+      "id": "spotify",
+      "asset": "spotify.svg",
+      "svgSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/13.0.0/icons/spotify.svg",
+      "title": "Spotify",
+      "hex": "1DB954",
+      "source": "https://developer.spotify.com/documentation/general/design-and-branding/#using-our-logo",
+      "guidelines": "https://developer.spotify.com/documentation/general/design-and-branding/#using-our-logo"
+    }
+  ]
+}

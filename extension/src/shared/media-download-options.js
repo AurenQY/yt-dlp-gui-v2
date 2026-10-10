@@ -163,19 +163,19 @@ export function recommendedDownloadChoice(item, contentKind) {
   return choice;
 }
 
-export function pageDownloadScope(url) {
+export function pageDownloadScope(url, sourceScope = 'unknown') {
   const parsed = new URL(url);
   const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
   const youtube = host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com');
   if (!youtube || !parsed.searchParams.get('list')) {
-    return { value: 'current', selectable: false };
+    return { value: sourceScope === 'playlist' ? 'playlist' : 'current', selectable: false };
   }
   const hasCurrentVideo = host === 'youtu.be'
     || parsed.searchParams.has('v')
     || /^\/(shorts|live)\//.test(parsed.pathname);
   return hasCurrentVideo
     ? { value: 'current', selectable: true }
-    : { value: 'playlist', selectable: false };
+    : { value: sourceScope === 'playlist' ? 'playlist' : 'current', selectable: false };
 }
 
 export function buildDownloadRequest(item, choice) {

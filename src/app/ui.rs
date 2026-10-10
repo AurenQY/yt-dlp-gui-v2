@@ -10,6 +10,8 @@ mod titlebar;
 mod about_tab;
 mod about_tab_controls;
 mod about_tab_template;
+mod about_tool_version;
+mod batch_list_template;
 mod compact_row;
 mod format_picker;
 mod format_picker_content;
@@ -21,14 +23,20 @@ mod format_picker_subtitle;
 mod format_picker_table;
 mod format_picker_template;
 mod format_picker_time_range;
+mod gallery_range_filter;
+mod gallery_range_picker;
+mod gallery_range_text;
 mod item_card;
 mod item_card_compact;
+mod item_card_gallery;
 mod item_card_output_actions;
 mod item_card_template;
+mod item_card_thumbnail;
 mod prepare_tab;
 mod prepare_tab_template;
 mod single_mode;
 mod single_mode_format_rows;
+mod single_mode_gallery;
 mod single_mode_preview;
 mod single_mode_template;
 
@@ -66,7 +74,6 @@ mod options_layout;
 mod options_prompts;
 mod options_tab;
 mod options_tab_template;
-mod options_tool_paths;
 mod options_window;
 
 // Advance tab sections.
@@ -156,6 +163,7 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
     handle_hidden_music_aura_shortcut(root_ui, render_resources);
 
     let prompt_open = state.youtube_playlist_prompt.is_some()
+        || state.gallery_backend_prompt_open()
         || state.music_download_prompt_open()
         || state.youtube_login_rescue_dialog_visible();
     if state.active_tab == AppTab::Prepare && !state.should_show_prepare_tab() {
@@ -198,6 +206,10 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
             };
             content_frame.show(ui, |ui| {
                 ui.add_enabled_ui(!prompt_open, |ui| {
+                    if state.gallery_range_picker.item_id.is_some() {
+                        gallery_range_picker::render(ui, state);
+                        return;
+                    }
                     if state.format_picker.open {
                         format_picker::render_format_picker_screen(ui, state);
                         return;
@@ -235,7 +247,10 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
                         }
                     }
 
-                    if !state.last_action.is_empty() && !state.should_show_prepare_tab() {
+                    if !state.last_action.is_empty()
+                        && state.active_tab != AppTab::About
+                        && !state.should_show_prepare_tab()
+                    {
                         ui.separator();
                         ui.small(state.localize_message(&state.last_action));
                     }
@@ -244,6 +259,8 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
         });
 
     options_prompts::render_youtube_playlist_prompt(root_ui.ctx(), state);
+    options_prompts::render_gallery_downloader_choice_prompt(root_ui.ctx(), state);
+    options_prompts::render_gallery_backend_prompt(root_ui.ctx(), state);
     options_prompts::render_music_download_prompt(root_ui.ctx(), state);
     advance_cookie_rescue::render_youtube_login_rescue_dialog(root_ui.ctx(), state);
 }

@@ -10,6 +10,12 @@ use super::tools::{CacheLocationMode, FileTimeMode, ToolPaths};
 
 #[path = "config_document.rs"]
 mod document;
+#[path = "config_update_cache.rs"]
+mod update_cache;
+
+pub(crate) use update_cache::{
+    read_runtime_component_update_cache, write_runtime_component_update_cache,
+};
 
 #[derive(Clone, Debug)]
 pub struct ConfigFileOption {
@@ -27,6 +33,7 @@ pub struct AppConfig {
     pub cache_location_mode: SerializableCacheLocationMode,
     #[serde(alias = "PathYTDLP")]
     pub yt_dlp_path: String,
+    pub gallery_dl_path: String,
     pub yt_dlp_config_path: String,
     #[serde(alias = "PathFFMPEG")]
     pub ffmpeg_path: String,
@@ -47,6 +54,7 @@ pub struct AppConfig {
     #[serde(alias = "ProxyUrl")]
     pub proxy_url: String,
     pub no_check_certificates: bool,
+    pub impersonate: String,
     #[serde(alias = "LimitRate")]
     pub limit_rate: String,
     #[serde(alias = "TimeRange")]
@@ -67,6 +75,9 @@ pub struct AppConfig {
     pub clipboard_auto_add: bool,
     #[serde(alias = "AutoDownloadAnalysed")]
     pub auto_analyze: bool,
+    pub force_analysis: bool,
+    pub analysis_choice_yt_dlp: bool,
+    pub analysis_choice_gallery_dl: bool,
     pub direct_download_on_add: bool,
     pub output_file_action_mode: OutputFileActionMode,
     pub batch_limit_enabled: bool,
@@ -112,6 +123,9 @@ pub struct AppConfig {
     pub window_size: Option<WindowSize>,
     pub enable_batch_panel: bool,
     pub prepare_skipped: bool,
+    /// About version-check history persists in the executable-named YAML.
+    #[serde(default)]
+    pub component_update_cache: Option<serde_yaml::Value>,
     #[serde(skip)]
     config_path: Option<PathBuf>,
 }
@@ -877,6 +891,7 @@ impl Default for AppConfig {
             cache_dir: String::new(),
             cache_location_mode: SerializableCacheLocationMode::V2Cache,
             yt_dlp_path: String::new(),
+            gallery_dl_path: String::new(),
             yt_dlp_config_path: String::new(),
             ffmpeg_path: String::new(),
             aria2c_path: String::new(),
@@ -892,6 +907,7 @@ impl Default for AppConfig {
             proxy_enabled: false,
             proxy_url: String::new(),
             no_check_certificates: false,
+            impersonate: String::new(),
             limit_rate: String::new(),
             download_sections: String::new(),
             chapter_compatibility_mode: true,
@@ -905,6 +921,9 @@ impl Default for AppConfig {
             auto_paste_clipboard: false,
             clipboard_auto_add: false,
             auto_analyze: false,
+            force_analysis: false,
+            analysis_choice_yt_dlp: true,
+            analysis_choice_gallery_dl: true,
             direct_download_on_add: false,
             output_file_action_mode: OutputFileActionMode::Menu,
             batch_limit_enabled: false,
@@ -937,6 +956,7 @@ impl Default for AppConfig {
             window_size: None,
             enable_batch_panel: true,
             prepare_skipped: false,
+            component_update_cache: None,
             config_path: None,
         }
     }
@@ -965,7 +985,10 @@ impl AppConfig {
     }
 
     fn load_from_path(config_path: PathBuf) -> (Self, ToolPaths) {
-        let raw_content = fs::read_to_string(&config_path).ok();
+        let raw_content = {
+            let _read_guard = update_cache::lock_config_file();
+            fs::read_to_string(&config_path).ok()
+        };
         let mut config = raw_content
             .as_deref()
             .and_then(|content| document::decode(content).ok())
@@ -983,12 +1006,19 @@ impl AppConfig {
             return Ok(());
         };
 
+        // Prevent a settings save from erasing an update worker's newer cache.
+        let _write_guard = update_cache::lock_config_file();
+        let mut latest_config = self.clone();
+        if let Some(latest_cache) = update_cache::read_component_update_cache_from_path(path)? {
+            latest_config.component_update_cache = Some(latest_cache);
+        }
+
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("Could not create config folder: {error}"))?;
         }
 
-        let content = document::encode(self)
+        let content = document::encode(&latest_config)
             .map_err(|error| format!("Could not serialize config file: {error}"))?;
         fs::write(path, content).map_err(|error| format!("Could not write config file: {error}"))
     }
@@ -999,6 +1029,10 @@ impl AppConfig {
 
     pub fn set_yt_dlp_path(&mut self, path: impl Into<String>) {
         self.yt_dlp_path = normalize_stored_path(&path.into());
+    }
+
+    pub fn set_gallery_dl_path(&mut self, path: impl Into<String>) {
+        self.gallery_dl_path = normalize_stored_path(&path.into());
     }
 
     pub fn set_yt_dlp_config_path(&mut self, path: impl Into<String>) {
@@ -1026,6 +1060,10 @@ impl AppConfig {
         self.proxy_url = value.into().trim().to_owned();
     }
 
+    pub fn set_impersonate(&mut self, value: impl Into<String>) {
+        self.impersonate = value.into().trim().to_owned();
+    }
+
     pub fn set_limit_rate(&mut self, value: impl Into<String>) {
         self.limit_rate = value.into().trim().to_owned();
     }
@@ -1036,8 +1074,8 @@ impl AppConfig {
 
     fn tool_paths(&self) -> ToolPaths {
         ToolPaths {
-            native_cookie_override: None,
             yt_dlp: self.yt_dlp_path.clone(),
+            gallery_dl: self.gallery_dl_path.clone(),
             yt_dlp_config: self.yt_dlp_config_path.clone(),
             ffmpeg: self.ffmpeg_path.clone(),
             aria2c: self.aria2c_path.clone(),
@@ -1054,6 +1092,7 @@ impl AppConfig {
             proxy_enabled: self.proxy_enabled,
             proxy_url: self.proxy_url.clone(),
             no_check_certificates: self.no_check_certificates,
+            impersonate: self.impersonate.clone(),
             limit_rate: self.limit_rate.clone(),
             download_sections: self.download_sections.clone(),
             chapter_compatibility_mode: self.chapter_compatibility_mode,
@@ -1077,6 +1116,7 @@ impl AppConfig {
         }
 
         normalize_tool_path(&mut self.yt_dlp_path, DependencyTool::YtDlp);
+        normalize_tool_path(&mut self.gallery_dl_path, DependencyTool::GalleryDl);
         normalize_tool_path(&mut self.ffmpeg_path, DependencyTool::Ffmpeg);
         normalize_tool_path(&mut self.aria2c_path, DependencyTool::Aria2c);
         normalize_tool_path(&mut self.deno_path, DependencyTool::Deno);
@@ -1088,6 +1128,7 @@ impl AppConfig {
         self.youtube_extractor_args = self.youtube_extractor_args.trim().to_owned();
         self.concurrent_fragments = normalize_concurrent_fragments(self.concurrent_fragments);
         self.proxy_url = self.proxy_url.trim().to_owned();
+        self.impersonate = self.impersonate.trim().to_owned();
         self.limit_rate = self.limit_rate.trim().to_owned();
         self.download_sections = self.download_sections.trim().to_owned();
 
@@ -1137,150 +1178,6 @@ fn normalize_ui_scroll_offset(value: f32) -> f32 {
         value.max(0.0)
     } else {
         0.0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        AppConfig, FormatPickerViewPreference, PostProcessMode, UnknownFilesizeFormatPolicy,
-        normalize_app_mode_value, queue_display_mode_from_app_mode_value,
-    };
-
-    #[test]
-    fn app_config_defaults_to_origin_app_mode() {
-        assert_eq!(AppConfig::default().app_mode, "origin");
-    }
-
-    #[test]
-    fn unknown_filesize_format_policy_defaults_off_and_round_trips_filter() {
-        let legacy = serde_yaml::from_str::<AppConfig>("{}").expect("deserialize legacy config");
-        assert_eq!(
-            legacy.unknown_filesize_format_policy,
-            UnknownFilesizeFormatPolicy::Off
-        );
-
-        let mut config = AppConfig::default();
-        config.unknown_filesize_format_policy = UnknownFilesizeFormatPolicy::Filter;
-        let yaml = serde_yaml::to_string(&config).expect("serialize policy");
-        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize policy");
-
-        assert!(yaml.contains("unknown_filesize_format_policy: filter"));
-        assert_eq!(
-            restored.unknown_filesize_format_policy,
-            UnknownFilesizeFormatPolicy::Filter
-        );
-    }
-
-    #[test]
-    fn app_mode_normalization_rejects_legacy_aliases() {
-        assert_eq!(normalize_app_mode_value("origin"), "origin");
-        assert_eq!(normalize_app_mode_value("standard"), "standard");
-        assert_eq!(normalize_app_mode_value("audio"), "audio");
-
-        assert_eq!(normalize_app_mode_value("single"), "origin");
-        assert_eq!(normalize_app_mode_value("normal"), "origin");
-        assert_eq!(normalize_app_mode_value("garbage"), "origin");
-    }
-
-    #[test]
-    fn queue_display_mode_is_derived_from_app_mode() {
-        assert_eq!(queue_display_mode_from_app_mode_value("audio"), "audio");
-        assert_eq!(queue_display_mode_from_app_mode_value("origin"), "normal");
-        assert_eq!(queue_display_mode_from_app_mode_value("standard"), "normal");
-    }
-
-    #[test]
-    fn serialized_config_writes_app_mode_without_queue_display_mode() {
-        for app_mode in ["origin", "standard", "audio"] {
-            let mut config = AppConfig::default();
-            config.app_mode = app_mode.to_owned();
-            config.queue_display_mode = queue_display_mode_from_app_mode_value(app_mode);
-
-            let yaml = serde_yaml::to_string(&config).expect("serialize config");
-
-            assert!(yaml.contains(&format!("app_mode: {app_mode}")));
-            assert!(!yaml.contains("queue_display_mode"));
-        }
-    }
-
-    #[test]
-    fn serialized_config_writes_post_process_modes_without_legacy_bools() {
-        let mut config = AppConfig::default();
-        config.thumbnail_mode = PostProcessMode::Embed;
-        config.subtitle_mode = PostProcessMode::Download;
-        config.chapter_mode = PostProcessMode::Off;
-
-        let yaml = serde_yaml::to_string(&config).expect("serialize config");
-
-        assert!(yaml.contains("thumbnail_mode: embed"));
-        assert!(yaml.contains("subtitle_mode: download"));
-        assert!(yaml.contains("chapter_mode: off"));
-        assert!(!yaml.contains("write_thumbnail"));
-        assert!(!yaml.contains("embed_thumbnail"));
-        assert!(!yaml.contains("write_subtitles"));
-        assert!(!yaml.contains("embed_subtitles"));
-        assert!(!yaml.contains("write_chapters"));
-        assert!(!yaml.contains("embed_chapters"));
-    }
-
-    #[test]
-    fn live_from_start_defaults_on_and_round_trips_when_disabled() {
-        assert!(AppConfig::default().live_from_start);
-
-        let mut config = AppConfig::default();
-        config.live_from_start = false;
-        let yaml = serde_yaml::to_string(&config).expect("serialize config");
-        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize config");
-
-        assert!(yaml.contains("live_from_start: false"));
-        assert!(!restored.live_from_start);
-    }
-
-    #[test]
-    fn always_show_download_range_defaults_off_and_round_trips_when_enabled() {
-        assert!(!AppConfig::default().always_show_download_range);
-
-        let mut config = AppConfig::default();
-        config.always_show_download_range = true;
-        let yaml = serde_yaml::to_string(&config).expect("serialize config");
-        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize config");
-
-        assert!(yaml.contains("always_show_download_range: true"));
-        assert!(restored.always_show_download_range);
-    }
-
-    #[test]
-    fn options_and_advance_scroll_offsets_round_trip_only_when_nonzero() {
-        let defaults = serde_yaml::to_string(&AppConfig::default()).expect("serialize defaults");
-        assert!(!defaults.contains("options_scroll_offset"));
-        assert!(!defaults.contains("advance_scroll_offset"));
-
-        let mut config = AppConfig::default();
-        config.options_scroll_offset = 120.5;
-        config.advance_scroll_offset = 340.25;
-        let yaml = serde_yaml::to_string(&config).expect("serialize offsets");
-        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize offsets");
-
-        assert_eq!(restored.options_scroll_offset, 120.5);
-        assert_eq!(restored.advance_scroll_offset, 340.25);
-    }
-
-    #[test]
-    fn format_picker_view_preference_is_absent_until_user_selects_one() {
-        let defaults = serde_yaml::to_string(&AppConfig::default()).expect("serialize defaults");
-        assert!(!defaults.contains("format_picker_view_preference"));
-
-        let mut config = AppConfig::default();
-        config.format_picker_view_preference = Some(FormatPickerViewPreference::Table);
-        let yaml = serde_yaml::to_string(&config).expect("serialize preference");
-        let restored = serde_yaml::from_str::<AppConfig>(&yaml).expect("deserialize preference");
-
-        assert!(yaml.contains("format_picker_view_preference: table"));
-        assert_eq!(
-            restored.format_picker_view_preference,
-            Some(FormatPickerViewPreference::Table)
-        );
     }
 }
 

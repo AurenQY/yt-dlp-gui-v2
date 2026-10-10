@@ -1,5 +1,68 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "Método de rango",
+        "gallery.range.time" => "Por tiempo",
+        "gallery.range.posts" => "Por número de publicaciones",
+        "gallery.range.date" => "Fecha inicial (UTC)",
+        "gallery.range.count" => "Número de publicaciones (entero positivo)",
+        "gallery.range.custom" => "Personalizado",
+        "gallery.range.positive" => "Entero positivo",
+        "gallery.range.invalid" => "Introduce un rango de descarga válido.",
+        "gallery.range.invalid_date" => "Introduce una fecha UTC válida (YYYY-MM-DD).",
+        "gallery.range.help" => "Ayuda",
+        "gallery.range.title" => "Rango de descarga de la cronología",
+        "gallery.range.time_or_all" => "Selecciona un período o todo",
+        "gallery.range.latest" => "Últimas {count} publicaciones",
+        "gallery.range.recent24h" => "Últimas 24 horas",
+        "gallery.range.days" => "Últimos {days} días",
+        "gallery.range.since" => "Desde {date} (UTC)",
+        "gallery.status.finishing" => "Finalizando",
+        "gallery.status.waiting" => "Esperando descarga",
+        "gallery.status.analyzing" => "Analizando",
+        "gallery.posts_count" => "{count} publicaciones",
+        "gallery.media_count" => "{count} archivos multimedia",
+        "music.volume" => "Volumen",
+        "gallery.folder_pending" => "Pendiente de confirmar",
+        "gallery.folder_opened" => "Carpeta abierta.",
+        "gallery.choice.downloader" => "Elegir descargador",
+        "gallery.choice.content" => "Elegir contenido",
+        "gallery.choice.add_title" => "Elegir contenido para añadir",
+        "gallery.choice.dual_hint" => {
+            "Dos descargadores admiten esta URL. Selecciona al menos uno."
+        }
+        "gallery.choice.origin_hint" => {
+            "Elige contenido para analizar (modo clásico: un tipo a la vez)."
+        }
+        "gallery.choice.add_hint" => "Elige contenido para añadir",
+        "gallery.choice.dual_media" => "Se pueden añadir vídeos e imágenes juntos.",
+        "gallery.choice.one_required" => "Selecciona un descargador.",
+        "gallery.choice.tool_required" => "Selecciona al menos un descargador.",
+        "gallery.choice.content_required" => "Elige contenido para analizar o añadir.",
+        "gallery.choice.cancelled" => "Selección cancelada.",
+        "gallery.range.help_steps" => {
+            "Elige el método y los límites del rango; confirma para aplicarlos."
+        }
+        "gallery.range.help_multiple" => {
+            "Esta fuente contiene varios canales. No se admite un límite total de publicaciones; elige un período o todo."
+        }
+        "gallery.range.help_order" => {
+            "Las publicaciones siguen el orden del sitio y pueden incluir las fijadas. Al reiniciar se recorre desde el principio y se omiten archivos existentes."
+        }
+        "gallery.range.help_time" => {
+            "El período se filtra por las fechas de publicación. Instagram omite las publicaciones fijadas antiguas y se detiene en una publicación normal fuera del rango. Otras fuentes pueden recorrer toda la cronología. La ausencia de fechas válidas produce un error."
+        }
+        "about.core_tools" => "Herramientas principales",
+        "about.extension_tools" => "Herramientas adicionales",
+        "about.gallery_dl_description" => {
+            "Descarga galerías de imágenes y colecciones de redes sociales."
+        }
+        "about.aria2_description" => {
+            "Descargador externo para yt-dlp; el rendimiento depende del sitio y la conexión."
+        }
+        "about.required" => "Obligatorio",
+        "about.availability.ready" => "Disponible",
+        "about.availability.missing" => "No encontrado",
+        "advance.use_aria2_external_downloader" => "Usar aria2 como descargador externo",
         "tab.advanced" => "Avanzado",
         "advance.browser_integration" => "Integración con el navegador",
         "advance.browser_connection" => "Conexión del navegador",
@@ -17,6 +80,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "Mensaje",
         "about.check_updates" => "Buscar actualizaciones",
         "about.update_all" => "Actualizar todo",
+        "about.install_dependencies" => "Instalar dependencias",
         "about.restart" => "Reiniciar",
         "about.open_release" => "Abrir Release",
         "about.install" => "Instalar",
@@ -96,8 +160,10 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.fps" => "FPS",
         "picker.filter.codec" => "Códec",
         "picker.filter.sample_rate" => "Frecuencia de muestreo",
-        "main.missing_yt_dlp_callout" => "Falta yt-dlp. Instálalo o elige yt-dlp.exe en Opciones.",
+        "main.missing_yt_dlp_callout" => "Falta yt-dlp. Instálalo o elige yt-dlp.exe en Acerca de.",
         "advance.source" => "Fuente",
+        "advance.analysis" => "Análisis",
+        "advance.force_analysis" => "Forzar análisis",
         "advance.config" => "Configuración",
         "advance.none" => "Ninguno",
         "advance.network_access" => "Red y acceso",
@@ -186,7 +252,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "Navegador",
         "advance.default" => "Predeterminado",
         "advance.external_downloader" => "Descargador externo",
-        "advance.use_aria2_for_faster_downloads" => "Usar Aria2 para descargas más rápidas",
         "advance.download_control" => "Control de descarga",
         "advance.concurrent_fragments" => "Fragmentos simultáneos",
         "advance.live_streams" => "Emisiones en directo",

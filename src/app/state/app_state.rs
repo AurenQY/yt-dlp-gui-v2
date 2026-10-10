@@ -3,6 +3,7 @@ use super::*;
 pub struct AppState {
     pub active_tab: AppTab,
     pub url_input: String,
+    pub(crate) url_source_preview: super::url_source_preview::UrlSourcePreview,
     pub batch_input: String,
     pub batch_enabled: bool,
     pub monitor_clipboard: bool,
@@ -11,6 +12,9 @@ pub struct AppState {
     pub(super) clipboard_monitor_baseline_ready: bool,
     pub empty_item_preview: VideoMetadata,
     pub queue_items: Vec<QueueItem>,
+    pub(super) queue_persistence: super::queue_persistence_actions::QueuePersistenceState,
+    pub(super) queue_refresh_rx: Receiver<super::queue_reanalysis_actions::QueueRefreshResult>,
+    pub(super) queue_refresh_tx: Sender<super::queue_reanalysis_actions::QueueRefreshResult>,
     pub(super) queue_display_mode: QueueDisplayMode,
     pub(super) app_mode: AppMode,
     pub item_defaults: DownloadOptions,
@@ -27,9 +31,24 @@ pub struct AppState {
     pub last_action: String,
     pub(super) logs: LogState,
     pub format_picker: FormatPickerState,
+    pub gallery_range_picker: GalleryRangePicker,
+    pub(super) pending_queue_removals: Vec<QueueItemId>,
     pub is_adding_batch: bool,
     pub is_cancelling_batch_add: bool,
     pub youtube_playlist_prompt: Option<YoutubePlaylistPrompt>,
+    // URL matcher runs before downloader choice; selected analyzer then runs.
+    pub(super) gallery_route_pending: bool,
+    pub(super) gallery_downloader_choice_prompt:
+        Option<super::gallery_queue_actions::GalleryDownloaderChoicePrompt>,
+    // Audio mode preflights only yt-dlp rules; no gallery-dl process is ever launched.
+    pub(super) audio_url_preflight_pending: bool,
+    pub(super) audio_url_preflight_rx:
+        Receiver<super::music_batch_actions::AudioSourcePreflightResult>,
+    pub(super) audio_url_preflight_tx:
+        Sender<super::music_batch_actions::AudioSourcePreflightResult>,
+    pub(super) gallery_route_prompt: Option<super::gallery_queue_actions::GalleryRoutePrompt>,
+    pub(super) gallery_route_rx: Receiver<super::gallery_queue_actions::GalleryRouteResult>,
+    pub(super) gallery_route_tx: Sender<super::gallery_queue_actions::GalleryRouteResult>,
     pub(super) cookie_rescue: CookieRescueState,
     pub(super) analyze_result_rx: Receiver<AnalyzeResult>,
     pub(super) analyze_result_tx: Sender<AnalyzeResult>,
@@ -53,8 +72,10 @@ pub struct AppState {
     pub(super) music_download_event_tx: Sender<MusicDownloadEvent>,
     pub(super) music: MusicState,
     pub(super) thumbnail_cache: HashMap<String, ThumbnailCacheEntry>,
+    pub(super) queue_thumbnail_disk_cache:
+        Option<Arc<crate::infrastructure::queue_thumbnail_cache::QueueThumbnailCache>>,
+    pub(super) queue_thumbnail_saved_owners: std::collections::BTreeSet<String>,
     pub component_update_snapshot: ComponentUpdateSnapshot,
-    pub about_markdown_cache: CommonMarkCache,
     pub(super) app_instance_guard: Option<AppInstanceGuard>,
     pub(super) font_content_revision: u64,
     pub(super) active_workflows: HashMap<WorkflowRunId, ActiveWorkflow>,
@@ -70,6 +91,9 @@ impl AppState {
 
     pub fn from_runtime(mut config: AppConfig, tool_paths: ToolPaths) -> Self {
         let (analyze_result_tx, analyze_result_rx) = mpsc::channel();
+        let (queue_refresh_tx, queue_refresh_rx) = mpsc::channel();
+        let (gallery_route_tx, gallery_route_rx) = mpsc::channel();
+        let (audio_url_preflight_tx, audio_url_preflight_rx) = mpsc::channel();
         let (download_result_tx, download_result_rx) = mpsc::channel();
         let (post_process_result_tx, post_process_result_rx) = mpsc::channel();
         let (component_update_result_tx, component_update_result_rx) = mpsc::channel();
@@ -88,6 +112,7 @@ impl AppState {
             runtime_renderer: None,
             active_tab: AppTab::Main,
             url_input: String::new(),
+            url_source_preview: Default::default(),
             batch_input: String::new(),
             batch_enabled: true,
             monitor_clipboard: config.auto_paste_clipboard,
@@ -96,6 +121,9 @@ impl AppState {
             clipboard_monitor_baseline_ready: false,
             empty_item_preview: VideoMetadata::empty_preview(),
             queue_items: Vec::new(),
+            queue_persistence: Default::default(),
+            queue_refresh_rx,
+            queue_refresh_tx,
             queue_display_mode,
             app_mode,
             item_defaults: {
@@ -123,9 +151,19 @@ impl AppState {
             last_action: String::new(),
             logs: LogState::default(),
             format_picker: FormatPickerState::default(),
+            gallery_range_picker: GalleryRangePicker::default(),
+            pending_queue_removals: Vec::new(),
             is_adding_batch: false,
             is_cancelling_batch_add: false,
             youtube_playlist_prompt: None,
+            gallery_route_pending: false,
+            gallery_downloader_choice_prompt: None,
+            audio_url_preflight_pending: false,
+            audio_url_preflight_rx,
+            audio_url_preflight_tx,
+            gallery_route_prompt: None,
+            gallery_route_rx,
+            gallery_route_tx,
             cookie_rescue: CookieRescueState::default(),
             analyze_result_rx,
             analyze_result_tx,
@@ -149,8 +187,9 @@ impl AppState {
             music_download_event_tx,
             music: MusicState::new(music_volume, music_playback_mode),
             thumbnail_cache: HashMap::new(),
+            queue_thumbnail_disk_cache: None,
+            queue_thumbnail_saved_owners: Default::default(),
             component_update_snapshot: component_update_startup_snapshot(),
-            about_markdown_cache: CommonMarkCache::default(),
             app_instance_guard: register_app_instance(),
             font_content_revision: 1,
             active_workflows: HashMap::new(),
@@ -159,11 +198,17 @@ impl AppState {
         };
 
         cleanup_applied_update();
-        state.restore_saved_audio_playlist();
+        state.restore_saved_queues();
         state.prepare_report = collect_dependency_presence_report(&state.tool_paths);
         state.sanitize_startup_prepare_component_update_snapshot();
         schedule_startup_transient_cleanup();
-        if state.should_show_prepare_tab() {
+        if state.should_open_component_pool_on_startup() {
+            if let Some(tool) = state.first_missing_core_dependency() {
+                state.open_dependency_component(tool);
+            }
+        } else if state.should_show_prepare_tab() {
+            // Non-tool environment failures still use the dedicated
+            // diagnostics page until they receive a component-pool item.
             state.active_tab = AppTab::Prepare;
         }
         state
@@ -172,6 +217,7 @@ impl AppState {
 
 impl Drop for AppState {
     fn drop(&mut self) {
+        self.flush_queue_persistence_before_exit();
         self.force_stop_owned_external_tools();
     }
 }

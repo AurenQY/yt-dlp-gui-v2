@@ -17,7 +17,7 @@ pub(super) fn render_aria2_section(tui: &mut Tui, state: &mut AppState, form: Se
             form,
             state.ui_i18n_text_for_key("advance.external_downloader"),
             state.item_defaults.use_aria2,
-            state.ui_i18n_text_for_key("advance.use_aria2_for_faster_downloads"),
+            state.ui_i18n_text_for_key("advance.use_aria2_external_downloader"),
         ) {
             state.set_use_aria2(enabled);
         }

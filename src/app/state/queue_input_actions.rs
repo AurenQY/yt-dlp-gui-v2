@@ -76,13 +76,9 @@ impl AppState {
     }
 
     pub fn add_current_url_to_batch(&mut self) {
-        if self.is_adding_batch {
-            self.last_action = "Batch add is still running.".to_owned();
-            return;
-        }
-
-        if let Err(error) = self.ensure_yt_dlp_ready() {
-            self.last_action = error;
+        if self.url_input_locked() {
+            self.last_action =
+                "Wait for the current add operation or URL choice to finish.".to_owned();
             return;
         }
 
@@ -94,37 +90,21 @@ impl AppState {
 
         let source = source.to_owned();
         if self.app_mode == AppMode::Origin {
-            if youtube_url_has_video_and_playlist(&source) {
-                let single_source =
-                    youtube_url_force_single_video(&source).unwrap_or_else(|| source.clone());
-                self.add_single_url_to_batch(single_source);
+            if !self.active_workflows.is_empty() {
+                self.last_action =
+                    "Wait for the current Origin Mode item to finish first.".to_owned();
                 return;
             }
-            if looks_like_playlist_url(&source) {
-                self.last_action = "Origin Mode does not support playlist URLs. Switch to Standard Mode to import a playlist."
-                    .to_owned();
-                return;
-            }
-            self.add_single_url_to_batch(source);
+            // The original single-item UX is retained; both tools may analyze,
+            // but only one backend result can occupy the Origin panel.
+            self.start_origin_backend_probe(source);
             return;
         }
 
         if youtube_url_has_video_and_playlist(&source) {
             match self.config.youtube_video_playlist_mode {
                 YoutubeVideoPlaylistMode::Ask => {
-                    let risk = if self.config.youtube_high_risk_playlist_prompt {
-                        classify_youtube_playlist(&source)
-                    } else {
-                        None
-                    };
-                    self.youtube_playlist_prompt = Some(YoutubePlaylistPrompt {
-                        source,
-                        kind: YoutubePlaylistPromptKind::VideoAndPlaylist,
-                        risk,
-                        music_compact: false,
-                    });
-                    self.last_action =
-                        "Detected a video URL that also contains a playlist.".to_owned();
+                    self.start_standard_video_playlist_probe(source);
                     return;
                 }
                 YoutubeVideoPlaylistMode::Video => {
@@ -135,11 +115,6 @@ impl AppState {
                 }
                 YoutubeVideoPlaylistMode::Ignore => {}
             }
-        }
-
-        if !looks_like_playlist_url(&source) {
-            self.add_single_url_to_batch(source);
-            return;
         }
 
         if self.config.youtube_high_risk_playlist_prompt {
@@ -158,7 +133,9 @@ impl AppState {
             }
         }
 
-        self.begin_batch_add(source);
+        // General source scope belongs to the offline index/bounded worker,
+        // not the old list= or /playlist substring heuristic.
+        self.start_standard_backend_probe(source);
     }
 
     pub fn run_primary_url_action(&mut self) {
@@ -167,7 +144,12 @@ impl AppState {
         } else if self.queue_display_mode == QueueDisplayMode::Audio {
             self.add_current_url_to_music_compact_batch();
         } else if self.config.direct_download_on_add {
-            self.immediate_download_current_url();
+            let source = self.url_input.trim().to_owned();
+            if !source.is_empty() {
+                self.start_immediate_backend_probe(source);
+            } else {
+                self.last_action = "There is no URL to download immediately.".to_owned();
+            }
         } else {
             self.add_current_url_to_batch();
         }
@@ -202,19 +184,18 @@ impl AppState {
             return;
         }
 
-        if let Err(error) = self.ensure_yt_dlp_ready() {
-            self.last_action = error;
-            return;
-        }
-
         let source = source.to_owned();
-        let source = if youtube_url_has_video_and_playlist(&source) {
-            youtube_url_force_single_video(&source).unwrap_or(source)
-        } else {
-            source
-        };
-        if looks_like_playlist_url(&source) {
-            self.last_action = "Download now currently only handles one video URL.".to_owned();
+        self.start_immediate_backend_probe(source);
+    }
+
+    pub(super) fn download_analyzed_single_video(&mut self, source: String, video: Value) {
+        if video.get("entries").is_some()
+            || !video["formats"]
+                .as_array()
+                .is_some_and(|formats| !formats.is_empty())
+        {
+            self.last_action =
+                "Download now requires an analyzed single video with usable formats.".to_owned();
             return;
         }
 
@@ -234,6 +215,13 @@ impl AppState {
         } else {
             self.ensure_queue_item_for_url(&source)
         };
+        self.apply_analysis_json(video, Some(source.clone()), Some(item_id), None);
+        if !self
+            .queue_item_by_id(item_id)
+            .is_some_and(|item| item.metadata_loaded())
+        {
+            return;
+        }
         if self.app_mode != AppMode::Origin {
             self.url_input.clear();
         }
@@ -242,10 +230,7 @@ impl AppState {
             "Added and ready to download now: {title}",
             &[("{title}", fallback_title.as_str())],
         );
-        let emit_json = self
-            .queue_item_by_id(item_id)
-            .is_some_and(|item| !item.metadata_loaded());
-        let _ = self.start_download_task_at(item_id, emit_json);
+        let _ = self.start_download_task_at(item_id, false);
     }
 
     pub fn confirm_youtube_playlist_prompt(&mut self) {
@@ -257,6 +242,21 @@ impl AppState {
         } else {
             self.begin_batch_add(prompt.source);
         }
+    }
+
+    pub(super) fn open_video_playlist_prompt(&mut self, source: String) {
+        let risk = if self.config.youtube_high_risk_playlist_prompt {
+            classify_youtube_playlist(&source)
+        } else {
+            None
+        };
+        self.youtube_playlist_prompt = Some(YoutubePlaylistPrompt {
+            source,
+            kind: YoutubePlaylistPromptKind::VideoAndPlaylist,
+            risk,
+            music_compact: false,
+        });
+        self.last_action = "Detected a video URL that also contains a playlist.".to_owned();
     }
 
     pub fn confirm_youtube_playlist_prompt_as_video(&mut self) {

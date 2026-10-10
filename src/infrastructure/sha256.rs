@@ -2,6 +2,12 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+pub(super) fn sha256_hex_bytes(bytes: &[u8]) -> String {
+    let mut state = Sha256State::new();
+    state.update(bytes);
+    state.finalize_hex()
+}
+
 pub(super) fn sha256_hex_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path)
         .map_err(|error| format!("Could not open {} for SHA256: {error}", path.display()))?;

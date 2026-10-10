@@ -4,6 +4,9 @@ impl AppState {
     pub fn poll_background_work(&mut self) {
         self.poll_media_session_commands();
         self.poll_youtube_login_rescue();
+        self.poll_standard_backend_probe();
+        self.poll_queue_reanalysis();
+        self.poll_audio_url_preflight();
 
         loop {
             match self.analyze_result_rx.try_recv() {
@@ -136,13 +139,21 @@ impl AppState {
                         action_id,
                         command_line,
                         success,
+                        partial_success,
+                        detail,
                     }) => {
-                        self.push_tool_log_step(
+                        self.push_tool_log_step_internal(
                             action_id,
-                            self.tool_log_status_for_batch_step(success),
+                            if partial_success {
+                                ToolLogStatus::Recovered
+                            } else {
+                                self.tool_log_status_for_batch_step(success)
+                            },
                             "yt-dlp",
                             "batch import",
                             command_line,
+                            detail,
+                            true,
                         );
                     }
                     Ok(BatchAddEvent::ItemAdded { source, seed }) => {
@@ -162,6 +173,7 @@ impl AppState {
                         source,
                         added,
                         stopped_by_limit,
+                        partial_success,
                     }) => {
                         self.is_adding_batch = false;
                         self.is_cancelling_batch_add = false;
@@ -171,6 +183,9 @@ impl AppState {
                         keep_rx = false;
                         if added == 0 {
                             self.last_action = "No new items were found in the batch.".to_owned();
+                        } else if partial_success {
+                            self.last_action =
+                                format!("Added {added} batch items; some yt-dlp entries failed.");
                         } else if stopped_by_limit {
                             self.last_action = i18n::format_fixed_english(
                                 "Added {count} batch items from the playlist (limit applied).",
@@ -262,14 +277,135 @@ impl AppState {
                 Ok(DownloadEvent::Metadata { item_id, json }) => {
                     self.apply_analysis_json(json, None, Some(item_id), None);
                 }
+                Ok(DownloadEvent::GalleryPostCompleted {
+                    item_id,
+                    workflow_id,
+                }) => {
+                    if !self.is_current_download_progress_event(item_id, workflow_id) {
+                        continue;
+                    }
+                    if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                        if let QueueBackend::GalleryDl(gallery) = &mut item.backend {
+                            gallery.processed_posts += 1;
+                            if gallery.analysis.as_ref().is_some_and(|analysis| {
+                                crate::domain::gallery_source_scope(&analysis.root_extractor)
+                                    == crate::domain::GallerySourceScope::Timeline
+                            }) && let crate::domain::GalleryDownloadRange::Posts { count } =
+                                gallery.download_range
+                            {
+                                if let Some(run) =
+                                    item.workflows.iter_mut().find(|run| run.id == workflow_id)
+                                {
+                                    if count > 0 {
+                                        run.progress = monotonic_progress(
+                                            run.progress,
+                                            (gallery.processed_posts as f32 / count as f32 * 100.0)
+                                                .min(99.0),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(DownloadEvent::GalleryProcessExited {
+                    item_id,
+                    workflow_id,
+                }) => {
+                    if !self.is_current_download_progress_event(item_id, workflow_id) {
+                        continue;
+                    }
+                    if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                        if let Some(run) =
+                            item.workflows.iter_mut().find(|run| run.id == workflow_id)
+                        {
+                            run.detail = "gallery-finishing".to_owned();
+                        }
+                    }
+                }
+                Ok(DownloadEvent::GalleryArtifact {
+                    item_id,
+                    workflow_id,
+                    artifact,
+                }) => {
+                    if !self.is_current_download_progress_event(item_id, workflow_id) {
+                        continue;
+                    }
+                    if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                        let QueueBackend::GalleryDl(gallery) = &mut item.backend else {
+                            continue;
+                        };
+                        if gallery
+                            .download_artifacts
+                            .iter()
+                            .any(|known| known.archive_key == artifact.archive_key)
+                        {
+                            continue;
+                        }
+                        if let Some(analysis) = gallery.analysis.as_mut() {
+                            let matching_index = analysis
+                                .media
+                                .iter()
+                                .position(|media| {
+                                    !artifact.media_url.is_empty()
+                                        && media.url == artifact.media_url
+                                })
+                                .or_else(|| {
+                                    analysis.media.iter().position(|media| {
+                                        media.sequence == artifact.sequence
+                                            && media.filename == artifact.filename
+                                    })
+                                });
+                            if let Some(media) =
+                                matching_index.and_then(|index| analysis.media.get_mut(index))
+                            {
+                                media.archive_key = artifact.archive_key.clone();
+                                media.output_path = Some(artifact.path.clone());
+                            }
+                        }
+                        gallery.download_artifacts.push(artifact);
+                        let completed = gallery.download_artifacts.len();
+                        let exact_total = gallery.analysis.as_ref().and_then(|analysis| {
+                            (crate::domain::gallery_source_scope(&analysis.root_extractor)
+                                == crate::domain::GallerySourceScope::SinglePost)
+                                .then_some(analysis.media.len())
+                        });
+                        if let Some(run) =
+                            item.workflows.iter_mut().find(|run| run.id == workflow_id)
+                        {
+                            if let Some(total) = exact_total.filter(|total| *total > 0) {
+                                let percent = (completed as f32 / total as f32 * 100.0).min(99.0);
+                                run.progress = monotonic_progress(run.progress, percent);
+                                if run.detail != "gallery-finishing" {
+                                    run.detail = format!("{completed} / {total}");
+                                }
+                            } else {
+                                // Full/source analysis intentionally probes only the first two
+                                // posts, so its media count is not a real total. Report only
+                                // work v2 has actually completed and reserve 100% for Finished.
+                                if run.detail != "gallery-finishing" {
+                                    run.detail = format!("{completed} / ?");
+                                }
+                            }
+                        }
+                    }
+                }
                 Ok(DownloadEvent::ToolCommandFinished {
-                    item_id: _,
+                    item_id,
                     workflow_id,
                     target_kind,
                     command_line,
                     success,
                     detail,
                 }) => {
+                    let tool_name = if self
+                        .queue_item_by_id(item_id)
+                        .is_some_and(|item| matches!(&item.backend, QueueBackend::GalleryDl(_)))
+                    {
+                        "gallery-dl"
+                    } else {
+                        "yt-dlp"
+                    };
                     let action_id = self.workflow_tool_log_action(
                         workflow_id,
                         "origin",
@@ -278,7 +414,7 @@ impl AppState {
                     self.push_tool_log_step_with_detail_without_failure_reveal(
                         action_id,
                         self.tool_log_status_for_workflow_step(workflow_id, success),
-                        "yt-dlp",
+                        tool_name,
                         "download",
                         command_line,
                         detail,
@@ -351,7 +487,14 @@ impl AppState {
                         }
                     }
                 }
-                Ok(DownloadEvent::Finished(message)) => {
+                Ok(DownloadEvent::Finished(mut message)) => {
+                    // Honor a stop/remove click racing with the worker's final
+                    // message, before starting any follow-up post-processing.
+                    if self.active_workflow_cancel_requested(message.workflow_id)
+                        && message.result.is_ok()
+                    {
+                        message.result = Err(DOWNLOAD_CANCELLED_MESSAGE.to_owned());
+                    }
                     let finished_item_id = message.item_id;
                     let notification_title = self
                         .queue_item_by_id(message.item_id)
@@ -373,8 +516,30 @@ impl AppState {
                             match &message.result {
                                 Ok(output_path) => {
                                     run.state = WorkflowState::Finished;
+                                    run.progress = 100.0;
                                     run.output_path = Some(output_path.clone());
+                                    if let QueueBackend::GalleryDl(gallery) = &mut item.backend {
+                                        if let crate::domain::GalleryDownloadRange::Recent {
+                                            since,
+                                            until,
+                                            ..
+                                        } = &mut gallery.download_range
+                                        {
+                                            // Successful recurring runs start a new time window next time.
+                                            // Cancelled runs retain both boundaries for a safe rescan.
+                                            *since = None;
+                                            *until = None;
+                                        }
+                                    }
                                     match message.target_kind {
+                                        DownloadTargetKind::Normal
+                                            if matches!(
+                                                &item.backend,
+                                                QueueBackend::GalleryDl(_)
+                                            ) =>
+                                        {
+                                            // Gallery downloads do not have yt-dlp video/audio selections.
+                                        }
                                         DownloadTargetKind::Normal => {
                                             item.progress.video = 100.0;
                                             item.progress.audio = 100.0;
@@ -390,7 +555,8 @@ impl AppState {
                                     }
                                     item.last_output_path = Some(output_path.clone());
                                     item.last_error = None;
-                                    if message.workflow_kind == WorkflowKind::DownloadMedia
+                                    if matches!(&item.backend, QueueBackend::YtDlp)
+                                        && message.workflow_kind == WorkflowKind::DownloadMedia
                                         && message.target_kind == DownloadTargetKind::Normal
                                     {
                                         pending_post_process_input = Some(output_path.clone());
@@ -439,6 +605,7 @@ impl AppState {
                         }
                     }
 
+                    self.finish_pending_queue_removal(finished_item_id);
                     if should_send_windows_toast && !post_process_started {
                         self.send_download_result_windows_toast(
                             notification_title,
@@ -570,6 +737,7 @@ impl AppState {
                         notification_title,
                         notification_result,
                     );
+                    self.finish_pending_queue_removal(finished_item_id);
                     self.start_next_queued_download_after(finished_item_id);
                 }
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
@@ -673,13 +841,13 @@ impl AppState {
     }
 
     pub fn start_single_download(&mut self) {
-        let Some(url) = self.primary_candidate_url() else {
-            self.last_action = "There is no URL to download.".to_owned();
+        if self.app_mode == AppMode::Origin {
+            self.request_origin_download();
             return;
-        };
-
-        if let Err(error) = self.ensure_yt_dlp_ready() {
-            self.last_action = error;
+        }
+        let url = self.primary_candidate_url();
+        if self.queue_items.is_empty() && url.is_none() && self.parsed_batch_urls().is_empty() {
+            self.last_action = "There is no URL to download.".to_owned();
             return;
         }
 
@@ -688,6 +856,11 @@ impl AppState {
         }
 
         if self.queue_items.is_empty() {
+            let url = url.expect("url checked above");
+            if let Err(error) = self.ensure_yt_dlp_ready() {
+                self.last_action = error;
+                return;
+            }
             self.queue_items = vec![self.build_queue_item_from_url(&url)];
         }
 

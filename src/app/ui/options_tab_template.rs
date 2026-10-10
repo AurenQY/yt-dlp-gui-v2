@@ -11,7 +11,6 @@ use super::xaml_ui_nodes::{TemplateNode, auto_block_rows};
 #[derive(Clone, Copy)]
 enum OptionsRootNode {
     Language,
-    ToolPaths,
     BrowserIntegration,
     Behavior,
     FormatList,
@@ -42,7 +41,6 @@ pub(super) fn render_options_root_page(ui: &mut Ui, state: &mut AppState) {
 fn options_root_template() -> OptionsRootTemplate {
     auto_block_rows([
         OptionsRootNode::Language,
-        OptionsRootNode::ToolPaths,
         OptionsRootNode::BrowserIntegration,
         OptionsRootNode::Behavior,
         OptionsRootNode::FormatList,
@@ -80,9 +78,6 @@ fn show_options_root_block(
         }
         OptionsRootNode::Language => {
             super::options_language::render_language_group(tui, state, form)
-        }
-        OptionsRootNode::ToolPaths => {
-            super::options_tool_paths::render_tool_paths_group(tui, state, label_width)
         }
         OptionsRootNode::Behavior => {
             super::options_behavior::render_behavior_group(tui, state, form)

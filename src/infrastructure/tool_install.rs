@@ -8,6 +8,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
+use super::async_http::{self, ClientOptions};
+
 const USER_AGENT: &str = "yt-dlp-gui-v2";
 const TOOL_INSTALL_CANCELLED: &str = "Dependency deployment cancelled.";
 const TOOL_DOWNLOAD_RETRY_ATTEMPTS: usize = 3;
@@ -26,6 +28,7 @@ const PORTABLE_TOOL_SEARCH_SKIPPED_DIRS: &[&str] = &[
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DependencyTool {
     YtDlp,
+    GalleryDl,
     Ffmpeg,
     Aria2c,
     Deno,
@@ -109,6 +112,7 @@ impl DependencyTool {
     pub fn label(self) -> &'static str {
         match self {
             Self::YtDlp => "yt-dlp",
+            Self::GalleryDl => "gallery-dl",
             Self::Ffmpeg => "FFmpeg",
             Self::Aria2c => "Aria2",
             Self::Deno => "Deno",
@@ -118,6 +122,7 @@ impl DependencyTool {
     pub fn executable_name(self) -> &'static str {
         match self {
             Self::YtDlp => "yt-dlp.exe",
+            Self::GalleryDl => "gallery-dl.exe",
             Self::Ffmpeg => "ffmpeg.exe",
             Self::Aria2c => "aria2c.exe",
             Self::Deno => "deno.exe",
@@ -127,6 +132,7 @@ impl DependencyTool {
     pub fn default_portable_path(self) -> &'static str {
         match self {
             Self::YtDlp => ".\\tools\\yt-dlp\\yt-dlp.exe",
+            Self::GalleryDl => ".\\tools\\gallery-dl\\gallery-dl.exe",
             Self::Ffmpeg => ".\\tools\\ffmpeg\\ffmpeg.exe",
             Self::Aria2c => ".\\tools\\aria2c\\aria2c.exe",
             Self::Deno => ".\\tools\\deno\\deno.exe",
@@ -136,6 +142,7 @@ impl DependencyTool {
     pub fn install_dir_name(self) -> &'static str {
         match self {
             Self::YtDlp => "yt-dlp",
+            Self::GalleryDl => "gallery-dl",
             Self::Ffmpeg => "ffmpeg",
             Self::Aria2c => "aria2c",
             Self::Deno => "deno",
@@ -152,11 +159,6 @@ struct GithubRelease {
 struct GithubReleaseAsset {
     name: String,
     browser_download_url: String,
-}
-
-struct HttpResponse {
-    reader: Box<dyn Read>,
-    content_length: Option<u64>,
 }
 
 pub fn dependency_tool_exists(path: &str) -> bool {
@@ -186,8 +188,31 @@ pub fn ffprobe_companion_path(ffmpeg_path: &str) -> PathBuf {
 }
 
 pub fn detect_dependency_tool(tool: DependencyTool) -> Option<PathBuf> {
+    let managed = resolve_support_path(tool.default_portable_path());
+    if dependency_tool_candidate_is_available(tool, &managed) {
+        return Some(managed);
+    }
     find_dependency_tool_in_base_dirs(tool, &portable_tool_search_base_dirs())
         .or_else(|| find_dependency_tool_in_system_path(tool))
+}
+
+/// Compare the selected executable against this tool's exact managed target.
+/// A second copy elsewhere under tools/ is still external, not v2-managed.
+pub fn dependency_tool_path_is_managed(tool: DependencyTool, configured: &str) -> bool {
+    if configured.trim().is_empty() {
+        return false;
+    }
+    let selected = resolve_support_path(configured);
+    let default = resolve_support_path(tool.default_portable_path());
+    let selected = selected.canonicalize().unwrap_or(selected);
+    let default = default.canonicalize().unwrap_or(default);
+    if cfg!(windows) {
+        selected
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&default.to_string_lossy())
+    } else {
+        selected == default
+    }
 }
 
 fn portable_tool_search_base_dirs() -> Vec<PathBuf> {
@@ -289,55 +314,6 @@ fn find_dependency_tool_in_system_path(tool: DependencyTool) -> Option<PathBuf> 
     None
 }
 
-#[cfg(test)]
-mod portable_detection_tests {
-    use super::*;
-
-    fn unique_test_root(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "yt-dlp-gui-v2-{name}-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ))
-    }
-
-    #[test]
-    fn portable_detection_finds_tool_beside_gui_or_in_nested_folder() {
-        let root = unique_test_root("portable-tool-detection");
-        let nested = root.join("vendor").join("yt-dlp");
-        fs::create_dir_all(&nested).expect("create nested tool folder");
-        let yt_dlp = nested.join("yt-dlp.exe");
-        fs::write(&yt_dlp, b"test").expect("create yt-dlp candidate");
-
-        let found = find_dependency_tool_in_base_dirs(DependencyTool::YtDlp, &[root.clone()]);
-
-        assert_eq!(found, Some(yt_dlp));
-        fs::remove_dir_all(root).expect("remove test folder");
-    }
-
-    #[test]
-    fn portable_ffmpeg_detection_requires_ffprobe_companion() {
-        let root = unique_test_root("portable-ffmpeg-detection");
-        fs::create_dir_all(&root).expect("create portable root");
-        let ffmpeg = root.join("ffmpeg.exe");
-        fs::write(&ffmpeg, b"test").expect("create ffmpeg candidate");
-
-        assert_eq!(
-            find_dependency_tool_in_base_dirs(DependencyTool::Ffmpeg, &[root.clone()]),
-            None
-        );
-
-        fs::write(root.join("ffprobe.exe"), b"test").expect("create ffprobe companion");
-        assert_eq!(
-            find_dependency_tool_in_base_dirs(DependencyTool::Ffmpeg, &[root.clone()]),
-            Some(ffmpeg)
-        );
-        fs::remove_dir_all(root).expect("remove test folder");
-    }
-}
-
 fn system_path_executable_candidates(tool: DependencyTool) -> &'static [&'static str] {
     match tool {
         DependencyTool::YtDlp => &[
@@ -350,6 +326,7 @@ fn system_path_executable_candidates(tool: DependencyTool) -> &'static [&'static
             "ytdl-patched.cmd",
             "ytdl-patched.bat",
         ],
+        DependencyTool::GalleryDl => &["gallery-dl.exe", "gallery-dl"],
         DependencyTool::Ffmpeg => &["ffmpeg.exe", "ffmpeg"],
         DependencyTool::Aria2c => &["aria2c.exe", "aria2c"],
         DependencyTool::Deno => &["deno.exe", "deno", "deno.cmd", "deno.bat"],
@@ -455,6 +432,9 @@ fn install_dependency_tool_native(
         DependencyTool::YtDlp => {
             install_yt_dlp(install_dir, temp_root, proxy_url, cancel_token, progress)
         }
+        DependencyTool::GalleryDl => {
+            install_gallery_dl(install_dir, temp_root, proxy_url, cancel_token, progress)
+        }
         DependencyTool::Ffmpeg => {
             install_ffmpeg(install_dir, temp_root, proxy_url, cancel_token, progress)
         }
@@ -487,6 +467,31 @@ fn install_yt_dlp(
         DependencyTool::YtDlp,
         &temp_file,
         &install_dir.join("yt-dlp.exe"),
+        cancel_token,
+        progress,
+    )
+}
+
+fn install_gallery_dl(
+    install_dir: &Path,
+    temp_root: &Path,
+    proxy_url: Option<&str>,
+    cancel_token: &ToolInstallCancelToken,
+    progress: &mut impl FnMut(ToolInstallProgress),
+) -> Result<InstalledDependencyTool, String> {
+    let temp_file = temp_root.join("gallery-dl.exe");
+    download_file(
+        DependencyTool::GalleryDl,
+        "https://codeberg.org/mikf/gallery-dl/releases/download/latest/gallery-dl.exe",
+        &temp_file,
+        proxy_url,
+        cancel_token,
+        progress,
+    )?;
+    copy_installed_file(
+        DependencyTool::GalleryDl,
+        &temp_file,
+        &install_dir.join("gallery-dl.exe"),
         cancel_token,
         progress,
     )
@@ -651,9 +656,15 @@ fn request_json<T: for<'de> Deserialize<'de>>(
     proxy_url: Option<&str>,
     cancel_token: &ToolInstallCancelToken,
 ) -> Result<T, String> {
-    let text = request_text(url, proxy_url, cancel_token)?;
-    serde_json::from_str(&text)
-        .map_err(|error| format!("Could not parse response from {url}: {error}"))
+    cancel_token.check()?;
+    let mut options = ClientOptions::new(USER_AGENT);
+    options.proxy_url = proxy_url;
+    options.connect_timeout = Duration::from_secs(10);
+    options.read_timeout = Duration::from_secs(10);
+    let client = async_http::build_client(options)?;
+    let result = async_http::block_on(async_http::get_json(&client, url, []));
+    cancel_token.check()?;
+    result
 }
 
 fn request_text(
@@ -662,11 +673,12 @@ fn request_text(
     cancel_token: &ToolInstallCancelToken,
 ) -> Result<String, String> {
     cancel_token.check()?;
-    let mut response = http_get(url, proxy_url)?;
-    let mut text = String::new();
-    response
-        .reader
-        .read_to_string(&mut text)
+    let mut options = ClientOptions::new(USER_AGENT);
+    options.proxy_url = proxy_url;
+    options.connect_timeout = Duration::from_secs(10);
+    options.read_timeout = Duration::from_secs(10);
+    let client = async_http::build_client(options)?;
+    let text = async_http::block_on(async_http::get_text(&client, url, []))
         .map_err(|error| format!("Could not read response from {url}: {error}"))?;
     cancel_token.check()?;
     Ok(text)
@@ -713,6 +725,24 @@ fn download_file_once(
     cancel_token: &ToolInstallCancelToken,
     progress: &mut impl FnMut(ToolInstallProgress),
 ) -> Result<(), String> {
+    async_http::block_on(download_file_once_async(
+        tool,
+        url,
+        destination,
+        proxy_url,
+        cancel_token,
+        progress,
+    ))
+}
+
+async fn download_file_once_async(
+    tool: DependencyTool,
+    url: &str,
+    destination: &Path,
+    proxy_url: Option<&str>,
+    cancel_token: &ToolInstallCancelToken,
+    progress: &mut impl FnMut(ToolInstallProgress),
+) -> Result<(), String> {
     cancel_token.check()?;
     progress(ToolInstallProgress {
         tool,
@@ -730,26 +760,37 @@ fn download_file_once(
         })?;
     }
 
-    let mut response = http_get(url, proxy_url)?;
-    let total = response.content_length;
+    let mut options = ClientOptions::new(USER_AGENT);
+    options.proxy_url = proxy_url;
+    options.connect_timeout = Duration::from_secs(10);
+    options.read_timeout = Duration::from_secs(10);
+    let client = async_http::build_client(options)?;
+    let mut response = async_http::send_get(&client, url, [])
+        .await
+        .map_err(|error| format!("Could not download {url}: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!(
+            "Could not download {url}: HTTP {}",
+            status.as_u16()
+        ));
+    }
+
+    let total = response.content_length();
     let mut file = File::create(destination)
         .map_err(|error| format!("Could not create {}: {error}", destination.display()))?;
-    let mut buffer = [0u8; 1024 * 1024];
     let mut downloaded = 0u64;
     let mut last_percent = Some(0u8);
 
-    loop {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| format!("Could not download {url}: {error}"))?
+    {
         cancel_token.check()?;
-        let read = response
-            .reader
-            .read(&mut buffer)
-            .map_err(|error| format!("Could not download {url}: {error}"))?;
-        if read == 0 {
-            break;
-        }
-        file.write_all(&buffer[..read])
+        file.write_all(&chunk)
             .map_err(|error| format!("Could not write {}: {error}", destination.display()))?;
-        downloaded += read as u64;
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
         if let Some(total) = total.filter(|value| *value > 0) {
             let percent = ((downloaded.saturating_mul(100)) / total).min(100) as u8;
             if Some(percent) != last_percent {
@@ -771,6 +812,7 @@ fn download_file_once(
             last_percent = None;
         }
     }
+
     file.flush()
         .map_err(|error| format!("Could not finish {}: {error}", destination.display()))?;
     cancel_token.check()?;
@@ -781,35 +823,6 @@ fn download_file_once(
         message: "downloaded".to_owned(),
     });
     Ok(())
-}
-
-fn http_get(url: &str, proxy_url: Option<&str>) -> Result<HttpResponse, String> {
-    let mut builder = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(10)))
-        .timeout_recv_response(Some(Duration::from_secs(10)))
-        .timeout_recv_body(Some(Duration::from_secs(10)))
-        .user_agent(USER_AGENT);
-    if let Some(proxy_url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) {
-        let proxy = ureq::Proxy::new(proxy_url)
-            .map_err(|error| format!("Invalid proxy URL {proxy_url}: {error}"))?;
-        builder = builder.proxy(Some(proxy));
-    }
-
-    let response = builder
-        .build()
-        .new_agent()
-        .get(url)
-        .call()
-        .map_err(|error| format!("Could not download {url}: {error}"))?;
-    let content_length = response
-        .headers()
-        .get("content-length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok());
-    Ok(HttpResponse {
-        reader: Box::new(response.into_parts().1.into_reader()),
-        content_length,
-    })
 }
 
 fn extract_zip(

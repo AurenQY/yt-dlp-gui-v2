@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-label="ImageMultipleOutline">
+  <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6" y="3" width="15" height="15" rx="2"/>
+    <path d="M3 7v12a2 2 0 0 0 2 2h12M7 16l4-5 3 3 2-2 4 4"/>
+    <circle cx="16.5" cy="7.5" r="1"/>
+  </g>
+</svg>

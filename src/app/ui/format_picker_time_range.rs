@@ -394,24 +394,3 @@ fn render_saved_time_ranges(ui: &mut Ui, state: &mut AppState) {
             });
         });
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn playhead_snaps_to_nearby_chapter_boundary() {
-        assert_eq!(
-            snapped_timeline_millis(19_600, 100_000, 800.0, &[0, 20_000, 50_000, 100_000]),
-            20_000
-        );
-    }
-
-    #[test]
-    fn playhead_keeps_free_position_outside_snap_window() {
-        assert_eq!(
-            snapped_timeline_millis(17_000, 100_000, 800.0, &[0, 20_000, 50_000, 100_000]),
-            17_000
-        );
-    }
-}

@@ -10,9 +10,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use super::cookie_site_index::{
-    CookieSiteIndexEntry, read_cookie_site_index_or_default, write_cookie_site_index,
+    CookieSiteIndexEntry, lock_cookie_store, read_cookie_site_index_or_default,
+    write_cookie_site_index, write_cookie_store_file_atomically,
 };
 use super::process_guard::{TrackedChildProcess, track_child_process};
+
+#[path = "youtube_login_rescue_cdp_http.rs"]
+mod cdp_http;
+
+use cdp_http::{read_cdp_version, read_page_targets};
 
 const CDP_POLL_ATTEMPTS: usize = 80;
 const CDP_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -300,6 +306,7 @@ fn run_youtube_login_rescue_cookie_export_inner(
     }
 
     let cookie_file_path = cookie_dir_path.join(format!("{}.cookies.txt", site.site_id));
+    let _cookie_store_lock = lock_cookie_store(&cookie_dir_path)?;
     write_netscape_cookie_file(&cookie_file_path, &filtered, &site)?;
     write_cookie_rescue_site_index(
         &cookie_dir_path,
@@ -307,6 +314,7 @@ fn run_youtube_login_rescue_cookie_export_inner(
         &normalized_target_url,
         &cookie_file_path,
     )?;
+    drop(_cookie_store_lock);
     let exported_cookie_count = filtered.len();
     let _ = session.close();
 
@@ -765,7 +773,7 @@ pub fn normalize_cookie_rescue_target_url(input: &str) -> Result<String, String>
     Ok(candidate)
 }
 
-fn host_from_http_url(url: &str) -> Option<String> {
+pub(super) fn host_from_http_url(url: &str) -> Option<String> {
     let trimmed = url.trim();
     let rest = trimmed
         .strip_prefix("https://")
@@ -812,7 +820,7 @@ fn is_valid_cookie_rescue_host(host: &str) -> bool {
     })
 }
 
-fn registrable_domain_guess(host: &str) -> Option<String> {
+pub(super) fn registrable_domain_guess(host: &str) -> Option<String> {
     let labels = host
         .trim_matches('.')
         .split('.')
@@ -844,7 +852,7 @@ fn registrable_domain_guess(host: &str) -> Option<String> {
     Some(labels[labels.len() - take..].join("."))
 }
 
-fn site_id_from_domain(domain: &str) -> String {
+pub(super) fn site_id_from_domain(domain: &str) -> String {
     let mut id = domain
         .trim_start_matches('.')
         .trim_end_matches('.')
@@ -968,6 +976,11 @@ fn write_cookie_rescue_site_index(
         .to_owned();
 
     let mut index = read_cookie_site_index_or_default(cookie_dir_path);
+    let auto_update_from_extension = index
+        .sites
+        .iter()
+        .find(|entry| entry.id == site.site_id)
+        .is_some_and(|entry| entry.auto_update_from_extension);
     let entry = CookieSiteIndexEntry {
         id: site.site_id.to_owned(),
         display_name: site.display_name.to_owned(),
@@ -977,6 +990,11 @@ fn write_cookie_rescue_site_index(
         cookie_file,
         builtin: site.is_youtube,
         updated_unix: current_unix_timestamp(),
+        auto_update_from_extension,
+        last_browser_snapshot_unix_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or_default(),
     };
 
     if let Some(existing) = index.sites.iter_mut().find(|item| item.id == site.site_id) {
@@ -1064,7 +1082,7 @@ fn write_netscape_cookie_file(
         ));
     }
 
-    fs::write(path, output).map_err(|error| format!("Could not write cookies.txt: {error}"))
+    write_cookie_store_file_atomically(path, output.as_bytes())
 }
 
 fn wait_for_first_page_target(port: u16) -> Result<CdpPageTarget, String> {
@@ -1091,58 +1109,6 @@ fn read_page_websocket_urls(port: u16) -> Result<Vec<String>, String> {
         .into_iter()
         .map(|target| target.ws_url)
         .collect())
-}
-
-fn read_page_targets(port: u16) -> Result<Vec<CdpPageTarget>, String> {
-    let list_url = format!("http://127.0.0.1:{port}/json/list");
-    let mut response = ureq::get(&list_url)
-        .call()
-        .map_err(|error| format!("Could not read CDP target list: {error}"))?;
-    let status = response.status().as_u16();
-    if status >= 400 {
-        return Err(format!("CDP target list returned HTTP {status}"));
-    }
-
-    let mut body = String::new();
-    response
-        .body_mut()
-        .as_reader()
-        .read_to_string(&mut body)
-        .map_err(|error| format!("Could not read CDP target list response: {error}"))?;
-
-    let json: Value = serde_json::from_str(&body)
-        .map_err(|error| format!("Could not parse CDP target list response: {error}"))?;
-    let Some(targets) = json.as_array() else {
-        return Err("CDP target list was not an array.".to_owned());
-    };
-
-    let mut page_targets = Vec::new();
-    for target in targets {
-        let target_type = target
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if target_type != "page" {
-            continue;
-        }
-        let Some(ws_url) = target
-            .get("webSocketDebuggerUrl")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-        else {
-            continue;
-        };
-        let url = target
-            .get("url")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
-        page_targets.push(CdpPageTarget { ws_url, url });
-    }
-    Ok(page_targets)
 }
 
 fn cdp_call(ws_url: &str, method: &str, params: Option<Value>) -> Result<Value, String> {
@@ -1387,51 +1353,6 @@ fn wait_for_cdp_version(version_url: &str) -> Result<(String, Option<String>), S
         Err(format!(
             "The login browser did not expose the local CDP endpoint in time. Last error: {last_error}"
         ))
-    }
-}
-
-fn read_cdp_version(version_url: &str) -> Result<Option<String>, String> {
-    let mut response = ureq::get(version_url)
-        .call()
-        .map_err(|error| format!("CDP endpoint is not ready: {error}"))?;
-    let status = response.status().as_u16();
-    if status >= 400 {
-        return Err(format!("CDP endpoint returned HTTP {status}"));
-    }
-
-    let mut body = String::new();
-    response
-        .body_mut()
-        .as_reader()
-        .read_to_string(&mut body)
-        .map_err(|error| format!("Could not read CDP version response: {error}"))?;
-
-    let json: Value = serde_json::from_str(&body)
-        .map_err(|error| format!("Could not parse CDP version response: {error}"))?;
-    let websocket_url = json
-        .get("webSocketDebuggerUrl")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
-    Ok(websocket_url)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_closed_login_browser_page_error;
-
-    #[test]
-    fn cookie_rescue_closed_browser_errors_are_terminal() {
-        assert!(is_closed_login_browser_page_error(
-            "Could not find a CDP page target for the login browser."
-        ));
-        assert!(is_closed_login_browser_page_error(
-            "CDP websocket was closed."
-        ));
-        assert!(!is_closed_login_browser_page_error(
-            "Waiting for YouTube login cookies."
-        ));
     }
 }
 

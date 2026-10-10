@@ -72,7 +72,7 @@
   <Block strong inset>{t('chapterRangeHint')}</Block>
 
   <Block inset>
-    <Segmented raised round>
+    <Segmented strong>
       <Button onClick={selectAll}>{t('selectAll')}</Button>
       <Button onClick={clearDraft}>{t('clearSelection')}</Button>
     </Segmented>
@@ -107,21 +107,3 @@
     </div>
   </Toolbar>
 </Page>
-
-<style>
-  :global(.chapter-range-toolbar .toolbar-inner) {
-    padding-inline: var(--shadow-action-inset);
-  }
-
-  .chapter-range-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px;
-    width: 100%;
-  }
-
-  :global([data-name="chapter-range"] .item-after) {
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-  }
-</style>

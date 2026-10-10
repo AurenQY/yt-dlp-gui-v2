@@ -1,4 +1,5 @@
 use super::*;
+use crate::infrastructure::async_http::{self, ClientOptions};
 
 pub(super) fn run_music_download_worker(
     tool_paths: ToolPaths,
@@ -143,20 +144,9 @@ pub(super) fn remove_cached_music_cover_files(dir: &Path) {
 pub(super) fn download_music_cover_to_dir(url: &str, dir: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(dir)
         .map_err(|error| format!("Could not create music cover cache: {error}"))?;
-    let mut response = ureq::get(url)
-        .call()
+    let client = async_http::build_client(ClientOptions::new("yt-dlp-gui-v2 music cover"))?;
+    let data = async_http::block_on(async_http::get_bytes(&client, url, [], None))
         .map_err(|error| format!("Could not download music cover cache: {error}"))?;
-    let status = response.status().as_u16();
-    if status >= 400 {
-        return Err(format!(
-            "Could not download music cover cache: HTTP {status}"
-        ));
-    }
-    let mut reader = response.body_mut().as_reader();
-    let mut data = Vec::new();
-    reader
-        .read_to_end(&mut data)
-        .map_err(|error| format!("Could not read music cover cache: {error}"))?;
     if data.is_empty() {
         return Err("Downloaded music cover cache is empty.".to_owned());
     }

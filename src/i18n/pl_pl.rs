@@ -1,5 +1,66 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "Sposób wyboru zakresu",
+        "gallery.range.time" => "Według czasu",
+        "gallery.range.posts" => "Według liczby wpisów",
+        "gallery.range.date" => "Data początkowa (UTC)",
+        "gallery.range.count" => "Liczba wpisów (dodatnia liczba całkowita)",
+        "gallery.range.custom" => "Własny",
+        "gallery.range.positive" => "Dodatnia liczba całkowita",
+        "gallery.range.invalid" => "Podaj prawidłowy zakres pobierania.",
+        "gallery.range.invalid_date" => "Podaj prawidłową datę UTC (YYYY-MM-DD).",
+        "gallery.range.help" => "Pomoc",
+        "gallery.range.title" => "Zakres pobierania osi czasu",
+        "gallery.range.time_or_all" => "Wybierz okres lub wszystko",
+        "gallery.range.latest" => "Ostatnie {count} wpisów",
+        "gallery.range.recent24h" => "Ostatnie 24 godziny",
+        "gallery.range.days" => "Ostatnie {days} dni",
+        "gallery.range.since" => "Od {date} (UTC)",
+        "gallery.status.finishing" => "Finalizowanie",
+        "gallery.status.waiting" => "Oczekiwanie na pobieranie",
+        "gallery.status.analyzing" => "Analizowanie",
+        "gallery.posts_count" => "{count} wpisów",
+        "gallery.media_count" => "{count} plików multimedialnych",
+        "music.volume" => "Głośność",
+        "gallery.folder_pending" => "Do potwierdzenia",
+        "gallery.folder_opened" => "Otwarto folder.",
+        "gallery.choice.downloader" => "Wybierz narzędzie pobierania",
+        "gallery.choice.content" => "Wybierz treść",
+        "gallery.choice.add_title" => "Wybierz treść do dodania",
+        "gallery.choice.dual_hint" => "Dwa narzędzia obsługują ten URL. Wybierz co najmniej jedno.",
+        "gallery.choice.origin_hint" => {
+            "Wybierz treść do analizy (tryb klasyczny: jeden typ naraz)."
+        }
+        "gallery.choice.add_hint" => "Wybierz treść do dodania",
+        "gallery.choice.dual_media" => "Filmy i obrazy można dodać razem.",
+        "gallery.choice.one_required" => "Wybierz jedno narzędzie pobierania.",
+        "gallery.choice.tool_required" => "Wybierz co najmniej jedno narzędzie pobierania.",
+        "gallery.choice.content_required" => "Wybierz treść do analizy lub dodania.",
+        "gallery.choice.cancelled" => "Anulowano wybór.",
+        "gallery.range.help_steps" => "Wybierz sposób i granice zakresu, a następnie potwierdź.",
+        "gallery.range.help_multiple" => {
+            "Źródło obejmuje wiele kanałów. Nie można ograniczyć łącznej liczby wpisów; wybierz okres lub wszystko."
+        }
+        "gallery.range.help_order" => {
+            "Wpisy zachowują kolejność witryny i mogą obejmować przypięte wpisy. Ponowne uruchomienie skanuje od początku i pomija istniejące pliki."
+        }
+        "gallery.range.help_time" => {
+            "Okres jest filtrowany według dat wpisów. Instagram pomija stare przypięte wpisy i kończy na zwykłym wpisie poza zakresem. Inne źródła mogą skanować całą oś czasu. Brak prawidłowych dat powoduje błąd."
+        }
+        "about.core_tools" => "Narzędzia podstawowe",
+        "about.extension_tools" => "Narzędzia dodatkowe",
+        "about.gallery_dl_description" => {
+            "Pobiera galerie zdjęć i kolekcje z mediów społecznościowych."
+        }
+        "about.aria2_description" => {
+            "Zewnętrzny program pobierający dla yt-dlp; wydajność zależy od witryny i połączenia."
+        }
+        "about.required" => "Wymagane",
+        "about.availability.ready" => "Dostępne",
+        "about.availability.missing" => "Nie znaleziono",
+        "advance.use_aria2_external_downloader" => {
+            "Używaj aria2 jako zewnętrznego programu pobierającego"
+        }
         "tab.advanced" => "Zaawansowane",
         "advance.browser_integration" => "Integracja z przeglądarką",
         "advance.browser_connection" => "Połączenie z przeglądarką",
@@ -17,6 +78,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "Komunikat",
         "about.check_updates" => "Sprawdź aktualizacje",
         "about.update_all" => "Aktualizuj wszystko",
+        "about.install_dependencies" => "Zainstaluj zależności",
         "about.restart" => "Uruchom ponownie",
         "about.open_release" => "Otwórz Release",
         "about.install" => "Zainstaluj",
@@ -97,9 +159,11 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.codec" => "Kodek",
         "picker.filter.sample_rate" => "Częstotliwość próbkowania",
         "main.missing_yt_dlp_callout" => {
-            "Brakuje yt-dlp. Zainstaluj go albo wybierz yt-dlp.exe w Opcjach."
+            "Brakuje yt-dlp. Zainstaluj go albo wybierz yt-dlp.exe w Informacjach."
         }
         "advance.source" => "Źródło",
+        "advance.analysis" => "Analiza",
+        "advance.force_analysis" => "Wymuś analizę",
         "advance.config" => "Konfiguracja",
         "advance.none" => "Brak",
         "advance.network_access" => "Sieć i dostęp",
@@ -184,7 +248,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "Przeglądarka",
         "advance.default" => "Domyślne",
         "advance.external_downloader" => "Zewnętrzny program pobierający",
-        "advance.use_aria2_for_faster_downloads" => "Użyj Aria2 dla szybszych pobrań",
         "advance.download_control" => "Kontrola pobierania",
         "advance.concurrent_fragments" => "Równoczesne fragmenty",
         "advance.live_streams" => "Transmisje na żywo",

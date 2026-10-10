@@ -1,5 +1,60 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "طريقة تحديد النطاق",
+        "gallery.range.time" => "حسب الوقت",
+        "gallery.range.posts" => "حسب عدد المنشورات",
+        "gallery.range.date" => "تاريخ البداية (UTC)",
+        "gallery.range.count" => "عدد المنشورات (عدد صحيح موجب)",
+        "gallery.range.custom" => "مخصص",
+        "gallery.range.positive" => "عدد صحيح موجب",
+        "gallery.range.invalid" => "أدخل نطاق تنزيل صالحاً.",
+        "gallery.range.invalid_date" => "أدخل تاريخ UTC صالحاً (YYYY-MM-DD).",
+        "gallery.range.help" => "مساعدة",
+        "gallery.range.title" => "نطاق تنزيل الخط الزمني",
+        "gallery.range.time_or_all" => "اختر فترة زمنية أو الكل",
+        "gallery.range.latest" => "آخر {count} منشورات",
+        "gallery.range.recent24h" => "آخر 24 ساعة",
+        "gallery.range.days" => "آخر {days} أيام",
+        "gallery.range.since" => "من {date} (UTC)",
+        "gallery.status.finishing" => "جارٍ الإنهاء",
+        "gallery.status.waiting" => "بانتظار التنزيل",
+        "gallery.status.analyzing" => "جارٍ التحليل",
+        "gallery.posts_count" => "{count} منشورات",
+        "gallery.media_count" => "{count} وسائط",
+        "music.volume" => "مستوى الصوت",
+        "gallery.folder_pending" => "بانتظار التأكيد",
+        "gallery.folder_opened" => "تم فتح المجلد.",
+        "gallery.choice.downloader" => "اختر أداة التنزيل",
+        "gallery.choice.content" => "اختر المحتوى",
+        "gallery.choice.add_title" => "اختر المحتوى للإضافة",
+        "gallery.choice.dual_hint" => "تدعم أداتان هذا الرابط. اختر واحدة على الأقل.",
+        "gallery.choice.origin_hint" => {
+            "اختر المحتوى للتحليل (الوضع الكلاسيكي يدعم نوعاً واحداً في كل مرة)."
+        }
+        "gallery.choice.add_hint" => "اختر المحتوى للإضافة",
+        "gallery.choice.dual_media" => "يمكن إضافة الفيديوهات والصور معاً.",
+        "gallery.choice.one_required" => "اختر أداة تنزيل واحدة.",
+        "gallery.choice.tool_required" => "اختر أداة تنزيل واحدة على الأقل.",
+        "gallery.choice.content_required" => "اختر المحتوى للتحليل أو الإضافة.",
+        "gallery.choice.cancelled" => "تم إلغاء الاختيار.",
+        "gallery.range.help_steps" => "اختر طريقة تحديد النطاق وحدوده ثم أكد لتطبيقه.",
+        "gallery.range.help_multiple" => {
+            "يتوسع هذا المصدر إلى عدة خلاصات. لا يتوفر حد إجمالي للمنشورات؛ اختر فترة زمنية أو الكل."
+        }
+        "gallery.range.help_order" => {
+            "تتبع المنشورات ترتيب الموقع وقد تتضمن منشورات مثبتة. عند إعادة البدء يجري المسح من البداية مع تجاوز الملفات الموجودة."
+        }
+        "gallery.range.help_time" => {
+            "تستخدم تصفية الوقت تواريخ المنشورات. يتجاوز Instagram المنشورات المثبتة القديمة ويتوقف عند منشور عادي خارج النطاق. قد تمسح المصادر الأخرى الخط الزمني كاملاً. عدم توفر تواريخ صالحة يؤدي إلى خطأ."
+        }
+        "about.core_tools" => "الأدوات الأساسية",
+        "about.extension_tools" => "أدوات إضافية",
+        "about.gallery_dl_description" => "ينزّل معارض الصور ومجموعات وسائل التواصل الاجتماعي.",
+        "about.aria2_description" => "أداة تنزيل خارجية لـ yt-dlp؛ يعتمد الأداء على الموقع والاتصال.",
+        "about.required" => "مطلوب",
+        "about.availability.ready" => "جاهز",
+        "about.availability.missing" => "غير موجود",
+        "advance.use_aria2_external_downloader" => "استخدام aria2 كأداة تنزيل خارجية",
         "tab.advanced" => "متقدم",
         "advance.browser_integration" => "تكامل المتصفح",
         "advance.browser_connection" => "اتصال المتصفح",
@@ -17,6 +72,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "الرسالة",
         "about.check_updates" => "التحقق من التحديثات",
         "about.update_all" => "تحديث الكل",
+        "about.install_dependencies" => "تثبيت التبعيات",
         "about.restart" => "إعادة التشغيل",
         "about.open_release" => "فتح Release",
         "about.install" => "تثبيت",
@@ -96,8 +152,10 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.fps" => "FPS",
         "picker.filter.codec" => "الترميز",
         "picker.filter.sample_rate" => "معدل العينة",
-        "main.missing_yt_dlp_callout" => "yt-dlp غير موجود. ثبّته أو اختر yt-dlp.exe من الخيارات.",
+        "main.missing_yt_dlp_callout" => "yt-dlp غير موجود. ثبّته أو اختر yt-dlp.exe من حول.",
         "advance.source" => "المصدر",
+        "advance.analysis" => "التحليل",
+        "advance.force_analysis" => "فرض التحليل",
         "advance.config" => "الإعدادات",
         "advance.none" => "لا شيء",
         "advance.network_access" => "الشبكة والوصول",
@@ -180,7 +238,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "المتصفح",
         "advance.default" => "افتراضي",
         "advance.external_downloader" => "منزّل خارجي",
-        "advance.use_aria2_for_faster_downloads" => "استخدام Aria2 لتنزيل أسرع",
         "advance.download_control" => "التحكم بالتنزيل",
         "advance.concurrent_fragments" => "الأجزاء المتزامنة",
         "advance.live_streams" => "البث المباشر",

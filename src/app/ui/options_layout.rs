@@ -47,10 +47,6 @@ fn options_label_width(ui: &Ui, state: &AppState) -> f32 {
     semantic_ui_metrics::settings_form_label_column_width_for_visible_texts(
         ui,
         &[
-            "yt-dlp",
-            "Deno",
-            "FFmpeg",
-            "Aria2",
             state.ui_i18n_text_for_key("advance.browser_connection"),
             add_action_text,
             clipboard_change_text,

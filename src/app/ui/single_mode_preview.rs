@@ -31,8 +31,11 @@ pub(super) fn render_thumbnail_at(
         ui.make_persistent_id("single-mode-thumbnail"),
         Sense::click(),
     );
-    let thumbnail_source =
-        state.single_thumbnail_render_source_for_url(ui.ctx(), &view.thumbnail_url);
+    let thumbnail_source = state.single_thumbnail_render_source_for_url(
+        ui.ctx(),
+        &view.thumbnail_url,
+        semantic_ui_metrics::single_mode_thumbnail_inner_rect(thumbnail_rect).size(),
+    );
     paint_thumbnail_box(ui, thumbnail_rect, state, view, thumbnail_source);
     if !view.thumbnail_url.is_empty() {
         response.context_menu(|ui| {
@@ -246,9 +249,12 @@ fn paint_thumbnail_box(
     let inner = semantic_ui_metrics::single_mode_thumbnail_inner_rect(rect);
     match thumbnail_source {
         ThumbnailRenderSource::Texture(texture) => {
+            // The template owns the 16:9 thumbnail frame. Fit the actual
+            // texture *inside* it so square avatars are not stretched wide.
+            let image_rect = single_thumbnail_contain_rect(inner, texture.size_vec2());
             ui.painter().image(
                 texture.id(),
-                inner,
+                image_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
@@ -298,6 +304,22 @@ fn paint_thumbnail_box(
         inner,
         state.localize_message(&view.thumbnail_hint).as_str(),
     );
+}
+
+/// Preserve the image aspect ratio within the already allocated thumbnail frame.
+/// Only the image content is fitted; the Taffy slot and surrounding UI do not move.
+fn single_thumbnail_contain_rect(slot: Rect, source_size: egui::Vec2) -> Rect {
+    if slot.width() <= 0.0
+        || slot.height() <= 0.0
+        || !source_size.x.is_finite()
+        || !source_size.y.is_finite()
+        || source_size.x <= 0.0
+        || source_size.y <= 0.0
+    {
+        return slot;
+    }
+    let scale = (slot.width() / source_size.x).min(slot.height() / source_size.y);
+    Rect::from_center_size(slot.center(), source_size * scale)
 }
 
 fn paint_single_duration_badge(ui: &Ui, inner: Rect, duration_text: &str) {

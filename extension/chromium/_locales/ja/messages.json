@@ -1,4 +1,86 @@
 {
+  "albumNotFound": { "message": "アルバムが見つかりません。" },
+  "albumExpired": { "message": "アルバムデータの有効期限が切れました。拡張機能から開き直してください。" },
+  "albumEmpty": { "message": "表示できる項目がありません。" },
+  "galleryPathMissing": { "message": "フォルダーとファイル名の情報がありません。V2 を更新し、再解析してください。" },
+  "galleryPathInvalid": { "message": "gallery-dl のパスをブラウザーのダウンロードフォルダーに安全に保存できません。" },
+  "mediaPermissionRequired": { "message": "ダウンロードには選択したメディアのサイトへのアクセス許可が必要です。" },
+  "browserDownloadInterrupted": { "message": "ブラウザーのダウンロードが中断されました。" },
+  "albumOriginalNoXmp": { "message": "この形式には XMP を埋め込めないため、元の内容を表示します。" },
+  "albumDownloadAuthorized": { "message": "アクセスが許可されました。すべての項目を準備中…" },
+  "albumActions": { "message": "アルバムの選択とダウンロード" },
+  "albumMedia": { "message": "アルバムのメディア" },
+  "albumGrid": { "message": "アルバム一覧" },
+  "post": { "message": "投稿" },
+  "postViewInfo": { "message": "投稿情報を表示" },
+  "postInfo": { "message": "投稿情報" },
+  "postCloseInfo": { "message": "投稿情報を閉じる" },
+  "postEmpty": { "message": "この投稿にはテキストがありません。" },
+  "postOpenOriginal": { "message": "元の投稿を開く" },
+  "albumReading": { "message": "読み込み中…" },
+  "albumReadDone": { "message": "読み込み完了" },
+  "albumReadRetry": { "message": "再読み込み" },
+  "albumReadMore": { "message": "続きを読み込む" },
+  "albumReadHint": { "message": "ここまでスクロールすると次の投稿を自動で読み込みます" },
+  "albumNoMore": { "message": "これ以上の投稿はありません" },
+  "albumProcessingImage": { "message": "画像を処理中…" },
+  "albumWaiting": { "message": "読み込み待ち" },
+  "albumMutedVideoPreview": { "message": "ミュート動画プレビュー" },
+  "creatingZip": { "message": "ZIP を作成中…" },
+  "browserDownloadNoMedia": { "message": "選択した範囲にダウンロード可能なメディアがありません。" },
+  "browserJobStateFailed": { "message": "ダウンロードの状態を保存できません。" },
+  "missingXmpMetadata": { "message": "XMP 情報がありません。拡張機能でこの URL を再解析してください。" },
+  "timelineRangeMethod": { "message": "範囲の指定方法" },
+  "rangePosts": { "message": "投稿数" },
+  "rangeTime": { "message": "期間" },
+  "rangeSinceChoice": { "message": "開始日を指定 (UTC)" },
+  "rangeAll": { "message": "すべて" },
+  "rangeCount": { "message": "投稿数 (正の整数)" },
+  "rangeDays": { "message": "過去の日数" },
+  "rangeDate": { "message": "開始日 (UTC)" },
+  "rangeInvalid": { "message": "有効なダウンロード範囲を入力してください。" },
+  "rangeRecent24h": { "message": "過去 24 時間" },
+  "zipItemsLimit": { "message": "ZIP の上限は 65,535 項目です。" },
+  "zipSizeLimit": { "message": "ZIP が 4 GiB の上限を超えます。選択項目を個別にダウンロードしてください。" },
+  "galleryTimelineUpgradeRequired": { "message": "タイムラインの範囲指定と追加読み込みに対応するには V2 を更新してください。" },
+  "timelineReadFailed": { "message": "タイムラインの読み込みに失敗しました。" },
+  "albumSelected": { "message": "選択 {count}/{total}" },
+  "albumViewItem": { "message": "項目 {number} を拡大表示" },
+  "albumSelectItem": { "message": "項目 {number} を選択" },
+  "albumImage": { "message": "画像 {number}" },
+  "albumProcessingNumber": { "message": "画像 {number} を処理中…" },
+  "albumPreferencesFailed": { "message": "アルバム設定を読み込めません: {message}" },
+  "albumViewerFailed": { "message": "ビューアーを開けません: {message}" },
+  "browserDownloadFailed": { "message": "ブラウザーのダウンロードに失敗しました: {message}" },
+  "processingMedia": { "message": "処理中 {current}/{total} · {name}" },
+  "savingMedia": { "message": "ダウンロード中 {current}/{total} · {name}" },
+  "downloadCompletedXmp": { "message": "{count} 項目完了。XMP を保持しました。" },
+  "downloadCompletedOriginal": { "message": "{count} 項目完了。{unsupported} 項目は XMP 非対応のため元の内容を保持しました。" },
+  "browserJobInterrupted": { "message": "バックグラウンド処理が中断されました。送信済みのファイルは完了している可能性があるため、再試行前にダウンロード履歴を確認してください。" },
+  "timelineReadProgress": { "message": "投稿 {number} からタイムラインを読み込み中…" },
+  "rangeLatest": { "message": "最新 {count} 投稿" },
+  "rangeRecentDays": { "message": "過去 {days} 日間" },
+  "rangeSince": { "message": "{date} 以降 (UTC)" },
+  "albumSettings": { "message": "アルバム設定" },
+  "albumWheelOperation": { "message": "マウスホイール" },
+  "albumWheelZoom": { "message": "ズーム（既定）" },
+  "albumWheelNavigate": { "message": "前／次の項目" },
+  "albumWheelHint": { "message": "ビューアでは上へスクロールで前、下で次の項目。投稿テキストはスクロールできます。" },
+  "albumSettingsFailed": { "message": "アルバム設定を保存できません：{message}" },
+  "analysisTools": { "message": "解析ツール" },
+  "analysisToolsHint": { "message": "次の解析に適用されます。選択と検出結果は拡張機能に保存され、起動時に V2 へ問い合わせません。" },
+  "detectTools": { "message": "ツールを検出" },
+  "toolAvailable": { "message": "利用可能" },
+  "toolUnavailable": { "message": "見つかりません" },
+  "toolNotDetected": { "message": "未検出" },
+  "lastToolDetection": { "message": "前回の検出：{date}" },
+  "toolDetectionDone": { "message": "ツールの状態を更新しました。既存の選択は保持されます。" },
+  "toolDetectionLegacy": { "message": "この V2 は gallery-dl の利用可否を報告できません。V2 を更新してください。" },
+  "toolSettingsFailed": { "message": "ツール設定を更新できません：{message}" },
+  "selectAnalysisTool": { "message": "設定で解析ツールを少なくとも一つ有効にしてください。" },
+  "summaryVideo": { "message": "動画" },
+  "summaryAudio": { "message": "音声" },
+  "album": { "message": "アルバム" },
   "extensionName": {
     "message": "yt-dlp-gui"
   },
@@ -53,9 +135,10 @@
   "playlistLimit": {
     "message": "再生リスト解析上限"
   },
-  "playlistLimitCompact": {
-    "message": "最大"
+  "ytDlpFetchLimit": {
+    "message": "取得上限"
   },
+  "ytDlpFetchLimitHint": { "message": "yt-dlp の再生リスト解析ごとに取得する最大件数（1–100）。" },
   "itemsUnit": {
     "message": "件"
   },
@@ -103,6 +186,9 @@
   },
   "fileNameBaseHint": {
     "message": "拡張子は出力形式で決まります。"
+  },
+  "clearFileName": {
+    "message": "ファイル名をクリア"
   },
   "downloadRange": {
     "message": "ダウンロード範囲"
@@ -272,6 +358,9 @@
   "showFirstItems": {
     "message": "先頭 {count} 件のみ表示"
   },
+  "galleryMediaCount": {
+    "message": "メディア {count} 件"
+  },
   "mediaCountLimit": {
     "message": "{count} 件のメディア · 上限 {limit}"
   },
@@ -287,6 +376,7 @@
   "analysisFailed": {
     "message": "解析に失敗しました：{message}"
   },
+  "retryAnalysis": { "message": "再試行" },
   "noDownloadableMedia": {
     "message": "このページにはダウンロードできる動画または音声がありません。"
   },
@@ -493,5 +583,77 @@
   },
   "supportGenericBadge": {
     "message": "汎用"
+  },
+  "settings": {
+    "message": "設定"
+  },
+  "saveSiteCookies": {
+    "message": "Cookie を yt-dlp-gui に保存"
+  },
+  "saveSiteCookiesHint": {
+    "message": "サイトの登録可能ドメインと、すべてのサブドメイン・パスの Cookie を保存します。通常ウィンドウの解析・ダウンロードでは、送信した Cookie で先に保存ファイルを更新し、v2 の Cookie 設定を使用します。事前の保存操作は不要です。シークレットウィンドウでは自動保存しません。"
+  },
+  "save": {
+    "message": "保存"
+  },
+  "cookieSaveNoPage": {
+    "message": "利用できるサイトがありません。"
+  },
+  "cookieSaveSuccess": {
+    "message": "サイト全体の Cookie を保存しました。通常ウィンドウから Cookie を送信する場合も、先に対応する保存ファイルを更新します。"
+  },
+  "cookieSaveFailed": {
+    "message": "現在のサイトの Cookie を保存できませんでした。"
+  },
+  "cookieSaveAutoUpdateUnavailable": {
+    "message": "Cookie は保存されましたが、この Native Host は自動更新に対応していません。v2 を更新してから、もう一度保存してください。"
+  },
+  "analysisLaunchGalleryDl": {
+    "message": "gallery-dl を実行中"
+  },
+  "browserDownloadDestination": {
+    "message": "ブラウザーの標準ダウンロード先"
+  },
+  "browserDownloadsStarted": {
+    "message": "ブラウザーで {count} 件のダウンロードを開始しました。{failed} 件は開始できませんでした。ダウンロード履歴で確認してください。"
+  },
+  "browserDownloadUnavailable": {
+    "message": "ブラウザーのダウンロード機能を利用できません。"
+  },
+  "galleryAnalysisWarning": {
+    "message": "gallery-dl の部分的な結果：{message}"
+  },
+  "nativeGalleryUpgradeRequired": {
+    "message": "gallery-dl 解析を使用するには yt-dlp-gui-v2 の実行ファイルを更新してください。"
+  },
+  "openAllPostsInNewTab": {
+    "message": "すべての投稿を新しいタブで表示"
+  },
+  "galleryAlbumOpenFailed": {
+    "message": "アルバムを開けません"
+  },
+  "galleryDownloadUrlUnavailable": {
+    "message": "V2でダウンロードする個別投稿URLがありません"
+  },
+  "nativeGalleryDownloadUpgradeRequired": {
+    "message": "gallery-dl のダウンロードには V2 実行ファイルの再ビルドと更新が必要です。"
+  },
+  "galleryDownloadMode": {
+    "message": "保存方法"
+  },
+  "galleryModeV2Direct": {
+    "message": "アプリでダウンロード"
+  },
+  "galleryModeBrowserFiles": {
+    "message": "ブラウザでダウンロード"
+  },
+  "galleryDownloadChoiceSaveFailed": {
+    "message": "保存方法を記録できませんでした：{message}"
+  },
+  "noMatchingExtractor": {
+    "message": "V2 の JSON ルールに、この URL に一致する yt-dlp または gallery-dl の抽出器がありません。"
+  },
+  "nativeAnalysisUpgradeRequired": {
+    "message": "統一 URL 解析を使用するには、V2 実行ファイルを再ビルドして更新してください。"
   }
 }

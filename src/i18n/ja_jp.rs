@@ -1,5 +1,66 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "範囲の指定方法",
+        "gallery.range.time" => "期間",
+        "gallery.range.posts" => "投稿数",
+        "gallery.range.date" => "開始日 (UTC)",
+        "gallery.range.count" => "投稿数 (正の整数)",
+        "gallery.range.custom" => "カスタム",
+        "gallery.range.positive" => "正の整数",
+        "gallery.range.invalid" => "有効なダウンロード範囲を入力してください。",
+        "gallery.range.invalid_date" => "有効な UTC 日付 (YYYY-MM-DD) を入力してください。",
+        "gallery.range.help" => "ヘルプ",
+        "gallery.range.title" => "タイムラインのダウンロード範囲",
+        "gallery.range.time_or_all" => "期間またはすべてを選択してください",
+        "gallery.range.latest" => "最新 {count} 投稿",
+        "gallery.range.recent24h" => "過去 24 時間",
+        "gallery.range.days" => "過去 {days} 日間",
+        "gallery.range.since" => "{date} 以降 (UTC)",
+        "gallery.status.finishing" => "仕上げ中",
+        "gallery.status.waiting" => "ダウンロード待ち",
+        "gallery.status.analyzing" => "解析中",
+        "gallery.posts_count" => "{count} 投稿",
+        "gallery.media_count" => "{count} メディア",
+        "music.volume" => "音量",
+        "gallery.folder_pending" => "確認待ち",
+        "gallery.folder_opened" => "フォルダーを開きました。",
+        "gallery.choice.downloader" => "ダウンローダーを選択",
+        "gallery.choice.content" => "内容を選択",
+        "gallery.choice.add_title" => "追加する内容を選択",
+        "gallery.choice.dual_hint" => {
+            "この URL は 2 つのダウンローダーに対応しています。1 つ以上選択してください。"
+        }
+        "gallery.choice.origin_hint" => {
+            "解析する内容を選択してください (クラシックモードでは一度に 1 種類)。"
+        }
+        "gallery.choice.add_hint" => "追加する内容を選択してください",
+        "gallery.choice.dual_media" => "動画と画像を同時に追加できます。",
+        "gallery.choice.one_required" => "ダウンローダーを 1 つ選択してください。",
+        "gallery.choice.tool_required" => "ダウンローダーを 1 つ以上選択してください。",
+        "gallery.choice.content_required" => "解析または追加する内容を選択してください。",
+        "gallery.choice.cancelled" => "選択をキャンセルしました。",
+        "gallery.range.help_steps" => "範囲の指定方法と範囲を選び、確定すると適用されます。",
+        "gallery.range.help_multiple" => {
+            "このソースは複数のフィードに展開されます。合計投稿数は制限できません。期間またはすべてを選択してください。"
+        }
+        "gallery.range.help_order" => {
+            "投稿数はサイトの順序に従い、固定投稿を含む場合があります。再開時は先頭から調べ、既存ファイルをスキップします。"
+        }
+        "gallery.range.help_time" => {
+            "期間は投稿日時で判定します。Instagram は古い固定投稿をスキップし、範囲外の通常投稿で終了します。他のソースは全件走査する場合があります。有効な日時がない場合はエラーになります。"
+        }
+        "about.core_tools" => "基本ツール",
+        "about.extension_tools" => "追加ツール",
+        "about.gallery_dl_description" => {
+            "画像ギャラリーやソーシャルメディアのコレクションをダウンロードします。"
+        }
+        "about.aria2_description" => {
+            "yt-dlp 用の外部ダウンローダー。性能はサイトと接続に依存します。"
+        }
+        "about.required" => "必須",
+        "about.availability.ready" => "利用可能",
+        "about.availability.missing" => "見つかりません",
+        "advance.use_aria2_external_downloader" => "aria2 を外部ダウンローダーとして使用",
         "tab.advanced" => "詳細",
         "advance.browser_integration" => "ブラウザー連携",
         "advance.browser_connection" => "ブラウザー接続",
@@ -17,6 +78,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "メッセージ",
         "about.check_updates" => "更新確認",
         "about.update_all" => "すべて更新",
+        "about.install_dependencies" => "依存ツールをインストール",
         "about.restart" => "再起動",
         "about.open_release" => "Release を開く",
         "about.install" => "インストール",
@@ -97,9 +159,11 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.codec" => "コーデック",
         "picker.filter.sample_rate" => "サンプルレート",
         "main.missing_yt_dlp_callout" => {
-            "yt-dlpがありません。設定でインストールするかyt-dlp.exeを指定してください。"
+            "yt-dlpがありません。情報でインストールするかyt-dlp.exeを指定してください。"
         }
         "advance.source" => "ソース",
+        "advance.analysis" => "解析",
+        "advance.force_analysis" => "強制解析",
         "advance.config" => "設定ファイル",
         "advance.none" => "なし",
         "advance.network_access" => "ネットワークとアクセス",
@@ -182,7 +246,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "ブラウザー",
         "advance.default" => "既定",
         "advance.external_downloader" => "外部ダウンローダー",
-        "advance.use_aria2_for_faster_downloads" => "Aria2で高速化",
         "advance.download_control" => "ダウンロード制御",
         "advance.concurrent_fragments" => "同時フラグメント",
         "advance.live_streams" => "ライブ配信",

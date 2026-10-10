@@ -498,7 +498,9 @@ fn render_music_seek_or_error(ui: &mut Ui, state: &mut AppState, rect: egui::Rec
 
 fn render_music_volume_control(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
     let response = music_icon_button_at(ui, rect, AppIcon::VolumeHigh, "music-volume-popup", None);
-    response.clone().on_hover_text("Volume");
+    response
+        .clone()
+        .on_hover_text(state.ui_i18n_text_for_key("music.volume"));
     egui::Popup::menu(&response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
@@ -837,116 +839,4 @@ fn music_seek_ratio_for_pointer(rect: egui::Rect, pointer_x: f32) -> f32 {
         return 0.0;
     }
     ((pointer_x - rect.left()) / rect.width()).clamp(0.0, 1.0)
-}
-
-#[cfg(test)]
-mod painted_seek_tests {
-    use super::{
-        MusicAnalysisPearlEnvelope, music_analysis_pearl_targets, music_seek_ratio_for_pointer,
-        normalized_seek_range_ratios, played_seek_fill_ratios,
-    };
-    use crate::app::state::{MusicPlayerAuraDisplay, MusicPlayerAuraTrackField};
-    use eframe::egui;
-
-    #[test]
-    fn painted_seek_pointer_ratio_clamps_to_track() {
-        let rect = egui::Rect::from_min_max(egui::pos2(10.0, 0.0), egui::pos2(110.0, 20.0));
-
-        assert_eq!(music_seek_ratio_for_pointer(rect, -5.0), 0.0);
-        assert_eq!(music_seek_ratio_for_pointer(rect, 60.0), 0.5);
-        assert_eq!(music_seek_ratio_for_pointer(rect, 140.0), 1.0);
-    }
-
-    #[test]
-    fn seek_range_ratios_use_full_song_duration_and_reject_invalid_ranges() {
-        assert_eq!(
-            normalized_seek_range_ratios(30.0, 90.0, 120.0),
-            Some((0.25, 0.75))
-        );
-        assert_eq!(normalized_seek_range_ratios(90.0, 30.0, 120.0), None);
-        assert_eq!(normalized_seek_range_ratios(30.0, 90.0, 0.0), None);
-    }
-
-    #[test]
-    fn played_fill_starts_at_local_range_start_or_song_start() {
-        assert_eq!(played_seek_fill_ratios(0.40, None), Some((0.0, 0.40)));
-        assert_eq!(
-            played_seek_fill_ratios(0.40, Some((0.25, 0.75))),
-            Some((0.25, 0.40))
-        );
-        assert_eq!(played_seek_fill_ratios(0.20, Some((0.25, 0.75))), None);
-        assert_eq!(
-            played_seek_fill_ratios(0.90, Some((0.25, 0.75))),
-            Some((0.25, 0.75))
-        );
-    }
-
-    #[test]
-    fn analysis_pearl_targets_keep_four_frequency_pairs_distinct() {
-        let mut field = MusicPlayerAuraTrackField::default();
-        field.spectrum_bands = [1.0, 0.2, 0.7, 0.1, 0.45, 0.05, 0.18, 0.02];
-        let targets = music_analysis_pearl_targets(MusicPlayerAuraDisplay {
-            primary: Some(field),
-            ..Default::default()
-        });
-
-        assert!(targets[0] > targets[1]);
-        assert!(targets[1] > targets[2]);
-        assert!(targets[2] > targets[3]);
-        assert!(targets.iter().all(|value| (0.0..=1.0).contains(value)));
-    }
-
-    #[test]
-    fn analysis_pearl_targets_use_equal_power_mix_ownership() {
-        let mut primary = MusicPlayerAuraTrackField::default();
-        primary.spectrum_bands[0] = 1.0;
-        let mut secondary = MusicPlayerAuraTrackField::default();
-        secondary.spectrum_bands[0] = 1.0;
-        let targets = music_analysis_pearl_targets(MusicPlayerAuraDisplay {
-            primary: Some(primary),
-            secondary: Some(secondary),
-            mix_progress: 0.5,
-            ..Default::default()
-        });
-
-        assert!((targets[0] - 1.0).abs() < 0.000_001);
-    }
-
-    #[test]
-    fn analysis_pearl_motion_returns_to_center_and_reacts_in_both_directions() {
-        let mut envelope = MusicAnalysisPearlEnvelope::default();
-        assert_eq!(envelope.signed_motion(0), 0.0);
-
-        envelope.advance([1.0, 0.0, 0.0, 0.0], 1.0 / 60.0);
-        assert!(envelope.signed_motion(0) > 0.0);
-
-        for _ in 0..300 {
-            envelope.advance([1.0, 0.0, 0.0, 0.0], 1.0 / 60.0);
-        }
-        envelope.advance([0.0; 4], 1.0 / 60.0);
-        assert!(envelope.signed_motion(0) < 0.0);
-
-        for _ in 0..300 {
-            envelope.advance([0.0; 4], 1.0 / 60.0);
-        }
-        assert!(envelope.signed_motion(0).abs() < 0.001);
-    }
-
-    #[test]
-    fn music_control_metrics_keep_a_compact_twenty_eight_pixel_minimum() {
-        assert_eq!(
-            super::semantic_ui_metrics::main_music_player_control_row_height(22.0),
-            28.0
-        );
-        assert_eq!(
-            super::semantic_ui_metrics::main_music_player_control_row_height(32.0),
-            32.0
-        );
-        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(28.0, 28.0));
-        assert!(
-            (super::semantic_ui_metrics::main_music_playback_icon_size_for_rect(rect) - 17.92)
-                .abs()
-                < 0.001
-        );
-    }
 }

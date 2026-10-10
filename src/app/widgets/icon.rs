@@ -1,8 +1,20 @@
 use eframe::egui::{self, Color32, Image, Ui};
 
+// Capability identity, independent of status/theme/link colors. Browser mirrors
+// these in egui-shadow-theme.css --capability-* tokens.
+pub const VIDEO_CAPABILITY_COLOR: Color32 = Color32::from_rgb(255, 64, 64);
+pub const GALLERY_CAPABILITY_COLOR: Color32 = Color32::from_rgb(88, 166, 255);
+#[allow(dead_code)]
+pub const MUSIC_CAPABILITY_COLOR: Color32 = Color32::from_rgb(30, 215, 96);
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppIcon {
+    Web,
+    PlayBoxOutline,
+    PlaylistPlay,
+    HelpCircleOutline,
+    ImageMultipleOutline,
     CheckboxBlankOutline,
     Check,
     CheckCircle,
@@ -31,6 +43,7 @@ pub enum AppIcon {
     NewBox,
     Package,
     Pause,
+    Stop,
     Play,
     SkipPrevious,
     SkipNext,
@@ -49,6 +62,11 @@ pub enum AppIcon {
 impl AppIcon {
     fn name(self) -> &'static str {
         match self {
+            Self::Web => "Web",
+            Self::PlayBoxOutline => "PlayBoxOutline",
+            Self::PlaylistPlay => "PlaylistPlay",
+            Self::HelpCircleOutline => "HelpCircleOutline",
+            Self::ImageMultipleOutline => "ImageMultipleOutline",
             Self::CheckboxBlankOutline => "CheckboxBlankOutline",
             Self::Check => "Check",
             Self::CheckCircle => "CheckCircle",
@@ -77,6 +95,7 @@ impl AppIcon {
             Self::NewBox => "NewBox",
             Self::Package => "Package",
             Self::Pause => "Pause",
+            Self::Stop => "Stop",
             Self::Play => "Play",
             Self::SkipPrevious => "SkipPrevious",
             Self::SkipNext => "SkipNext",
@@ -95,6 +114,15 @@ impl AppIcon {
 
     fn svg_bytes(self) -> &'static [u8] {
         match self {
+            Self::Web => include_bytes!("../../../assets/icons/Web.svg"),
+            Self::PlayBoxOutline => include_bytes!("../../../assets/icons/PlayBoxOutline.svg"),
+            Self::PlaylistPlay => include_bytes!("../../../assets/icons/PlaylistPlay.svg"),
+            Self::HelpCircleOutline => {
+                include_bytes!("../../../assets/icons/HelpCircleOutline.svg")
+            }
+            Self::ImageMultipleOutline => {
+                include_bytes!("../../../assets/icons/ImageMultipleOutline.svg")
+            }
             Self::CheckboxBlankOutline => {
                 include_bytes!("../../../assets/icons/CheckboxBlankOutline.svg")
             }
@@ -127,6 +155,7 @@ impl AppIcon {
             Self::NewBox => include_bytes!("../../../assets/icons/NewBox.svg"),
             Self::Package => include_bytes!("../../../assets/icons/Package.svg"),
             Self::Pause => include_bytes!("../../../assets/icons/Pause.svg"),
+            Self::Stop => include_bytes!("../../../assets/icons/Stop.svg"),
             Self::Play => include_bytes!("../../../assets/icons/Play.svg"),
             Self::SkipPrevious => include_bytes!("../../../assets/icons/SkipPrevious.svg"),
             Self::SkipNext => include_bytes!("../../../assets/icons/SkipNext.svg"),

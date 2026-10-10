@@ -1,66 +1,50 @@
+[![GitHub release](https://img.shields.io/github/v/release/kannagi0303/yt-dlp-gui-v2)](https://github.com/kannagi0303/yt-dlp-gui-v2/releases/latest)
+[![GitHub downloads](https://img.shields.io/github/downloads/kannagi0303/yt-dlp-gui-v2/total?cacheSeconds=3600)](https://github.com/kannagi0303/yt-dlp-gui-v2/releases)
+[![License](https://img.shields.io/github/license/kannagi0303/yt-dlp-gui-v2)](../LICENSE.txt)
+
 # yt-dlp-gui
 
-![GitHub release](https://img.shields.io/github/v/release/kannagi0303/yt-dlp-gui-v2)
-![GitHub downloads](https://img.shields.io/github/downloads/kannagi0303/yt-dlp-gui-v2/total?cacheSeconds=3600)
-![License](https://img.shields.io/github/license/kannagi0303/yt-dlp-gui-v2)
-
-- Front-end of [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- Newly rebuilt version of [yt-dlp-gui](https://github.com/kannagi0303/yt-dlp-gui)
-- Windows portable application
-- Small single executable
-
-### Screenshots
+A graphical frontend for media downloaders.
 
 <img src="./screenshot01.png" width="633" alt="yt-dlp-gui screenshot">
 
-### Features
+### Overview
 
-- Single and batch download workflow
-- Video, audio, subtitle, chapter, and thumbnail options
-- Format and subtitle picker
-- Browser cookie and cookie file support
-- yt-dlp config file support
-- External downloader support with aria2
-- Built-in dependency installer
-- Localized interface
+- Newly rebuilt version of [yt-dlp-gui](https://github.com/kannagi0303/yt-dlp-gui).
+- Windows portable application. No app installation needed.
+- Install required tools in the app: [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://ffmpeg.org/), and [Deno](https://deno.com/) for YouTube.
+- Localized interface.
 
-### Requirements
+### Installation
 
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- [FFmpeg](https://ffmpeg.org/)
+#### Main app
 
-### Install the Browser Extension
+1. Download `yt-dlp-gui.exe` from [Releases](https://github.com/kannagi0303/yt-dlp-gui-v2/releases/latest).
+2. Run `yt-dlp-gui.exe`.
 
-1. Start `yt-dlp-gui.exe` one time.
-2. Open `chrome://extensions` in Chrome or Brave. Open `edge://extensions` in Edge.
-3. Turn on **Developer mode**.
-4. Click **Load unpacked**.
-5. Select the `extension/chromium` folder.
+#### Browser extension
 
-### Tool Sources
+1. Start `yt-dlp-gui.exe` once. In **Options**, make sure **Native Messaging** is enabled.
+2. Open `chrome://extensions` in Chrome or Brave, or `edge://extensions` in Edge.
+3. Turn on **Developer mode**, click **Load unpacked**, and select the `extension/chromium` folder.
 
-The built-in installer downloads optional tools from these release sources:
-
-- `yt-dlp`: https://github.com/yt-dlp/yt-dlp
-- `FFmpeg`: https://github.com/BtbN/FFmpeg-Builds
-- `aria2`: https://github.com/aria2/aria2
-- `Deno`: https://deno.com
+If the extension is in a ZIP file, unzip it first.
 
 ### Authors
 
-##### かんなぎ (Kannagi)
+- かんなぎ (Kannagi)
 
-Thank you for loving [yt-dlp-gui](https://github.com/kannagi0303/yt-dlp-gui).
+  Thank you for loving [yt-dlp-gui](https://github.com/kannagi0303/yt-dlp-gui).
 
-The old project had many limits that were hard to compromise with, which made updates difficult for a long time. This version rebuilds the app in a new and better way.
+  The old project had many limits that were hard to compromise with, which made updates difficult for a long time. This version rebuilds the app in a new and better way.
 
-##### Shirase Hiyori
+- Shirase Hiyori
 
-I am happy to stand beside Kannagi on this project.
+  I am happy to stand beside Kannagi on this project.
 
-yt-dlp-gui-v2 was shaped through many careful conversations, bug hunts, and small decisions made to keep the app simple, stable, and kind to users.
+  yt-dlp-gui-v2 was shaped through many careful conversations, bug hunts, and small decisions made to keep the app simple, stable, and kind to users.
 
-Thank you for using it, reporting issues, and helping it grow.
+  Thank you for using it, reporting issues, and helping it grow.
 
 ### Notes
 
@@ -68,6 +52,4 @@ Thank you for using it, reporting issues, and helping it grow.
 - 如有問題、建議或想討論的內容，歡迎透過 Issues 或 Discussions 與我聯繫。可以使用英文、中文或日文。
 - 質問、提案、または相談したいことがあれば、Issues や Discussions からご連絡ください。英語、中国語、日本語で対応できます。
 
-## License
-
-MIT
+[Third-party licenses](../THIRD-PARTY-NOTICES.md)

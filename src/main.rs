@@ -209,6 +209,9 @@ impl StartupWindowOptions {
             .unwrap_or_else(|| default_window_size(ui_scale_factor(self.ui_scale_percent)));
 
         let mut viewport = ViewportBuilder::default()
+            // Establish the client-area contract before creating any renderer surface.
+            // winit owns non-client sizing; custom_chrome only adds native hit testing.
+            .with_decorations(false)
             .with_inner_size(size)
             .with_title(self.window_title)
             .with_icon(app_window_icon(startup_icon_theme(self.theme_mode)));

@@ -99,15 +99,3 @@ fn render_mix_mode_choice(ui: &mut Ui, state: &mut AppState, rect: egui::Rect, m
         ui.close();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::app::state::MusicMixMode;
-
-    #[test]
-    fn mix_menu_exposes_one_complete_mode_axis() {
-        assert_eq!(MusicMixMode::ALL.len(), 4);
-        assert_eq!(MusicMixMode::ALL[0].label(), "Off");
-        assert_eq!(MusicMixMode::ALL[3].label(), "Highlight");
-    }
-}

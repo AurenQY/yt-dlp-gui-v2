@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use super::async_http::{self, ClientOptions};
 use super::sha256::sha256_hex_file;
 use super::tool_install::{self, DependencyTool};
 use super::yaml_store::{read_yaml_file, write_yaml_file};
@@ -29,6 +31,10 @@ const YT_DLP_ASSET_NAME: &str = "yt-dlp.exe";
 const YT_DLP_DIRECT_ASSET_URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
 const YT_DLP_LATEST_RELEASE_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest";
+const GALLERY_DL_ASSET_NAME: &str = "gallery-dl.exe";
+const GALLERY_DL_DIRECT_ASSET_URL: &str =
+    "https://codeberg.org/mikf/gallery-dl/releases/download/latest/gallery-dl.exe";
+const GALLERY_DL_LATEST_RELEASE_URL: &str = "https://codeberg.org/mikf/gallery-dl/releases/latest";
 const FFMPEG_ASSET_NAME: &str = "ffmpeg-master-latest-win64-gpl.zip";
 const FFMPEG_DIRECT_ASSET_URL: &str = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
 const FFMPEG_LATEST_RELEASE_URL: &str = "https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest";
@@ -41,6 +47,7 @@ const DENO_LATEST_RELEASE_URL: &str = "https://github.com/denoland/deno/releases
 enum ComponentUpdateProviderKind {
     AppGithubRelease,
     YtDlpNativeLikeRelease,
+    GalleryDlCodebergRelease,
     FfmpegAutoBuildRelease,
     DenoGithubRelease,
     Aria2cGithubRelease,
@@ -74,6 +81,14 @@ fn component_update_provider(id: ManagedComponentId) -> ComponentUpdateProvider 
             direct_release_url: Some(YT_DLP_LATEST_RELEASE_URL),
             direct_asset_url: Some(YT_DLP_DIRECT_ASSET_URL),
         },
+        ManagedComponentId::GalleryDl => ComponentUpdateProvider {
+            kind: ComponentUpdateProviderKind::GalleryDlCodebergRelease,
+            owner: "mikf",
+            repo: "gallery-dl",
+            asset_name: Some(GALLERY_DL_ASSET_NAME),
+            direct_release_url: Some(GALLERY_DL_LATEST_RELEASE_URL),
+            direct_asset_url: Some(GALLERY_DL_DIRECT_ASSET_URL),
+        },
         ManagedComponentId::Ffmpeg => ComponentUpdateProvider {
             kind: ComponentUpdateProviderKind::FfmpegAutoBuildRelease,
             owner: "BtbN",
@@ -105,16 +120,18 @@ fn component_update_provider(id: ManagedComponentId) -> ComponentUpdateProvider 
 pub enum ManagedComponentId {
     App,
     YtDlp,
+    GalleryDl,
     Ffmpeg,
     Deno,
     Aria2c,
 }
 
 impl ManagedComponentId {
-    pub const CORE_TOOLS: [Self; 3] = [Self::YtDlp, Self::Ffmpeg, Self::Deno];
-    pub const ALL: [Self; 5] = [
+    pub const CORE_TOOLS: [Self; 4] = [Self::YtDlp, Self::GalleryDl, Self::Ffmpeg, Self::Deno];
+    pub const ALL: [Self; 6] = [
         Self::App,
         Self::YtDlp,
+        Self::GalleryDl,
         Self::Ffmpeg,
         Self::Deno,
         Self::Aria2c,
@@ -124,6 +141,7 @@ impl ManagedComponentId {
         match self {
             Self::App => "yt-dlp-gui",
             Self::YtDlp => "yt-dlp",
+            Self::GalleryDl => "gallery-dl",
             Self::Ffmpeg => "FFmpeg",
             Self::Deno => "Deno",
             Self::Aria2c => "Aria2",
@@ -138,6 +156,7 @@ impl ManagedComponentId {
         match self {
             Self::App => None,
             Self::YtDlp => Some(DependencyTool::YtDlp),
+            Self::GalleryDl => Some(DependencyTool::GalleryDl),
             Self::Ffmpeg => Some(DependencyTool::Ffmpeg),
             Self::Deno => Some(DependencyTool::Deno),
             Self::Aria2c => Some(DependencyTool::Aria2c),
@@ -147,6 +166,7 @@ impl ManagedComponentId {
     pub fn for_dependency_tool(tool: DependencyTool) -> Self {
         match tool {
             DependencyTool::YtDlp => Self::YtDlp,
+            DependencyTool::GalleryDl => Self::GalleryDl,
             DependencyTool::Ffmpeg => Self::Ffmpeg,
             DependencyTool::Aria2c => Self::Aria2c,
             DependencyTool::Deno => Self::Deno,
@@ -157,6 +177,7 @@ impl ManagedComponentId {
         match self {
             Self::App => "app",
             Self::YtDlp => "yt-dlp",
+            Self::GalleryDl => "gallery-dl",
             Self::Ffmpeg => "ffmpeg",
             Self::Deno => "deno",
             Self::Aria2c => "aria2c",
@@ -253,6 +274,15 @@ impl ComponentUpdateEntry {
 
     pub fn has_update(&self) -> bool {
         matches!(self.status, ComponentUpdateStatus::UpdateAvailable)
+    }
+
+    /// Last-checked App release is informative until the next check, but
+    /// must never be presented as an upgrade if it is older or unparseable.
+    pub fn app_has_newer_checked_release(&self) -> bool {
+        self.id == ManagedComponentId::App
+            && self.latest_version.as_deref().is_some_and(|remote| {
+                app_update_release_is_newer(self.local_version.as_deref(), remote)
+            })
     }
 
     pub fn can_apply_tool_update(&self) -> bool {
@@ -446,12 +476,6 @@ struct DownloadPartMetadata {
     asset_checksum_sha256: Option<String>,
 }
 
-struct HttpResponse {
-    reader: Box<dyn Read>,
-    content_length: Option<u64>,
-    status: u16,
-}
-
 pub struct AppInstanceGuard {
     path: PathBuf,
 }
@@ -532,16 +556,14 @@ struct AppInstanceRecord {
 }
 
 pub fn component_update_cache_snapshot() -> ComponentUpdateSnapshot {
-    let path = manifest_cache_dir().join("state.yaml");
-    let mut snapshot = read_yaml_file::<ComponentUpdateSnapshot>(&path).unwrap_or_default();
+    let mut snapshot = read_component_update_history();
     reset_cached_remote_check_state_for_session(&mut snapshot);
     refresh_snapshot_local_component_state(&mut snapshot);
     snapshot
 }
 
 pub fn component_update_startup_snapshot() -> ComponentUpdateSnapshot {
-    let path = manifest_cache_dir().join("state.yaml");
-    let mut snapshot = read_yaml_file::<ComponentUpdateSnapshot>(&path).unwrap_or_default();
+    let mut snapshot = read_component_update_history();
     reset_cached_remote_check_state_for_session(&mut snapshot);
     refresh_snapshot_local_component_presence(&mut snapshot);
     snapshot
@@ -556,14 +578,19 @@ fn reset_cached_remote_check_state_for_session(snapshot: &mut ComponentUpdateSna
 }
 
 fn reset_cached_entry_remote_check_state_for_session(entry: &mut ComponentUpdateEntry) {
-    if entry.id == ManagedComponentId::App && entry.status == ComponentUpdateStatus::PendingRestart
+    if entry.id == ManagedComponentId::App
+        && entry.status == ComponentUpdateStatus::PendingRestart
+        && pending_app_update_manifest().is_some_and(|manifest| {
+            app_update_release_is_newer(current_app_build_version().as_deref(), &manifest.version)
+        })
     {
         entry.progress = None;
         entry.total_size_bytes = None;
         return;
     }
 
-    entry.latest_version = None;
+    // Keep the last checked remote version as *informational* cached data;
+    // reset its status and URL so an old check never authorizes an update.
     entry.latest_url = None;
     entry.release_notes_markdown = None;
     entry.progress = None;
@@ -581,8 +608,48 @@ fn reset_cached_entry_remote_check_state_for_session(entry: &mut ComponentUpdate
 }
 
 pub fn save_component_update_cache(snapshot: &ComponentUpdateSnapshot) {
-    let path = manifest_cache_dir().join("state.yaml");
-    let _ = write_yaml_file(&path, snapshot);
+    // Persist only the history needed by About. Active transfers, remote
+    // download URLs and release notes are transient and can be large.
+    let mut history = snapshot.clone();
+    history.running = false;
+    history.message.clear();
+    for entry in &mut history.entries {
+        entry.latest_url = None;
+        entry.release_notes_markdown = None;
+        entry.progress = None;
+        entry.total_size_bytes = None;
+        entry.message.clear();
+    }
+    if let Ok(cache) = serde_yaml::to_value(&history) {
+        if super::config::write_runtime_component_update_cache(&cache).is_ok() {
+            // Only remove the legacy file after successful persistence into
+            // the exe-named YAML; do not lose history on a failed save.
+            let _ = fs::remove_file(legacy_component_update_state_path());
+        }
+    }
+}
+
+fn legacy_component_update_state_path() -> PathBuf {
+    manifest_cache_dir().join("state.yaml")
+}
+
+fn read_component_update_history() -> ComponentUpdateSnapshot {
+    if let Some(snapshot) = super::config::read_runtime_component_update_cache()
+        .and_then(|value| serde_yaml::from_value::<ComponentUpdateSnapshot>(value).ok())
+    {
+        // The unified config already contains a usable snapshot; a leftover
+        // standalone file is redundant and must not be imported later.
+        let _ = fs::remove_file(legacy_component_update_state_path());
+        return snapshot;
+    }
+    // One-time import of the old separate state.yaml from existing installs.
+    // If writing the new YAML fails, keep the old file intact for the next run.
+    let legacy_path = legacy_component_update_state_path();
+    let Some(snapshot) = read_yaml_file::<ComponentUpdateSnapshot>(&legacy_path) else {
+        return ComponentUpdateSnapshot::default();
+    };
+    save_component_update_cache(&snapshot);
+    snapshot
 }
 
 pub fn pending_app_update_manifest() -> Option<PendingAppUpdateManifest> {
@@ -964,6 +1031,16 @@ fn update_component_to_entry_with_progress(
     }
     let result = (|| {
         let remote = resolve_remote_release(id, proxy_url)?;
+        if id == ManagedComponentId::App {
+            let local = current_app_build_version();
+            if !app_update_release_is_newer(local.as_deref(), &remote.tag) {
+                return Err(format!(
+                    "App update not started: published release {} is not verified newer than local build {}",
+                    remote.tag,
+                    local.as_deref().unwrap_or("unknown"),
+                ));
+            }
+        }
         entry.latest_version = Some(remote_release_display_version(id, &remote));
         entry.latest_url = remote.url.clone();
         let asset = remote
@@ -1091,7 +1168,28 @@ fn check_component(id: ManagedComponentId, proxy_url: Option<&str>) -> Component
                             &remote,
                         ))
                     });
-            if entry.ownership == ComponentOwnership::Missing {
+            if id == ManagedComponentId::App {
+                match compare_app_release_versions(entry.local_version.as_deref(), &remote.tag) {
+                    None => {
+                        entry.status = ComponentUpdateStatus::Failed;
+                        entry.message =
+                            "Cannot verify App release version; update disabled".to_owned();
+                    }
+                    Some(Ordering::Less) if remote.asset.is_none() => {
+                        entry.status = ComponentUpdateStatus::Failed;
+                        entry.message =
+                            "App release has no compatible Windows x64 asset".to_owned();
+                    }
+                    Some(Ordering::Less) => {
+                        entry.status = ComponentUpdateStatus::UpdateAvailable;
+                        entry.message = "update available".to_owned();
+                    }
+                    Some(Ordering::Equal | Ordering::Greater) => {
+                        entry.status = ComponentUpdateStatus::UpToDate;
+                        entry.message = "up to date".to_owned();
+                    }
+                }
+            } else if entry.ownership == ComponentOwnership::Missing {
                 entry.status = ComponentUpdateStatus::Missing;
                 entry.message = "not installed".to_owned();
             } else if remote_release_matches_comparison(
@@ -1126,7 +1224,8 @@ fn check_component(id: ManagedComponentId, proxy_url: Option<&str>) -> Component
             if matches!(
                 manifest.state,
                 PendingAppUpdateState::DownloadedStaged | PendingAppUpdateState::ApplyRequested
-            ) {
+            ) && app_update_release_is_newer(entry.local_version.as_deref(), &manifest.version)
+            {
                 entry.latest_version = Some(manifest.version);
                 entry.status = ComponentUpdateStatus::PendingRestart;
                 entry.message = "downloaded; restart required".to_owned();
@@ -1148,6 +1247,11 @@ fn resolve_remote_release(
         ManagedComponentId::YtDlp => resolve_release_with_direct_asset_fallback(id, || {
             github_latest_release(id, "yt-dlp", "yt-dlp", proxy_url, |asset| {
                 asset.name.eq_ignore_ascii_case(YT_DLP_ASSET_NAME)
+            })
+        }),
+        ManagedComponentId::GalleryDl => resolve_release_with_direct_asset_fallback(id, || {
+            codeberg_latest_release(id, "mikf", "gallery-dl", proxy_url, |asset| {
+                asset.name.eq_ignore_ascii_case(GALLERY_DL_ASSET_NAME)
             })
         }),
         ManagedComponentId::Ffmpeg => resolve_release_with_direct_asset_fallback(id, || {
@@ -1278,18 +1382,44 @@ fn github_latest_release(
     select_asset: impl Fn(&GithubReleaseAsset) -> bool,
 ) -> Result<RemoteRelease, String> {
     let url = format!("https://api.github.com/repos/{owner}/{repo}/releases/latest");
+    latest_release_from_api(id, &url, proxy_url, select_asset)
+}
+
+fn codeberg_latest_release(
+    id: ManagedComponentId,
+    owner: &str,
+    repo: &str,
+    proxy_url: Option<&str>,
+    select_asset: impl Fn(&GithubReleaseAsset) -> bool,
+) -> Result<RemoteRelease, String> {
+    let url = format!("https://codeberg.org/api/v1/repos/{owner}/{repo}/releases/latest");
+    latest_release_from_api(id, &url, proxy_url, select_asset)
+}
+
+fn latest_release_from_api(
+    id: ManagedComponentId,
+    url: &str,
+    proxy_url: Option<&str>,
+    select_asset: impl Fn(&GithubReleaseAsset) -> bool,
+) -> Result<RemoteRelease, String> {
     let release: GithubRelease = request_json(&url, proxy_url)?;
     let asset = release
         .assets
         .iter()
         .find(|asset| select_asset(asset))
         .or_else(|| {
-            release
-                .assets
-                .iter()
-                .find(|asset| asset.name.ends_with(".zip") || asset.name.ends_with(".exe"))
+            // Never substitute an arbitrary ZIP/EXE for the application: a
+            // mismatched asset will download successfully but fail to stage.
+            (id != ManagedComponentId::App)
+                .then(|| {
+                    release
+                        .assets
+                        .iter()
+                        .find(|asset| asset.name.ends_with(".zip") || asset.name.ends_with(".exe"))
+                })
+                .flatten()
         })
-        .map(|asset| release_asset_from_github(id, &release.assets, asset, proxy_url));
+        .map(|asset| release_asset_from_api(id, &release.assets, asset, proxy_url));
     Ok(RemoteRelease {
         tag: release.tag_name,
         name: release.name,
@@ -1312,7 +1442,7 @@ fn github_latest_release_required_asset(
         .assets
         .iter()
         .find(|asset| select_asset(asset))
-        .map(|asset| release_asset_from_github(id, &release.assets, asset, proxy_url))
+        .map(|asset| release_asset_from_api(id, &release.assets, asset, proxy_url))
         .ok_or_else(|| format!("release asset not found for {owner}/{repo}"))?;
 
     Ok(RemoteRelease {
@@ -1324,7 +1454,7 @@ fn github_latest_release_required_asset(
     })
 }
 
-fn release_asset_from_github(
+fn release_asset_from_api(
     id: ManagedComponentId,
     release_assets: &[GithubReleaseAsset],
     asset: &GithubReleaseAsset,
@@ -1354,6 +1484,7 @@ fn component_release_asset_checksum_sha256(
     let provider = component_update_provider(id);
     match provider.kind {
         ComponentUpdateProviderKind::YtDlpNativeLikeRelease
+        | ComponentUpdateProviderKind::GalleryDlCodebergRelease
         | ComponentUpdateProviderKind::FfmpegAutoBuildRelease
         | ComponentUpdateProviderKind::DenoGithubRelease => {}
         _ => return None,
@@ -1450,7 +1581,14 @@ fn is_sha256_hex(value: &str) -> bool {
 
 fn select_app_asset(asset: &GithubReleaseAsset) -> bool {
     let name = asset.name.to_ascii_lowercase();
-    (name.contains("windows") || name.contains("win"))
+    // The official release publishes `yt-dlp-gui.exe` without an architecture
+    // suffix. Do not fall back to the accompanying `extension.zip`, which is
+    // not an application update and cannot be staged as the executable.
+    if name == "yt-dlp-gui.exe" {
+        return true;
+    }
+    (name.contains("yt-dlp-gui") || name.contains("yt_dlp_gui"))
+        && (name.contains("windows") || name.contains("win"))
         && (name.contains("x64") || name.contains("x86_64") || name.contains("amd64"))
         && (name.ends_with(".zip") || name.ends_with(".exe"))
 }
@@ -1539,6 +1677,9 @@ fn component_update_comparison_version(
     local_version: Option<&str>,
     release_identity: &InstalledReleaseIdentity,
 ) -> Option<String> {
+    if id == ManagedComponentId::App {
+        return local_version.map(str::to_owned);
+    }
     match release_identity {
         InstalledReleaseIdentity::Verified { tag, .. } => Some(tag.clone()),
         InstalledReleaseIdentity::NotRecorded | InstalledReleaseIdentity::FingerprintChanged => {
@@ -1547,6 +1688,40 @@ fn component_update_comparison_version(
                 .flatten()
         }
     }
+}
+
+/// App self-update is only offered when the published, date-tagged release is
+/// strictly newer than the build date embedded in the currently running EXE.
+/// `None` means the versions cannot be compared safely: do not download.
+fn compare_app_release_versions(local: Option<&str>, remote: &str) -> Option<Ordering> {
+    fn date_parts(raw: &str) -> Option<(u32, u32, u32)> {
+        let normalized = normalize_version(raw);
+        let mut parts = normalized.split('.');
+        let year = parts.next()?;
+        let month = parts.next()?;
+        let day = parts.next()?;
+        if parts.next().is_some()
+            || year.len() != 4
+            || month.len() != 2
+            || day.len() != 2
+            || !year.bytes().all(|value| value.is_ascii_digit())
+            || !month.bytes().all(|value| value.is_ascii_digit())
+            || !day.bytes().all(|value| value.is_ascii_digit())
+        {
+            return None;
+        }
+        let date = (
+            year.parse::<u32>().ok()?,
+            month.parse::<u32>().ok()?,
+            day.parse::<u32>().ok()?,
+        );
+        (date.0 >= 2000 && (1..=12).contains(&date.1) && (1..=31).contains(&date.2)).then_some(date)
+    }
+    Some(date_parts(local?)?.cmp(&date_parts(remote)?))
+}
+
+fn app_update_release_is_newer(local: Option<&str>, remote: &str) -> bool {
+    compare_app_release_versions(local, remote) == Some(Ordering::Less)
 }
 
 fn remote_release_matches_comparison(
@@ -1647,6 +1822,7 @@ fn component_release_tag_can_be_inferred_from_local_version(id: ManagedComponent
         id,
         ManagedComponentId::App
             | ManagedComponentId::YtDlp
+            | ManagedComponentId::GalleryDl
             | ManagedComponentId::Deno
             | ManagedComponentId::Aria2c
     )
@@ -1850,23 +2026,29 @@ fn component_ownership(id: ManagedComponentId) -> ComponentOwnership {
 }
 
 fn local_component_version(id: ManagedComponentId) -> Option<String> {
-    match id {
-        ManagedComponentId::App => current_app_build_version(),
-        ManagedComponentId::YtDlp => {
-            command_first_line(tool_path(DependencyTool::YtDlp), &["--version"])
+    if let Some(tool) = id.as_dependency_tool() {
+        return probe_dependency_tool_version(tool, tool.default_portable_path());
+    }
+    current_app_build_version()
+}
+
+/// Shared version probe for the managed release worker and an explicitly
+/// selected executable. Call from a worker thread, never inside egui paint.
+pub fn probe_dependency_tool_version(
+    tool: DependencyTool,
+    configured_path: &str,
+) -> Option<String> {
+    let path = tool_install::resolve_support_path(configured_path);
+    match tool {
+        DependencyTool::YtDlp | DependencyTool::GalleryDl => {
+            command_first_line(path, &["--version"])
         }
-        ManagedComponentId::Ffmpeg => {
-            command_first_line(tool_path(DependencyTool::Ffmpeg), &["-version"])
-                .and_then(|line| line.split_whitespace().nth(2).map(str::to_owned))
-        }
-        ManagedComponentId::Deno => {
-            command_first_line(tool_path(DependencyTool::Deno), &["--version"])
-                .and_then(|line| line.split_whitespace().nth(1).map(str::to_owned))
-        }
-        ManagedComponentId::Aria2c => {
-            command_first_line(tool_path(DependencyTool::Aria2c), &["--version"])
-                .and_then(|line| line.split_whitespace().nth(2).map(str::to_owned))
-        }
+        DependencyTool::Ffmpeg => command_first_line(path, &["-version"])
+            .and_then(|line| line.split_whitespace().nth(2).map(str::to_owned)),
+        DependencyTool::Deno => command_first_line(path, &["--version"])
+            .and_then(|line| line.split_whitespace().nth(1).map(str::to_owned)),
+        DependencyTool::Aria2c => command_first_line(path, &["--version"])
+            .and_then(|line| line.split_whitespace().nth(2).map(str::to_owned)),
     }
 }
 
@@ -1950,6 +2132,17 @@ fn download_asset_resumable_once(
     proxy_url: Option<&str>,
     progress: &mut impl FnMut(DownloadAssetProgress),
 ) -> Result<DownloadedAsset, String> {
+    async_http::block_on(download_asset_resumable_once_async(
+        id, asset, proxy_url, progress,
+    ))
+}
+
+async fn download_asset_resumable_once_async(
+    id: ManagedComponentId,
+    asset: &ReleaseAsset,
+    proxy_url: Option<&str>,
+    progress: &mut impl FnMut(DownloadAssetProgress),
+) -> Result<DownloadedAsset, String> {
     let dir = update_download_dir().join(id.dir_name());
     fs::create_dir_all(&dir)
         .map_err(|error| format!("Could not create {}: {error}", dir.display()))?;
@@ -1962,12 +2155,28 @@ fn download_asset_resumable_once(
         .map(|metadata| metadata.len())
         .unwrap_or(0);
 
-    let mut response = http_get(&asset.url, proxy_url, (existing > 0).then_some(existing))?;
-    let append = existing > 0 && response.status == 206;
+    let mut options = ClientOptions::new(USER_AGENT);
+    options.proxy_url = proxy_url;
+    options.connect_timeout = Duration::from_secs(10);
+    options.read_timeout = Duration::from_secs(20);
+    let client = async_http::build_client(options)?;
+    let headers = (existing > 0)
+        .then(|| vec![("Range".to_owned(), format!("bytes={existing}-"))])
+        .unwrap_or_default();
+    let mut response = async_http::send_get(&client, &asset.url, headers)
+        .await
+        .map_err(|error| format!("Could not download {}: {error}", asset.url))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(format!("Could not download {}: HTTP {status}", asset.url));
+    }
+
+    let response_length = response.content_length();
+    let append = existing > 0 && status == 206;
     let already = if append { existing } else { 0 };
     let total = asset
         .size
-        .or_else(|| response.content_length.map(|len| len + already));
+        .or_else(|| response_length.map(|len| len + already));
     progress(DownloadAssetProgress {
         percent: total.map(|_| 0),
         total_size_bytes: total,
@@ -1985,19 +2194,15 @@ fn download_asset_resumable_once(
     };
 
     let mut downloaded = already;
-    let mut buffer = [0u8; DOWNLOAD_BUFFER];
     let mut last_percent = None;
-    loop {
-        let read = response
-            .reader
-            .read(&mut buffer)
-            .map_err(|error| format!("Could not download {}: {error}", asset.url))?;
-        if read == 0 {
-            break;
-        }
-        file.write_all(&buffer[..read])
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| format!("Could not download {}: {error}", asset.url))?
+    {
+        file.write_all(&chunk)
             .map_err(|error| format!("Could not write {}: {error}", part_path.display()))?;
-        downloaded += read as u64;
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
         let percent = total
             .filter(|total| *total > 0)
             .map(|total| ((downloaded.saturating_mul(100)) / total).min(100) as u8);
@@ -2227,6 +2432,7 @@ fn required_tool_file_names(id: ManagedComponentId, tool: DependencyTool) -> Vec
         ManagedComponentId::Deno => vec!["deno.exe"],
         ManagedComponentId::Aria2c => vec!["aria2c.exe"],
         ManagedComponentId::YtDlp => vec!["yt-dlp.exe"],
+        ManagedComponentId::GalleryDl => vec!["gallery-dl.exe"],
         ManagedComponentId::App => vec![tool.executable_name()],
     }
 }
@@ -2395,6 +2601,12 @@ pub fn launch_pending_app_update(restart: bool) -> Result<(), String> {
 
     let mut manifest = pending_app_update_manifest()
         .ok_or_else(|| "No pending app update was found.".to_owned())?;
+    if !app_update_release_is_newer(current_app_build_version().as_deref(), &manifest.version) {
+        return Err(
+            "Staged App update is not newer than the running build; refusing to replace the EXE."
+                .to_owned(),
+        );
+    }
     if !manifest.staged_exe.is_file() {
         return Err(format!(
             "Staged executable was not found: {}",
@@ -2655,56 +2867,22 @@ fn request_json<T: for<'de> Deserialize<'de>>(
     url: &str,
     proxy_url: Option<&str>,
 ) -> Result<T, String> {
-    let text = request_text(url, proxy_url)?;
-    serde_json::from_str(&text)
-        .map_err(|error| format!("Could not parse response from {url}: {error}"))
+    let mut options = ClientOptions::new(USER_AGENT);
+    options.proxy_url = proxy_url;
+    options.connect_timeout = Duration::from_secs(10);
+    options.read_timeout = Duration::from_secs(20);
+    let client = async_http::build_client(options)?;
+    async_http::block_on(async_http::get_json(&client, url, []))
 }
 
 fn request_text(url: &str, proxy_url: Option<&str>) -> Result<String, String> {
-    let mut response = http_get(url, proxy_url, None)?;
-    let mut text = String::new();
-    response
-        .reader
-        .read_to_string(&mut text)
-        .map_err(|error| format!("Could not read response from {url}: {error}"))?;
-    Ok(text)
-}
-
-fn http_get(
-    url: &str,
-    proxy_url: Option<&str>,
-    range_start: Option<u64>,
-) -> Result<HttpResponse, String> {
-    let mut builder = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(10)))
-        .timeout_recv_response(Some(Duration::from_secs(20)))
-        .timeout_recv_body(Some(Duration::from_secs(20)))
-        .user_agent(USER_AGENT);
-    if let Some(proxy_url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) {
-        let proxy = ureq::Proxy::new(proxy_url)
-            .map_err(|error| format!("Invalid proxy URL {proxy_url}: {error}"))?;
-        builder = builder.proxy(Some(proxy));
-    }
-
-    let agent = builder.build().new_agent();
-    let mut request = agent.get(url);
-    if let Some(start) = range_start {
-        request = request.header("Range", format!("bytes={start}-"));
-    }
-    let response = request
-        .call()
-        .map_err(|error| format!("Could not download {url}: {error}"))?;
-    let status = response.status().as_u16();
-    let content_length = response
-        .headers()
-        .get("content-length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok());
-    Ok(HttpResponse {
-        reader: Box::new(response.into_parts().1.into_reader()),
-        content_length,
-        status,
-    })
+    let mut options = ClientOptions::new(USER_AGENT);
+    options.proxy_url = proxy_url;
+    options.connect_timeout = Duration::from_secs(10);
+    options.read_timeout = Duration::from_secs(20);
+    let client = async_http::build_client(options)?;
+    async_http::block_on(async_http::get_text(&client, url, []))
+        .map_err(|error| format!("Could not read response from {url}: {error}"))
 }
 
 fn extract_zip(zip_path: &Path, destination: &Path) -> Result<(), String> {
@@ -2862,461 +3040,4 @@ fn runtime_instance_dir() -> PathBuf {
     tool_install::portable_temp_cache_dir()
         .join("runtime")
         .join("instances")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ffmpeg_without_release_identity_has_no_safe_comparison_version() {
-        let identity = InstalledReleaseIdentity::NotRecorded;
-
-        assert_eq!(
-            component_update_comparison_version(
-                ManagedComponentId::Ffmpeg,
-                Some("7.1.1"),
-                &identity
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn yt_dlp_without_manifest_can_fallback_to_executable_version() {
-        let identity = InstalledReleaseIdentity::NotRecorded;
-
-        assert_eq!(
-            component_update_comparison_version(
-                ManagedComponentId::YtDlp,
-                Some("2026.06.02"),
-                &identity
-            ),
-            Some("2026.06.02".to_owned())
-        );
-    }
-
-    #[test]
-    fn direct_latest_asset_fallback_uses_fixed_prepare_tool_assets() {
-        let cases = [
-            (
-                ManagedComponentId::YtDlp,
-                YT_DLP_ASSET_NAME,
-                YT_DLP_DIRECT_ASSET_URL,
-            ),
-            (
-                ManagedComponentId::Ffmpeg,
-                FFMPEG_ASSET_NAME,
-                FFMPEG_DIRECT_ASSET_URL,
-            ),
-            (
-                ManagedComponentId::Deno,
-                DENO_ASSET_NAME,
-                DENO_DIRECT_ASSET_URL,
-            ),
-        ];
-
-        for (id, expected_name, expected_url) in cases {
-            let remote = direct_latest_asset_release(id).expect("core tool fallback");
-            let asset = remote.asset.expect("direct fallback asset");
-
-            assert_eq!(asset.name, expected_name);
-            assert_eq!(asset.url, expected_url);
-            assert_eq!(asset.id, None);
-            assert_eq!(asset.size, None);
-        }
-        assert!(direct_latest_asset_release(ManagedComponentId::App).is_none());
-        assert!(direct_latest_asset_release(ManagedComponentId::Aria2c).is_none());
-    }
-
-    #[test]
-    fn action_start_snapshot_replaces_stale_failed_targets() {
-        let mut yt_dlp = ComponentUpdateEntry::new(ManagedComponentId::YtDlp);
-        yt_dlp.status = ComponentUpdateStatus::Failed;
-        yt_dlp.message = "old failed state".to_owned();
-        let mut aria2c = ComponentUpdateEntry::new(ManagedComponentId::Aria2c);
-        aria2c.status = ComponentUpdateStatus::Failed;
-        aria2c.message = "not part of prepare".to_owned();
-        let mut snapshot = ComponentUpdateSnapshot {
-            entries: vec![yt_dlp, aria2c],
-            selected: None,
-            running: true,
-            message: "updating yt-dlp".to_owned(),
-            checked_at_unix: None,
-        };
-
-        mark_action_entries_started(
-            &mut snapshot,
-            &ComponentUpdateAction::UpdateMany(vec![
-                ManagedComponentId::YtDlp,
-                ManagedComponentId::Deno,
-            ]),
-        );
-
-        let yt_dlp = snapshot
-            .entry(ManagedComponentId::YtDlp)
-            .expect("yt-dlp entry");
-        assert_eq!(yt_dlp.status, ComponentUpdateStatus::Checking);
-        assert_eq!(yt_dlp.message, "queued");
-        assert_eq!(yt_dlp.progress, None);
-        let deno = snapshot
-            .entry(ManagedComponentId::Deno)
-            .expect("deno entry");
-        assert_eq!(deno.status, ComponentUpdateStatus::Checking);
-        assert_eq!(deno.message, "queued");
-        assert_eq!(snapshot.selected, Some(ManagedComponentId::YtDlp));
-        assert_eq!(
-            snapshot
-                .entry(ManagedComponentId::Aria2c)
-                .map(|entry| entry.status),
-            Some(ComponentUpdateStatus::Failed)
-        );
-    }
-
-    #[test]
-    fn update_all_targets_skip_optional_missing_components() {
-        let mut aria2c = ComponentUpdateEntry::new(ManagedComponentId::Aria2c);
-        aria2c.ownership = ComponentOwnership::Missing;
-        aria2c.status = ComponentUpdateStatus::Missing;
-        let mut yt_dlp = ComponentUpdateEntry::new(ManagedComponentId::YtDlp);
-        yt_dlp.ownership = ComponentOwnership::Missing;
-        yt_dlp.status = ComponentUpdateStatus::Missing;
-        let snapshot = ComponentUpdateSnapshot {
-            entries: vec![aria2c, yt_dlp],
-            selected: None,
-            running: false,
-            message: String::new(),
-            checked_at_unix: None,
-        };
-
-        assert_eq!(
-            component_update_targets(&snapshot, &ManagedComponentId::ALL, false),
-            vec![ManagedComponentId::YtDlp]
-        );
-        assert_eq!(
-            component_update_targets(&snapshot, &[ManagedComponentId::Aria2c], true),
-            vec![ManagedComponentId::Aria2c]
-        );
-    }
-
-    #[test]
-    fn local_probe_restores_current_version_for_installed_tool_cache_entry() {
-        let mut entry = ComponentUpdateEntry::new(ManagedComponentId::YtDlp);
-        entry.ownership = ComponentOwnership::Missing;
-        entry.status = ComponentUpdateStatus::Failed;
-        entry.message = "old failure".to_owned();
-
-        apply_local_component_probe(
-            &mut entry,
-            ComponentOwnership::ManagedPortable,
-            Some("2026.03.17".to_owned()),
-        );
-
-        assert_eq!(entry.ownership, ComponentOwnership::ManagedPortable);
-        assert_eq!(entry.local_version, Some("2026.03.17".to_owned()));
-        assert_eq!(entry.status, ComponentUpdateStatus::Unknown);
-        assert_eq!(entry.message, "not checked");
-    }
-
-    #[test]
-    fn local_probe_downgrades_stale_up_to_date_for_missing_tool() {
-        let mut entry = ComponentUpdateEntry::new(ManagedComponentId::YtDlp);
-        entry.ownership = ComponentOwnership::ManagedPortable;
-        entry.status = ComponentUpdateStatus::UpToDate;
-        entry.local_version = Some("2026.03.17".to_owned());
-
-        apply_local_component_probe(&mut entry, ComponentOwnership::Missing, None);
-
-        assert_eq!(entry.ownership, ComponentOwnership::Missing);
-        assert_eq!(entry.local_version, None);
-        assert_eq!(entry.status, ComponentUpdateStatus::Missing);
-        assert_eq!(entry.message, "not installed");
-    }
-
-    #[test]
-    fn startup_presence_probe_keeps_cache_for_existing_tool_without_running_it() {
-        assert_eq!(
-            startup_cached_local_version(
-                ManagedComponentId::YtDlp,
-                ComponentOwnership::ManagedPortable,
-                Some("2026.03.17".to_owned()),
-            ),
-            Some("2026.03.17".to_owned())
-        );
-        assert_eq!(
-            startup_cached_local_version(
-                ManagedComponentId::YtDlp,
-                ComponentOwnership::Missing,
-                Some("2026.03.17".to_owned()),
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn verified_release_identity_overrides_executable_version() {
-        let identity = InstalledReleaseIdentity::Verified {
-            tag: "autobuild-2026-06-02".to_owned(),
-            asset_id: Some(42),
-            asset_name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-            asset_size: Some(1024),
-            asset_updated_at: Some("2026-06-02T00:00:00Z".to_owned()),
-        };
-
-        assert_eq!(
-            component_update_comparison_version(
-                ManagedComponentId::Ffmpeg,
-                Some("7.1.1"),
-                &identity
-            ),
-            Some("autobuild-2026-06-02".to_owned())
-        );
-    }
-
-    #[test]
-    fn verified_release_identity_detects_changed_asset_metadata() {
-        let identity = InstalledReleaseIdentity::Verified {
-            tag: "latest".to_owned(),
-            asset_id: Some(42),
-            asset_name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-            asset_size: Some(1024),
-            asset_updated_at: Some("2026-06-02T00:00:00Z".to_owned()),
-        };
-        let remote = RemoteRelease {
-            tag: "latest".to_owned(),
-            name: None,
-            url: None,
-            notes_markdown: None,
-            asset: Some(ReleaseAsset {
-                id: Some(42),
-                name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-                url: "https://example.invalid/ffmpeg.zip".to_owned(),
-                size: Some(2048),
-                updated_at: Some("2026-06-03T00:00:00Z".to_owned()),
-                checksum_sha256: None,
-            }),
-        };
-
-        assert!(!remote_release_matches_comparison(
-            Some("latest"),
-            &identity,
-            &remote
-        ));
-    }
-
-    #[test]
-    fn verified_release_identity_reanchors_when_remote_has_new_metadata() {
-        let identity = InstalledReleaseIdentity::Verified {
-            tag: "latest".to_owned(),
-            asset_id: None,
-            asset_name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-            asset_size: None,
-            asset_updated_at: None,
-        };
-        let remote = RemoteRelease {
-            tag: "latest".to_owned(),
-            name: None,
-            url: None,
-            notes_markdown: None,
-            asset: Some(ReleaseAsset {
-                id: Some(42),
-                name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-                url: "https://example.invalid/ffmpeg.zip".to_owned(),
-                size: Some(2048),
-                updated_at: Some("2026-06-03T00:00:00Z".to_owned()),
-                checksum_sha256: None,
-            }),
-        };
-
-        assert!(!remote_release_matches_comparison(
-            Some("latest"),
-            &identity,
-            &remote
-        ));
-    }
-
-    #[test]
-    fn ffmpeg_latest_release_display_uses_yyyy_mm_dd_build_date() {
-        let remote = RemoteRelease {
-            tag: "latest".to_owned(),
-            name: None,
-            url: None,
-            notes_markdown: None,
-            asset: Some(ReleaseAsset {
-                id: Some(42),
-                name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-                url: "https://example.invalid/ffmpeg.zip".to_owned(),
-                size: Some(2048),
-                updated_at: Some("2026-06-03T00:00:00Z".to_owned()),
-                checksum_sha256: None,
-            }),
-        };
-
-        assert_eq!(
-            remote_release_display_version(ManagedComponentId::Ffmpeg, &remote),
-            "2026.06.03"
-        );
-    }
-
-    #[test]
-    fn ffmpeg_latest_release_display_without_metadata_uses_placeholder() {
-        let remote = RemoteRelease {
-            tag: "latest".to_owned(),
-            name: None,
-            url: None,
-            notes_markdown: None,
-            asset: Some(ReleaseAsset {
-                id: None,
-                name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-                url: "https://example.invalid/ffmpeg.zip".to_owned(),
-                size: None,
-                updated_at: None,
-                checksum_sha256: None,
-            }),
-        };
-
-        assert_eq!(
-            remote_release_display_version(ManagedComponentId::Ffmpeg, &remote),
-            "-"
-        );
-    }
-
-    #[test]
-    fn sha256_hex_file_matches_known_vector() {
-        let dir = std::env::temp_dir().join(format!(
-            "yt-dlp-gui-v2-sha256-test-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).expect("create temp test dir");
-        let path = dir.join("abc.txt");
-        fs::write(&path, b"abc").expect("write test file");
-
-        assert_eq!(
-            sha256_hex_file(&path).expect("hash file"),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn checksum_parser_matches_named_asset_line() {
-        let text = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef  other.exe\n\
-                   ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad *yt-dlp.exe\n";
-
-        assert_eq!(
-            parse_sha256_checksum_for_asset(text, "yt-dlp.exe"),
-            Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_owned())
-        );
-    }
-
-    #[test]
-    fn checksum_asset_candidates_ignore_other_platform_sidecars() {
-        let assets = vec![
-            GithubReleaseAsset {
-                id: Some(1),
-                name: "deno-aarch64-apple-darwin.zip.sha256sum".to_owned(),
-                browser_download_url: "https://example.invalid/apple.sha256sum".to_owned(),
-                size: Some(96),
-                updated_at: None,
-            },
-            GithubReleaseAsset {
-                id: Some(2),
-                name: "deno-x86_64-pc-windows-msvc.zip.sha256sum".to_owned(),
-                browser_download_url: "https://example.invalid/windows.sha256sum".to_owned(),
-                size: Some(178),
-                updated_at: None,
-            },
-            GithubReleaseAsset {
-                id: Some(3),
-                name: "deno-x86_64-pc-windows-msvc.zip".to_owned(),
-                browser_download_url: "https://example.invalid/windows.zip".to_owned(),
-                size: Some(42),
-                updated_at: None,
-            },
-        ];
-
-        let candidates = checksum_assets_for_main_asset(&assets, "deno-x86_64-pc-windows-msvc.zip");
-
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(
-            candidates[0].name,
-            "deno-x86_64-pc-windows-msvc.zip.sha256sum"
-        );
-    }
-
-    #[test]
-    fn direct_fallback_asset_does_not_resume_stale_part_without_identity() {
-        let dir = std::env::temp_dir().join(format!(
-            "yt-dlp-gui-v2-part-identity-test-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).expect("create temp test dir");
-        let part = dir.join("yt-dlp.exe.part");
-        let metadata = dir.join("yt-dlp.exe.part.yaml");
-        fs::write(&part, b"partial").expect("write partial file");
-        fs::write(&metadata, "{}").expect("write metadata file");
-        let asset = direct_latest_asset_release(ManagedComponentId::YtDlp)
-            .expect("direct fallback")
-            .asset
-            .expect("direct fallback asset");
-
-        reset_stale_download_part(&asset, &part, &metadata).expect("reset part");
-
-        assert!(!part.exists());
-        assert!(!metadata.exists());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ffmpeg_external_probe_can_match_remote_build_date() {
-        let remote = RemoteRelease {
-            tag: "latest".to_owned(),
-            name: None,
-            url: None,
-            notes_markdown: None,
-            asset: Some(ReleaseAsset {
-                id: Some(42),
-                name: "ffmpeg-master-latest-win64-gpl.zip".to_owned(),
-                url: "https://example.invalid/ffmpeg.zip".to_owned(),
-                size: Some(2048),
-                updated_at: Some("2026-06-03T00:00:00Z".to_owned()),
-                checksum_sha256: None,
-            }),
-        };
-
-        assert!(remote_release_matches_local_probe(
-            ManagedComponentId::Ffmpeg,
-            Some("N-124739-gbb5c461a47-20260603"),
-            &remote
-        ));
-    }
-
-    #[test]
-    fn file_fingerprint_changes_when_file_is_replaced() {
-        let dir = std::env::temp_dir().join(format!(
-            "yt-dlp-gui-v2-fingerprint-test-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).expect("create temp test dir");
-        let path = dir.join("tool.exe");
-
-        fs::write(&path, b"first-content").expect("write first test file");
-        let first = file_fingerprint(&path).expect("fingerprint first file");
-
-        fs::write(&path, b"second-content").expect("write second test file");
-        let second = file_fingerprint(&path).expect("fingerprint second file");
-
-        let _ = fs::remove_dir_all(&dir);
-        assert_ne!(first.hash_fnv1a64, second.hash_fnv1a64);
-    }
 }

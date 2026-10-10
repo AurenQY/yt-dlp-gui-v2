@@ -1,5 +1,52 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "Range method",
+        "gallery.range.time" => "By time",
+        "gallery.range.posts" => "By post count",
+        "gallery.range.date" => "Start date (UTC)",
+        "gallery.range.count" => "Post count (positive integer)",
+        "gallery.range.custom" => "Custom",
+        "gallery.range.positive" => "Positive integer",
+        "gallery.range.invalid" => "Enter a valid download range.",
+        "gallery.range.invalid_date" => "Enter a valid UTC date (YYYY-MM-DD).",
+        "gallery.range.help" => "Help",
+        "gallery.range.title" => "Timeline download range",
+        "gallery.range.time_or_all" => "Select a time range or all",
+        "gallery.range.latest" => "Latest {count} posts",
+        "gallery.range.recent24h" => "Last 24 hours",
+        "gallery.range.days" => "Last {days} days",
+        "gallery.range.since" => "Since {date} (UTC)",
+        "gallery.status.finishing" => "Finalizing",
+        "gallery.status.waiting" => "Waiting to download",
+        "gallery.status.analyzing" => "Analyzing",
+        "gallery.posts_count" => "{count} posts",
+        "gallery.media_count" => "{count} media",
+        "music.volume" => "Volume",
+        "gallery.folder_pending" => "Pending confirmation",
+        "gallery.folder_opened" => "Folder opened.",
+        "gallery.choice.downloader" => "Select downloader",
+        "gallery.choice.content" => "Select content",
+        "gallery.choice.add_title" => "Select content to add",
+        "gallery.choice.dual_hint" => "Two downloaders support this URL. Select at least one.",
+        "gallery.choice.origin_hint" => {
+            "Choose content to analyze (Classic mode supports one type at a time)."
+        }
+        "gallery.choice.add_hint" => "Choose content to add",
+        "gallery.choice.dual_media" => "Video and images can be added together.",
+        "gallery.choice.one_required" => "Select one downloader.",
+        "gallery.choice.tool_required" => "Select at least one downloader.",
+        "gallery.choice.content_required" => "Select content to analyze or add.",
+        "gallery.choice.cancelled" => "Selection cancelled.",
+        "gallery.range.help_steps" => "Choose a range method, then its bounds. Confirm to apply.",
+        "gallery.range.help_multiple" => {
+            "This source expands into multiple feeds. A total post limit is unavailable; choose a time range or all."
+        }
+        "gallery.range.help_order" => {
+            "Post counts follow site order and may include pinned posts. Restarting scans from the beginning and skips existing files."
+        }
+        "gallery.range.help_time" => {
+            "Time filtering uses post dates. Instagram skips old pinned posts and stops at an ordinary post outside the range. Other sources may scan the whole timeline. Missing valid dates cause an error."
+        }
         "tab.advanced" => "Advanced",
         "advance.browser_integration" => "Browser extension",
         "advance.browser_connection" => "Native Messaging",
@@ -9,14 +56,24 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser_connection_disabled_message" => "Browser extension connection disabled.",
         "tab.about" => "About",
         "about.tools" => "Tool versions",
+        "about.core_tools" => "Core tools",
+        "about.extension_tools" => "Additional tools",
+        "about.gallery_dl_description" => "Downloads image galleries and social-media collections.",
+        "about.aria2_description" => {
+            "External downloader for yt-dlp; performance depends on the site and connection."
+        }
         "about.current_version" => "Current",
         "about.latest_version" => "Latest",
         "about.author" => "Author",
         "about.source" => "Source",
+        "about.required" => "Required",
+        "about.availability.ready" => "Ready",
+        "about.availability.missing" => "Not found",
         "about.status" => "Status",
         "about.message" => "Message",
         "about.check_updates" => "Check updates",
         "about.update_all" => "Update all",
+        "about.install_dependencies" => "Install dependencies",
         "about.restart" => "Restart",
         "about.open_release" => "Open Release",
         "about.install" => "Install",
@@ -95,9 +152,11 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.codec" => "Codec",
         "picker.filter.sample_rate" => "Sample rate",
         "main.missing_yt_dlp_callout" => {
-            "yt-dlp is missing. Install it or choose yt-dlp.exe in Options."
+            "yt-dlp is missing. Install it or choose yt-dlp.exe in About."
         }
         "advance.source" => "Source",
+        "advance.analysis" => "Analysis",
+        "advance.force_analysis" => "Force analysis",
         "advance.config" => "Config",
         "advance.none" => "None",
         "advance.network_access" => "Network & Access",
@@ -180,7 +239,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "Browser",
         "advance.default" => "Default",
         "advance.external_downloader" => "External downloader",
-        "advance.use_aria2_for_faster_downloads" => "Use Aria2 for faster downloads",
+        "advance.use_aria2_external_downloader" => "Use aria2 as the external downloader",
         "advance.download_control" => "Download control",
         "advance.concurrent_fragments" => "Concurrent fragments",
         "advance.live_streams" => "Live streams",

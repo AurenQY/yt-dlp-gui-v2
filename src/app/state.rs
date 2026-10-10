@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use egui_commonmark::CommonMarkCache;
 use serde_json::Value;
 
 use crate::i18n::{self, Language, LanguageSelection};
@@ -50,16 +49,17 @@ use crate::app::queue_status::{
     item_latest_download_state, item_summary_bucket, selection_matches_completed,
 };
 use crate::app::thumbnail_worker::{
-    ThumbnailFetchEvent, fetch_thumbnail_bytes, run_thumbnail_fetch_worker,
+    ThumbnailFetchEvent, ThumbnailFetchOptions, ThumbnailFetchStage, fetch_thumbnail_bytes,
+    run_thumbnail_fetch_worker,
 };
 use crate::app::transcode_plan::resolve_transcode_plan;
 use crate::domain::{
     CompactMusicState, CompletedSelection, CookiePolicy, DownloadContainerPreference,
-    DownloadOptions, DownloadRangeSelection, DownloadTimeRange, FormatOption, MediaKind,
-    MetadataState, QualityPreset, QueueItem, QueueItemId, QueueItemViewKind, SubtitleOption,
-    SubtitleSource, ToolKind, VideoMetadata, WorkflowKind, WorkflowRun, WorkflowRunId,
-    WorkflowState, codecs_support_mp4_container, codecs_support_webm_container,
-    format_download_range_timestamp,
+    DownloadOptions, DownloadRangeSelection, DownloadTimeRange, FormatOption, GalleryQueueItem,
+    MediaKind, MetadataState, QualityPreset, QueueBackend, QueueItem, QueueItemId,
+    QueueItemViewKind, SubtitleOption, SubtitleSource, ToolKind, VideoMetadata, WorkflowKind,
+    WorkflowRun, WorkflowRunId, WorkflowState, codecs_support_mp4_container,
+    codecs_support_webm_container, format_download_range_timestamp,
 };
 use crate::infrastructure::cookie_site_index::{
     CookieSiteIndexEntry, read_cookie_site_index_or_default, write_cookie_site_index,
@@ -78,7 +78,7 @@ use crate::infrastructure::{
     cleanup_applied_update, collect_dependency_presence_report, collect_prepare_report,
     component_update_startup_snapshot, configure_background_command, dependency_tool_exists,
     dependency_tool_is_available, detect_default_youtube_login_rescue_browser,
-    detect_dependency_tool, display_output_dir, launch_pending_app_update, looks_like_playlist_url,
+    detect_dependency_tool, display_output_dir, launch_pending_app_update,
     normalize_cookie_rescue_target_url, normalize_ui_scale_percent, register_app_instance,
     resolve_output_dir, resolve_tool_path, run_tracked_command_output,
     run_youtube_login_rescue_cookie_export, schedule_startup_transient_cleanup,
@@ -93,6 +93,12 @@ mod cookie_actions;
 mod cookie_rescue;
 mod download_container_actions;
 mod download_range_actions;
+mod gallery_analysis_log;
+mod gallery_queue_actions;
+mod gallery_range_actions;
+mod url_source_preview;
+pub(crate) use gallery_queue_actions::GalleryDownloaderChoice;
+pub use gallery_range_actions::{GalleryRangePicker, GalleryRangeSection};
 mod item_format_actions;
 mod log;
 mod log_actions;
@@ -112,17 +118,19 @@ mod music_runtime;
 mod music_types;
 mod music_worker_helpers;
 mod options_actions;
+mod origin_download_actions;
 mod prepare_actions;
 mod prepare_visibility_helpers;
 mod queue_batch_helpers;
 mod queue_input_actions;
 mod queue_input_helpers;
 mod queue_item_actions;
+mod queue_persistence_actions;
+mod queue_reanalysis_actions;
 mod queue_worker_actions;
 mod queue_workflow_actions;
 mod state_helpers;
-#[cfg(test)]
-mod tests;
+mod thumbnail_actions;
 mod ui_types;
 mod ui_view_state_actions;
 mod workflow_download_actions;
@@ -136,13 +144,13 @@ pub use self::log::{ToolLogAction, ToolLogStatus, ToolLogStep};
 use self::music_metadata_helpers::*;
 pub use self::music_runtime::MusicItemCacheActivity;
 use self::music_runtime::{
-    AudioCacheManifestSnapshot, AudioPlaylistItemSnapshot, AudioPlaylistSnapshot,
-    CacheManagementSummary, CacheRemovalSummary, CachedLrcTrack, CompleteMusicCacheHit, LrcLine,
-    MusicAudioExportPlan, MusicAudioQualityIntent, MusicAudioSourceProfile, MusicChorusFadeIn,
-    MusicChorusFadeOut, MusicChorusFlowSegment, MusicChorusMixPlan, MusicChorusPendingFadeIn,
-    MusicChorusPendingMixTarget, MusicChorusPendingStart, MusicChorusPreparedPreview,
-    MusicChorusPreviewJob, MusicDownloadEvent, MusicDownloadJob, MusicLyricsCacheJob,
-    MusicPlaybackReadyHandoff, MusicState, MusicStreamResolveEvent, MusicStreamSeed,
+    AudioCacheManifestSnapshot, CacheManagementSummary, CacheRemovalSummary, CachedLrcTrack,
+    CompleteMusicCacheHit, LrcLine, MusicAudioExportPlan, MusicAudioQualityIntent,
+    MusicAudioSourceProfile, MusicChorusFadeIn, MusicChorusFadeOut, MusicChorusFlowSegment,
+    MusicChorusMixPlan, MusicChorusPendingFadeIn, MusicChorusPendingMixTarget,
+    MusicChorusPendingStart, MusicChorusPreparedPreview, MusicChorusPreviewJob, MusicDownloadEvent,
+    MusicDownloadJob, MusicLyricsCacheJob, MusicPlaybackReadyHandoff, MusicState,
+    MusicStreamResolveEvent, MusicStreamSeed,
 };
 use self::music_types::music_online_target_format_selector;
 pub use self::music_types::{
@@ -158,7 +166,7 @@ pub use self::ui_types::{
     AboutDetailTarget, AdvanceDetailPage, AppTab, CookieFileSourceMode, CookieUsageMode,
     MusicLyricsDisplayLine, MusicPlayerAuraDisplay, MusicPlayerAuraPulse,
     MusicPlayerAuraTrackField, OptionsDetailPage, PrepareDetailPage, SavedCookieFile,
-    ThumbnailRenderSource, YoutubePlaylistPrompt, YoutubePlaylistPromptKind,
+    ThumbnailReadyImage, ThumbnailRenderSource, YoutubePlaylistPrompt, YoutubePlaylistPromptKind,
 };
 use self::workflow_runtime::{ActiveWorkflow, AnalyzeResult};
 

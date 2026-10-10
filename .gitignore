@@ -1,11 +1,17 @@
 # Rust build output.
 /target/
+/extension/xmp-wasm/target/
 
 # Private Codex workspace state and machine-first notes.
 /notes/
 /AGENTS.md
 /.agents/
 /.codex/
+
+# Local data / notice preparation tools; builds consume prepared inputs.
+/scripts/
+/assets/third-party/
+/resources/
 
 # Local user-facing and generated documentation.
 /docs/

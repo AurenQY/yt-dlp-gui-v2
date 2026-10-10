@@ -1,4 +1,86 @@
 {
+  "albumNotFound": { "message": "找不到相簿。" },
+  "albumExpired": { "message": "相簿資料已失效，請從外掛重新開啟。" },
+  "albumEmpty": { "message": "相簿沒有可瀏覽的項目。" },
+  "galleryPathMissing": { "message": "缺少資料夾與檔名資訊，請更新 v2 並重新分析。" },
+  "galleryPathInvalid": { "message": "gallery-dl 的路徑無法安全存入瀏覽器下載資料夾。" },
+  "mediaPermissionRequired": { "message": "需要允許存取所選媒體的網站，才能下載。" },
+  "browserDownloadInterrupted": { "message": "瀏覽器下載已中斷。" },
+  "albumOriginalNoXmp": { "message": "此格式未嵌入 XMP，顯示原始內容。" },
+  "albumDownloadAuthorized": { "message": "已取得下載授權，準備下載全部項目…" },
+  "albumActions": { "message": "相簿選取與下載" },
+  "albumMedia": { "message": "相簿媒體" },
+  "albumGrid": { "message": "對齊式相簿" },
+  "post": { "message": "貼文" },
+  "postViewInfo": { "message": "查看貼文資訊" },
+  "postInfo": { "message": "貼文資訊" },
+  "postCloseInfo": { "message": "關閉貼文資訊" },
+  "postEmpty": { "message": "這篇貼文沒有文字內容。" },
+  "postOpenOriginal": { "message": "開啟原始貼文" },
+  "albumReading": { "message": "讀取中…" },
+  "albumReadDone": { "message": "已讀取完畢" },
+  "albumReadRetry": { "message": "重試讀取" },
+  "albumReadMore": { "message": "繼續讀取" },
+  "albumReadHint": { "message": "捲動至此，自動讀取後續貼文" },
+  "albumNoMore": { "message": "已沒有更多貼文" },
+  "albumProcessingImage": { "message": "處理圖片…" },
+  "albumWaiting": { "message": "等待載入" },
+  "albumMutedVideoPreview": { "message": "靜音影片預覽" },
+  "creatingZip": { "message": "正在建立 ZIP…" },
+  "browserDownloadNoMedia": { "message": "所選範圍沒有可下載的媒體。" },
+  "browserJobStateFailed": { "message": "無法保存下載工作狀態。" },
+  "missingXmpMetadata": { "message": "缺少 XMP 資訊，請回到外掛重新分析此網址。" },
+  "timelineRangeMethod": { "message": "範圍方式" },
+  "rangePosts": { "message": "按篇數" },
+  "rangeTime": { "message": "按時間" },
+  "rangeSinceChoice": { "message": "指定起始日期（UTC）" },
+  "rangeAll": { "message": "全部" },
+  "rangeCount": { "message": "篇數（正整數）" },
+  "rangeDays": { "message": "最近幾天" },
+  "rangeDate": { "message": "起始日期（UTC）" },
+  "rangeInvalid": { "message": "請輸入有效的下載範圍。" },
+  "rangeRecent24h": { "message": "最近 24 小時" },
+  "zipItemsLimit": { "message": "ZIP 格式最多容納 65,535 個項目。" },
+  "zipSizeLimit": { "message": "這份 ZIP 超過 4 GiB 上限；請改用下載選取項目。" },
+  "galleryTimelineUpgradeRequired": { "message": "請更新 v2，以支援 timeline 範圍與相簿續讀。" },
+  "timelineReadFailed": { "message": "Timeline 讀取失敗。" },
+  "albumSelected": { "message": "已選 {count}/{total}" },
+  "albumViewItem": { "message": "放大檢視第 {number} 項" },
+  "albumSelectItem": { "message": "選取第 {number} 項" },
+  "albumImage": { "message": "圖片 {number}" },
+  "albumProcessingNumber": { "message": "處理圖片 {number}…" },
+  "albumPreferencesFailed": { "message": "無法讀取相簿設定：{message}" },
+  "albumViewerFailed": { "message": "無法開啟檢視器：{message}" },
+  "browserDownloadFailed": { "message": "瀏覽器下載失敗：{message}" },
+  "processingMedia": { "message": "處理 {current}/{total} · {name}" },
+  "savingMedia": { "message": "下載 {current}/{total} · {name}" },
+  "downloadCompletedXmp": { "message": "完成 {count} 個項目。已保留 XMP 資訊。" },
+  "downloadCompletedOriginal": { "message": "完成 {count} 個項目。其中 {unsupported} 個格式不支援 XMP，保留原始內容。" },
+  "browserJobInterrupted": { "message": "背景工作已中斷；已交付瀏覽器的檔案可能已完成，請檢查下載紀錄後再重試。" },
+  "timelineReadProgress": { "message": "讀取 timeline · 第 {number} 篇起…" },
+  "rangeLatest": { "message": "最新 {count} 篇" },
+  "rangeRecentDays": { "message": "最近 {days} 天" },
+  "rangeSince": { "message": "自 {date} 起（UTC）" },
+  "albumSettings": { "message": "相簿設置" },
+  "albumWheelOperation": { "message": "滾輪操作" },
+  "albumWheelZoom": { "message": "縮放（預設）" },
+  "albumWheelNavigate": { "message": "上一張／下一張" },
+  "albumWheelHint": { "message": "檢視時向上滾為上一張，向下滾為下一張；貼文文字區仍可捲動。" },
+  "albumSettingsFailed": { "message": "無法儲存相簿設定：{message}" },
+  "analysisTools": { "message": "分析工具" },
+  "analysisToolsHint": { "message": "套用於下次分析。勾選與上次偵測結果會保存在外掛，開啟時不會額外查詢 v2。" },
+  "detectTools": { "message": "偵測工具" },
+  "toolAvailable": { "message": "可用" },
+  "toolUnavailable": { "message": "未找到" },
+  "toolNotDetected": { "message": "未偵測" },
+  "lastToolDetection": { "message": "上次偵測：{date}" },
+  "toolDetectionDone": { "message": "已更新工具狀態；已有的勾選偏好不會被覆蓋。" },
+  "toolDetectionLegacy": { "message": "此版本 v2 無法回報 gallery-dl 可用性；請更新 v2 以偵測兩套工具。" },
+  "toolSettingsFailed": { "message": "無法更新工具設定：{message}" },
+  "selectAnalysisTool": { "message": "請在設定中啟用至少一個分析工具。" },
+  "summaryVideo": { "message": "影片" },
+  "summaryAudio": { "message": "聲音" },
+  "album": { "message": "相簿" },
   "extensionName": {
     "message": "yt-dlp-gui"
   },
@@ -53,9 +135,10 @@
   "playlistLimit": {
     "message": "清單分析上限"
   },
-  "playlistLimitCompact": {
-    "message": "最多分析"
+  "ytDlpFetchLimit": {
+    "message": "抓取上限"
   },
+  "ytDlpFetchLimitHint": { "message": "每次 yt-dlp 清單分析最多抓取的項目數（1–100）。" },
   "itemsUnit": {
     "message": "項"
   },
@@ -103,6 +186,9 @@
   },
   "fileNameBaseHint": {
     "message": "副檔名由輸出格式決定。"
+  },
+  "clearFileName": {
+    "message": "清除檔名"
   },
   "downloadRange": {
     "message": "下載範圍"
@@ -272,6 +358,9 @@
   "showFirstItems": {
     "message": "僅顯示前 {count} 項"
   },
+  "galleryMediaCount": {
+    "message": "{count} 個媒體"
+  },
   "mediaCountLimit": {
     "message": "{count} 個媒體 · 上限 {limit}"
   },
@@ -287,6 +376,7 @@
   "analysisFailed": {
     "message": "分析失敗：{message}"
   },
+  "retryAnalysis": { "message": "重試" },
   "noDownloadableMedia": {
     "message": "此頁面沒有可下載的影片或音訊。"
   },
@@ -493,5 +583,77 @@
   },
   "supportGenericBadge": {
     "message": "通用"
+  },
+  "settings": {
+    "message": "設置"
+  },
+  "saveSiteCookies": {
+    "message": "傳送 Cookie 至 yt-dlp-gui 保存"
+  },
+  "saveSiteCookiesHint": {
+    "message": "保存目前網站主網域及其所有子網域、路徑的 Cookie。一般視窗分析、下載傳送 Cookie 至 v2 時，會先更新對應存檔，再沿用 v2 設定的 Cookie 來源；不必先按保存。無痕視窗不自動保存。"
+  },
+  "save": {
+    "message": "保存"
+  },
+  "cookieSaveNoPage": {
+    "message": "目前沒有可使用的網站。"
+  },
+  "cookieSaveSuccess": {
+    "message": "已保存此網站完整範圍的 Cookie。一般視窗傳送 Cookie 至 v2 時，也會先更新對應存檔。"
+  },
+  "cookieSaveFailed": {
+    "message": "無法保存目前網站的 Cookie。"
+  },
+  "cookieSaveAutoUpdateUnavailable": {
+    "message": "Cookie 已保存，但目前 Native Host 尚未支援自動更新；請更新 v2 後再按一次保存。"
+  },
+  "analysisLaunchGalleryDl": {
+    "message": "執行 gallery-dl"
+  },
+  "browserDownloadDestination": {
+    "message": "由瀏覽器下載至預設下載資料夾"
+  },
+  "browserDownloadsStarted": {
+    "message": "瀏覽器已開始下載 {count} 個檔案；未能開始 {failed} 個。請在瀏覽器下載紀錄確認結果。"
+  },
+  "browserDownloadUnavailable": {
+    "message": "瀏覽器下載功能不可用。"
+  },
+  "galleryAnalysisWarning": {
+    "message": "gallery-dl 部分結果：{message}"
+  },
+  "nativeGalleryUpgradeRequired": {
+    "message": "請更新 yt-dlp-gui-v2 執行檔，才能使用 gallery-dl 分析。"
+  },
+  "openAllPostsInNewTab": {
+    "message": "在新分頁檢視全部貼文"
+  },
+  "galleryAlbumOpenFailed": {
+    "message": "無法開啟相簿"
+  },
+  "galleryDownloadUrlUnavailable": {
+    "message": "無法取得可供 V2 下載的單篇貼文網址"
+  },
+  "nativeGalleryDownloadUpgradeRequired": {
+    "message": "請重新編譯並更新 V2 執行檔，以啟用 gallery-dl 下載。"
+  },
+  "galleryDownloadMode": {
+    "message": "下載方式"
+  },
+  "galleryModeV2Direct": {
+    "message": "應用程式下載"
+  },
+  "galleryModeBrowserFiles": {
+    "message": "瀏覽器下載"
+  },
+  "galleryDownloadChoiceSaveFailed": {
+    "message": "無法保存下載方式：{message}"
+  },
+  "noMatchingExtractor": {
+    "message": "V2 的 JSON 規則中，沒有符合這個網址的 yt-dlp 或 gallery-dl 解析器。"
+  },
+  "nativeAnalysisUpgradeRequired": {
+    "message": "請重新編譯並更新 V2 執行檔，才能使用統一網址分析。"
   }
 }

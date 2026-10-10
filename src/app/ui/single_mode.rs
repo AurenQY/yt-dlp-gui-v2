@@ -1,8 +1,10 @@
 use eframe::egui::{self, Rect, Ui};
 use egui_taffy::Tui;
 
+use crate::app::gallery_metadata_mapping::map_gallery_ui_metadata;
 use crate::app::state::AppState;
 use crate::app::widgets::url_input::{AppTextBox, AppTextBoxSyntax};
+use crate::domain::QueueBackend;
 
 use super::semantic_ui_metrics;
 use super::single_mode_format_rows::single_mode_format_row_count;
@@ -22,6 +24,7 @@ pub(super) fn build_single_mode_item(tui: &mut Tui, state: &mut AppState, row_he
 pub(super) struct SingleModeLayoutMetrics {
     pub(super) title_height: f32,
     pub(super) format_area_height: f32,
+    pub(super) gallery_media: bool,
     pub(super) right_checkbox_height: f32,
     pub(super) right_thumbnail_height: f32,
     pub(super) right_info_height: f32,
@@ -32,12 +35,24 @@ impl SingleModeLayoutMetrics {
         let row_height = row_height.max(24.0);
         let title_height =
             semantic_ui_metrics::single_mode_title_field_height_for_control_height(row_height);
-        let format_row_height = super::item_card::item_row_block_height();
-        let format_row_count = single_mode_format_row_count(state);
+        let gallery_media = state
+            .queue_items
+            .first()
+            .is_some_and(|item| matches!(&item.backend, QueueBackend::GalleryDl(_)));
+        let format_row_height = if gallery_media {
+            semantic_ui_metrics::item_card_field_row_height()
+        } else {
+            super::item_card::item_row_block_height()
+        };
+        let format_row_count = if gallery_media {
+            super::single_mode_gallery::row_count(state)
+        } else {
+            single_mode_format_row_count(state)
+        };
         let format_row_gaps =
             format_row_count.saturating_sub(1) as f32 * super::item_card::item_detail_row_gap();
         let format_area_height = format_row_height * format_row_count as f32 + format_row_gaps;
-        let right_checkbox_height = row_height;
+        let right_checkbox_height = if gallery_media { 0.0 } else { row_height };
         let right_column_width = right_column_width_for_layout_width(layout_width);
         let right_thumbnail_height =
             semantic_ui_metrics::single_mode_thumbnail_row_height_for_right_column_width(
@@ -48,6 +63,7 @@ impl SingleModeLayoutMetrics {
         Self {
             title_height,
             format_area_height,
+            gallery_media,
             right_checkbox_height,
             right_thumbnail_height,
             right_info_height,
@@ -77,6 +93,41 @@ impl SingleModeView {
         let Some(item) = state.queue_items.first() else {
             return Self::empty(state);
         };
+
+        if let QueueBackend::GalleryDl(gallery) = &item.backend {
+            // Saved queue summaries are offline card previews, not analyzed Classic content.
+            if item.needs_analysis_refresh || gallery.analysis.is_none() {
+                return Self::empty(state);
+            }
+            if let Some(analysis) = gallery.analysis.as_ref() {
+                let mapped = map_gallery_ui_metadata(analysis);
+                let thumbnail_url = if mapped.thumbnail.is_empty() {
+                    mapped.thumbnail_fallback.clone()
+                } else {
+                    mapped.thumbnail.clone()
+                };
+                return Self {
+                    title: mapped.title,
+                    description: mapped.description,
+                    title_hint: state.ui_i18n_text_for_key("single.title").to_owned(),
+                    description_hint: state.ui_i18n_text_for_key("single.description").to_owned(),
+                    thumbnail_hint: state.ui_i18n_text_for_key("item.thumbnail").to_owned(),
+                    // Match the gallery card's first-media preview.
+                    thumbnail_url,
+                    duration_text: crate::i18n::format_text(
+                        state.language(),
+                        "gallery.media_count",
+                        &[("{count}", &mapped.media_count.to_string())],
+                    ),
+                    webpage_url: mapped.source.url,
+                    creator_name: mapped.author,
+                    creator_url: String::new(),
+                    upload_date: mapped.date,
+                    view_count: String::new(),
+                    status_lines,
+                };
+            }
+        }
 
         if let Some(metadata) = item.metadata() {
             return Self {

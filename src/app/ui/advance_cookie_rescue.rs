@@ -256,7 +256,7 @@ fn render_youtube_login_rescue_confirm(ui: &mut Ui, state: &mut AppState, dialog
             .raw
             .dropped_files
             .iter()
-            .filter_map(|file| file.path.clone())
+            .map(|file| file.path().to_path_buf())
             .collect::<Vec<_>>()
     });
     if !dropped_paths.is_empty() {

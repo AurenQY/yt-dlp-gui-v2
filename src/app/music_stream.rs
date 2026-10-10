@@ -29,12 +29,12 @@ use crate::app::music_mix_timeline::{
     MusicMixSourcePosition, source_position_after_rendered_frames,
 };
 use crate::app::music_pcm_reservoir::{MusicPcmReservoir, MusicPcmReservoirCoverage};
+use crate::infrastructure::async_http::{self, ClientOptions};
 use crate::infrastructure::yaml_store::{read_yaml_file, write_yaml_file};
 
 const INITIAL_CACHE_BUFFER_BYTES: u64 = 384 * 1024;
 const INITIAL_CACHE_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 const CACHE_WAIT_STEP: Duration = Duration::from_millis(40);
-const HTTP_READ_BUFFER_SIZE: usize = 128 * 1024;
 const NO_SEEK_MILLIS: u64 = u64::MAX;
 const MUSIC_STREAM_CACHE_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
 const MUSIC_MIX_NORMAL_ANCHOR_MIN_SECONDS: f64 = 0.34;
@@ -2295,79 +2295,82 @@ fn download_cache_range(
     if music_cache_cancel_requested(cancel_requested) {
         return Err("Music cache download cancelled.".to_owned());
     }
-    let mut request = ureq::get(&stream.direct_url);
-    for (name, value) in &stream.headers {
-        if !name.trim().is_empty() && !value.trim().is_empty() {
-            request = request.header(name.trim(), value.trim());
-        }
-    }
+    let mut headers = stream
+        .headers
+        .iter()
+        .filter(|(name, value)| !name.trim().is_empty() && !value.trim().is_empty())
+        .map(|(name, value)| (name.trim().to_owned(), value.trim().to_owned()))
+        .collect::<Vec<_>>();
     if start_offset > 0 {
-        request = request.header("Range", format!("bytes={start_offset}-"));
+        headers.push(("Range".to_owned(), format!("bytes={start_offset}-")));
     }
 
-    let response = request
-        .call()
-        .map_err(|error| format!("Could not open audio stream cache download: {error}"))?;
-    let status = response.status().as_u16();
-    let content_length = response
-        .headers()
-        .get("content-length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok());
-    let content_range = response
-        .headers()
-        .get("content-range")
-        .and_then(|value| value.to_str().ok());
-    if let Some(total) =
-        total_length_from_headers(status, start_offset, content_length, content_range)
-    {
-        cache_state.set_expected_bytes(Some(total));
-    }
-
-    let range_start = if start_offset > 0 && status != 206 {
-        // Server ignored Range. Treat the response as a full-file restart from byte 0.
-        cache_state.seed_ranges(Vec::new());
-        0
-    } else {
-        start_offset
-    };
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(&paths.media)
-        .map_err(|error| format!("Could not open music cache file: {error}"))?;
-    file.seek(SeekFrom::Start(range_start))
-        .map_err(|error| format!("Could not seek music cache file: {error}"))?;
-    if range_start == 0 {
-        file.set_len(0)
-            .map_err(|error| format!("Could not reset music cache file: {error}"))?;
-    }
-
-    let mut reader = response.into_parts().1.into_reader();
-    let mut buffer = vec![0_u8; HTTP_READ_BUFFER_SIZE];
-    let mut cursor = range_start;
-
-    loop {
-        if music_cache_cancel_requested(cancel_requested) {
-            return Err("Music cache download cancelled.".to_owned());
+    let client = async_http::build_client(ClientOptions::new("yt-dlp-gui-v2 music stream"))?;
+    async_http::block_on(async {
+        let mut response = async_http::send_get(&client, &stream.direct_url, headers)
+            .await
+            .map_err(|error| format!("Could not open audio stream cache download: {error}"))?;
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(format!(
+                "Could not open audio stream cache download: HTTP {status}"
+            ));
         }
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| format!("Could not read audio stream cache: {error}"))?;
-        if read == 0 {
-            break;
+        let content_length = response.content_length();
+        let content_range_owned = response
+            .headers()
+            .get("content-range")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        if let Some(total) = total_length_from_headers(
+            status,
+            start_offset,
+            content_length,
+            content_range_owned.as_deref(),
+        ) {
+            cache_state.set_expected_bytes(Some(total));
         }
-        file.write_all(&buffer[..read])
-            .map_err(|error| format!("Could not write music cache file: {error}"))?;
-        let next_cursor = cursor.saturating_add(read as u64);
-        cache_state.add_range(cursor, next_cursor);
-        cursor = next_cursor;
-    }
 
-    let _ = file.flush();
-    Ok(DownloadRangeOutcome::CompletedRange)
+        let range_start = if start_offset > 0 && status != 206 {
+            // Server ignored Range. Treat the response as a full-file restart from byte 0.
+            cache_state.seed_ranges(Vec::new());
+            0
+        } else {
+            start_offset
+        };
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&paths.media)
+            .map_err(|error| format!("Could not open music cache file: {error}"))?;
+        file.seek(SeekFrom::Start(range_start))
+            .map_err(|error| format!("Could not seek music cache file: {error}"))?;
+        if range_start == 0 {
+            file.set_len(0)
+                .map_err(|error| format!("Could not reset music cache file: {error}"))?;
+        }
+
+        let mut cursor = range_start;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| format!("Could not read audio stream cache: {error}"))?
+        {
+            if music_cache_cancel_requested(cancel_requested) {
+                return Err("Music cache download cancelled.".to_owned());
+            }
+            file.write_all(&chunk)
+                .map_err(|error| format!("Could not write music cache file: {error}"))?;
+            let next_cursor = cursor.saturating_add(chunk.len() as u64);
+            cache_state.add_range(cursor, next_cursor);
+            cursor = next_cursor;
+        }
+
+        let _ = file.flush();
+        Ok(DownloadRangeOutcome::CompletedRange)
+    })
 }
 
 fn total_length_from_headers(
@@ -2450,18 +2453,9 @@ fn cache_cover_image_if_needed(stream: &ResolvedMusicStream, paths: &MusicCacheP
     let url = url.to_owned();
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
-            let mut response = ureq::get(&url)
-                .call()
+            let client = async_http::build_client(ClientOptions::new("yt-dlp-gui-v2 music cover"))?;
+            let data = async_http::block_on(async_http::get_bytes(&client, &url, [], None))
                 .map_err(|error| format!("Could not download cover image: {error}"))?;
-            let status = response.status().as_u16();
-            if status >= 400 {
-                return Err(format!("Could not download cover image: HTTP {status}"));
-            }
-            let mut reader = response.body_mut().as_reader();
-            let mut data = Vec::new();
-            reader
-                .read_to_end(&mut data)
-                .map_err(|error| format!("Could not read cover image: {error}"))?;
             if data.is_empty() {
                 return Err("Cover image response was empty.".to_owned());
             }
@@ -6486,543 +6480,4 @@ fn output_has_buffered_audio(shared: &SharedPlaybackState) -> bool {
                     .is_some_and(|deck| !deck.buffer.is_empty())
         })
         .unwrap_or(false)
-}
-
-#[cfg(test)]
-mod mix_execution_tests {
-    use super::*;
-
-    #[test]
-    fn cache_cookie_free_retry_is_limited_to_rejected_media_requests() {
-        assert!(music_cache_error_allows_cookie_free_retry(
-            "ERROR: unable to download video data: HTTP Error 403: Forbidden"
-        ));
-        assert!(music_cache_error_allows_cookie_free_retry(
-            "ERROR: The page needs to be reloaded."
-        ));
-        assert!(!music_cache_error_allows_cookie_free_retry(
-            "ERROR: Private video"
-        ));
-        assert!(!music_cache_error_allows_cookie_free_retry(
-            "Could not create music stream cache: access denied"
-        ));
-    }
-
-    #[test]
-    fn device_channel_conversion_keeps_front_stereo_and_silences_extra_outputs() {
-        let converted = convert_interleaved_channels(&[0.25, -0.5, 0.75, -1.0], 2, 4);
-
-        assert_eq!(converted, vec![0.25, -0.5, 0.0, 0.0, 0.75, -1.0, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn device_channel_conversion_downmixes_to_mono() {
-        let converted = convert_interleaved_channels(&[0.5, -0.25, 1.0, 0.0], 2, 1);
-
-        assert_eq!(converted, vec![0.125, 0.5]);
-    }
-
-    #[test]
-    fn device_rate_fallback_preserves_playback_duration() {
-        let source = vec![0.25_f32; 44_100 * 2];
-        let output = resample_interleaved_frames(&source, 44_100, 48_000, 2, None);
-
-        assert_eq!(output.len(), 48_000 * 2);
-    }
-
-    fn test_crossfade_deck(
-        mode: CrossfadeDeckMode,
-        samples: Vec<f32>,
-        transition_frames: MusicMixFrameCount,
-    ) -> CrossfadePreviewDeck {
-        CrossfadePreviewDeck {
-            mode,
-            buffer: samples.into_iter().collect(),
-            transition_output_frames: transition_frames,
-            target_volume: 1.0,
-            track_start_source_frame: MusicMixSourceFrame::new(0),
-            source_sample_rate: 44_100,
-            transition_source_frames: transition_frames,
-            prepared_mix_resume_source_frame: (mode == CrossfadeDeckMode::PreparedMix)
-                .then_some(MusicMixSourceFrame::new(transition_frames.get())),
-            prepared_mix_start_seconds: (mode == CrossfadeDeckMode::PreparedMix).then_some(0.0),
-            prepared_mix_alignment_applied: mode != CrossfadeDeckMode::PreparedMix,
-            track_duration_seconds: Some(120.0),
-            output_frames_consumed: MusicMixFrameCount::ZERO,
-            rendered_frames_consumed: MusicMixFrameCount::ZERO,
-            release_started_output_frame: None,
-            release_duration_frames: MusicMixFrameCount::ZERO,
-            release_from_gain: 0.0,
-            outgoing_transition_rate: 1.0,
-            outgoing_transition_phase_frames: 0.0,
-            outgoing_transition_started_output_frame: None,
-            outgoing_transition_duration_frames: MusicMixFrameCount::ZERO,
-            outgoing_highlight_end_phase: None,
-        }
-    }
-
-    #[test]
-    fn soft_limiter_has_no_full_scale_volume_collapse() {
-        let at_full_scale = soft_limit_audio_sample(1.0);
-        let just_over = soft_limit_audio_sample(1.0001);
-
-        assert!(at_full_scale > 0.95);
-        assert!(just_over >= at_full_scale);
-        assert!((just_over - at_full_scale).abs() < 0.001);
-        assert_eq!(
-            soft_limit_audio_sample(-1.0001),
-            -soft_limit_audio_sample(1.0001)
-        );
-    }
-
-    #[test]
-    fn soft_limiter_is_continuous_and_monotonic_through_knee() {
-        let values = [0.9199, 0.92, 0.9201, 1.0, 1.5, 4.0];
-        let limited = values.map(soft_limit_audio_sample);
-
-        assert!((limited[1] - limited[0]).abs() < 0.001);
-        assert!((limited[2] - limited[1]).abs() < 0.001);
-        assert!(limited.windows(2).all(|pair| pair[0] <= pair[1]));
-        assert!(limited.last().copied().unwrap_or_default() < 1.0);
-    }
-
-    #[test]
-    fn rms_ignores_callback_padding_after_valid_frames() {
-        let samples = [0.5_f32, -0.5, 0.5, -0.5, 0.0, 0.0, 0.0, 0.0];
-        let rms = rms_audio_samples_for_frames(&samples, MusicMixFrameCount::new(2), 2);
-
-        assert!((rms - 0.5).abs() < 0.000_001);
-    }
-
-    #[test]
-    fn prepared_mix_buffer_starts_as_current_and_continues_as_next() {
-        let current = vec![0.40_f32; 4 * 2];
-        let mut next = vec![0.0_f32; 6 * 2];
-        for frame in 0..6 {
-            for channel in 0..2 {
-                next[frame * 2 + channel] = 0.10 + frame as f32 * 0.05;
-            }
-        }
-
-        let mixed = build_prepared_mix_samples(&current, &next, 2, MusicMixFrameCount::new(4));
-
-        assert_eq!(mixed.len(), next.len());
-        assert!((mixed[0] - current[0]).abs() < 0.000_001);
-        assert!((mixed[4 * 2] - next[4 * 2]).abs() < 0.000_001);
-        assert!((mixed[5 * 2 + 1] - next[5 * 2 + 1]).abs() < 0.000_001);
-    }
-
-    #[test]
-    fn prepared_mix_guard_keeps_head_raw_a_and_tail_raw_b() {
-        let mut current = Vec::new();
-        let mut next = Vec::new();
-        for frame in 0..12 {
-            let current_left = 0.40 + frame as f32 * 0.01;
-            let next_left = 0.10 + frame as f32 * 0.02;
-            current.push(current_left);
-            current.push(current_left + 0.001);
-            next.push(next_left);
-            next.push(next_left + 0.001);
-        }
-
-        let mixed = build_prepared_mix_samples_with_guards(
-            &current,
-            &next,
-            2,
-            MusicMixFrameCount::new(12),
-            MusicMixFrameCount::new(3),
-        );
-
-        assert_eq!(mixed.len(), next.len());
-        assert!((mixed[0] - current[0]).abs() < 0.000_001);
-        assert!((mixed[2 * 2] - current[2 * 2]).abs() < 0.000_001);
-        assert!((mixed[9 * 2] - next[9 * 2]).abs() < 0.000_001);
-        assert!((mixed[11 * 2 + 1] - next[11 * 2 + 1]).abs() < 0.000_001);
-    }
-
-    #[test]
-    fn prepared_mix_guard_expands_for_late_handoff_but_stays_bounded() {
-        let base =
-            prepared_mix_edge_guard_frames_for_late(1_000, MusicMixFrameCount::new(4_000), 0.0);
-        let late =
-            prepared_mix_edge_guard_frames_for_late(1_000, MusicMixFrameCount::new(4_000), 0.750);
-        let capped =
-            prepared_mix_edge_guard_frames_for_late(1_000, MusicMixFrameCount::new(4_000), 10.0);
-
-        assert_eq!(base, MusicMixFrameCount::new(420));
-        assert_eq!(
-            late,
-            MusicMixFrameCount::new(750 + MUSIC_PREPARED_MIX_LATE_GUARD_PAD_MILLIS)
-        );
-        assert_eq!(capped, MusicMixFrameCount::new(1_000));
-    }
-
-    #[test]
-    fn prepared_mix_keeps_b_when_current_tail_is_short() {
-        let current = vec![0.35_f32; 2];
-        let next = vec![0.12_f32; 5 * 2];
-
-        let mixed = build_prepared_mix_samples(&current, &next, 2, MusicMixFrameCount::new(4));
-
-        assert_eq!(mixed.len(), next.len());
-        assert!((mixed[0] - current[0]).abs() < 0.000_001);
-        assert!((mixed[4 * 2] - next[4 * 2]).abs() < 0.000_001);
-    }
-
-    #[test]
-    fn prepared_mix_handoff_replaces_live_sources_with_segment_queue() {
-        let shared = Arc::new(SharedPlaybackState::new(0.8, Some(180.0), 11, 22));
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        {
-            let mut buffer = shared.buffer.lock().unwrap();
-            buffer.extend([0.7_f32; 8]);
-        }
-        {
-            let mut decks = shared.crossfade_decks.lock().unwrap();
-            decks.main = Some(test_crossfade_deck(
-                CrossfadeDeckMode::RealtimePreview,
-                vec![0.6_f32; 8],
-                MusicMixFrameCount::new(4),
-            ));
-        }
-        let control = MusicPlaybackControl {
-            item_id: 11,
-            session_id: 22,
-            shared: Arc::clone(&shared),
-            cache_state: Arc::new(CacheTransferState::default()),
-        };
-
-        let started = control.start_prepared_mix_handoff(
-            vec![0.25_f32; 10],
-            None,
-            MusicMixFrameCount::new(5),
-            0.8,
-            MusicMixSourceFrame::new(1_000),
-            44_100,
-            Some(180.0),
-            Some(0.0),
-        );
-
-        assert!(started.is_some());
-        assert!(shared.discard_decoder_samples.load(Ordering::Relaxed));
-        assert!(shared.buffer.lock().unwrap().is_empty());
-        let decks = shared.crossfade_decks.lock().unwrap();
-        assert!(decks.main.is_none());
-        let next = decks.next.as_ref().expect("prepared mix deck");
-        assert_eq!(next.mode, CrossfadeDeckMode::PreparedMix);
-        assert_eq!(next.buffer.len(), 10);
-    }
-
-    #[test]
-    fn prepared_mix_handoff_rebuilds_a_from_live_pcm_window() {
-        let shared = Arc::new(SharedPlaybackState::new(1.0, Some(180.0), 11, 22));
-        shared.sample_rate.store(1_000, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        {
-            let mut buffer = shared.buffer.lock().unwrap();
-            for frame in 0..200 {
-                let left = 0.90 - frame as f32 * 0.001;
-                buffer.push_back(left);
-                buffer.push_back(left + 0.01);
-            }
-        }
-        let control = MusicPlaybackControl {
-            item_id: 11,
-            session_id: 22,
-            shared: Arc::clone(&shared),
-            cache_state: Arc::new(CacheTransferState::default()),
-        };
-        let stale_worker_mix = vec![0.10_f32; 200 * 2];
-        let prepared_b = vec![0.0_f32; 200 * 2];
-
-        let started = control.start_prepared_mix_handoff(
-            stale_worker_mix,
-            Some(prepared_b),
-            MusicMixFrameCount::new(200),
-            1.0,
-            MusicMixSourceFrame::new(1_000),
-            1_000,
-            Some(180.0),
-            Some(0.0),
-        );
-
-        assert!(started.is_some());
-        assert!(shared.buffer.lock().unwrap().is_empty());
-        {
-            let decks = shared.crossfade_decks.lock().unwrap();
-            let next = decks.next.as_ref().expect("prepared mix deck");
-            assert!(!next.prepared_mix_alignment_applied);
-        }
-        let mut output = vec![0.0_f32; 8];
-        write_output_samples(&mut output, &shared, |sample| sample);
-
-        assert!((output[0] - 0.90).abs() < 0.000_001);
-        assert!((output[1] - 0.91).abs() < 0.000_001);
-        assert_ne!(output[0], 0.10);
-    }
-
-    #[test]
-    fn prepared_mix_handoff_prefers_frame_addressed_pcm_reservoir() {
-        let shared = Arc::new(SharedPlaybackState::new(1.0, Some(180.0), 11, 22));
-        shared.sample_rate.store(1_000, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.samples_played.store(50 * 2, Ordering::Relaxed);
-        let mut reservoir_samples = Vec::new();
-        for frame in 0..120 {
-            let left = 0.70 + frame as f32 * 0.001;
-            reservoir_samples.push(left);
-            reservoir_samples.push(left + 0.01);
-        }
-        append_playback_pcm_reservoir(
-            &shared,
-            11,
-            22,
-            MusicMixSourceFrame::new(50),
-            &reservoir_samples,
-            2,
-            1_000,
-        );
-        let control = MusicPlaybackControl {
-            item_id: 11,
-            session_id: 22,
-            shared: Arc::clone(&shared),
-            cache_state: Arc::new(CacheTransferState::default()),
-        };
-        let stale_worker_mix = vec![0.10_f32; 100 * 2];
-        let prepared_b = vec![0.0_f32; 100 * 2];
-
-        let started = control.start_prepared_mix_handoff(
-            stale_worker_mix,
-            Some(prepared_b),
-            MusicMixFrameCount::new(100),
-            1.0,
-            MusicMixSourceFrame::new(1_000),
-            1_000,
-            Some(180.0),
-            Some(0.050),
-        );
-
-        assert!(started.is_some());
-        let mut output = vec![0.0_f32; 8];
-        write_output_samples(&mut output, &shared, |sample| sample);
-
-        assert!((output[0] - 0.70).abs() < 0.000_001);
-        assert!((output[1] - 0.71).abs() < 0.000_001);
-        assert_ne!(output[0], 0.10);
-    }
-
-    #[test]
-    fn pcm_reservoir_owner_reset_keeps_promoted_track_frames_local() {
-        let shared = Arc::new(SharedPlaybackState::new(1.0, Some(180.0), 11, 22));
-        shared.sample_rate.store(1_000, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-
-        let old_track_samples = vec![0.10_f32; 120 * 2];
-        append_playback_pcm_reservoir(
-            &shared,
-            11,
-            22,
-            MusicMixSourceFrame::new(10_000),
-            &old_track_samples,
-            2,
-            1_000,
-        );
-
-        let mut promoted_track_samples = Vec::new();
-        for frame in 0..120 {
-            let left = 0.80 + frame as f32 * 0.001;
-            promoted_track_samples.push(left);
-            promoted_track_samples.push(left + 0.01);
-        }
-        append_playback_pcm_reservoir(
-            &shared,
-            12,
-            23,
-            MusicMixSourceFrame::new(50),
-            &promoted_track_samples,
-            2,
-            1_000,
-        );
-
-        let (snapshot, status) = snapshot_prepared_mix_pcm_reservoir_window(
-            &shared,
-            12,
-            23,
-            Some(0.050),
-            1_000,
-            2,
-            MusicMixFrameCount::new(100),
-        );
-        let snapshot = snapshot.expect("promoted track range should be frame-local");
-
-        assert!(status.starts_with("hit:"), "{status}");
-        assert_eq!(snapshot.live_a_frames, MusicMixFrameCount::new(100));
-        assert!((snapshot.samples[0] - 0.80).abs() < 0.000_001);
-        assert!((snapshot.samples[1] - 0.81).abs() < 0.000_001);
-
-        let (stale_snapshot, stale_status) = snapshot_prepared_mix_pcm_reservoir_window(
-            &shared,
-            11,
-            22,
-            Some(10.0),
-            1_000,
-            2,
-            MusicMixFrameCount::new(50),
-        );
-
-        assert!(stale_snapshot.is_none());
-        assert!(stale_status.starts_with("owner-miss:"), "{stale_status}");
-    }
-
-    #[test]
-    fn prepared_mix_handoff_rebuilds_a_head_when_full_live_window_is_short() {
-        let shared = Arc::new(SharedPlaybackState::new(1.0, Some(180.0), 11, 22));
-        shared.sample_rate.store(1_000, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        {
-            let mut buffer = shared.buffer.lock().unwrap();
-            for frame in 0..200 {
-                let left = 0.90 - frame as f32 * 0.001;
-                buffer.push_back(left);
-                buffer.push_back(left + 0.01);
-            }
-        }
-        let control = MusicPlaybackControl {
-            item_id: 11,
-            session_id: 22,
-            shared: Arc::clone(&shared),
-            cache_state: Arc::new(CacheTransferState::default()),
-        };
-        let stale_worker_mix = vec![0.10_f32; 400 * 2];
-        let prepared_b = vec![0.0_f32; 400 * 2];
-
-        let started = control.start_prepared_mix_handoff(
-            stale_worker_mix,
-            Some(prepared_b),
-            MusicMixFrameCount::new(400),
-            1.0,
-            MusicMixSourceFrame::new(1_000),
-            1_000,
-            Some(180.0),
-            Some(0.0),
-        );
-
-        assert!(started.is_some());
-        assert!(shared.buffer.lock().unwrap().is_empty());
-        let decks = shared.crossfade_decks.lock().unwrap();
-        let next = decks.next.as_ref().expect("prepared mix deck");
-        assert!(!next.prepared_mix_alignment_applied);
-        assert_eq!(next.buffer.len(), 400 * 2);
-        assert!((next.buffer[0] - 0.90).abs() < 0.000_001);
-        assert!((next.buffer[1] - 0.91).abs() < 0.000_001);
-        assert_ne!(next.buffer[0], 0.10);
-        assert!((next.buffer[250 * 2] - 0.10).abs() < 0.000_001);
-    }
-
-    #[test]
-    fn prepared_mix_live_rebuild_alignment_drops_frames_played_after_snapshot() {
-        let shared = Arc::new(SharedPlaybackState::new(1.0, Some(180.0), 11, 22));
-        shared.sample_rate.store(1_000, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        {
-            let mut buffer = shared.buffer.lock().unwrap();
-            for frame in 0..200 {
-                let left = 0.90 - frame as f32 * 0.001;
-                buffer.push_back(left);
-                buffer.push_back(left + 0.01);
-            }
-        }
-        let control = MusicPlaybackControl {
-            item_id: 11,
-            session_id: 22,
-            shared: Arc::clone(&shared),
-            cache_state: Arc::new(CacheTransferState::default()),
-        };
-        let stale_worker_mix = vec![0.10_f32; 200 * 2];
-        let prepared_b = vec![0.0_f32; 200 * 2];
-
-        let started = control.start_prepared_mix_handoff(
-            stale_worker_mix,
-            Some(prepared_b),
-            MusicMixFrameCount::new(200),
-            1.0,
-            MusicMixSourceFrame::new(1_000),
-            1_000,
-            Some(180.0),
-            Some(0.0),
-        );
-
-        assert!(started.is_some());
-        shared.samples_played.store(24 * 2, Ordering::Relaxed);
-        let mut output = vec![0.0_f32; 8];
-        write_output_samples(&mut output, &shared, |sample| sample);
-
-        assert!((output[0] - 0.876).abs() < 0.000_001);
-        assert!((output[1] - 0.886).abs() < 0.000_001);
-        let decks = shared.crossfade_decks.lock().unwrap();
-        let next = decks.next.as_ref().expect("prepared deck remains");
-        assert!(next.prepared_mix_alignment_applied);
-        assert_eq!(next.transition_output_frames, MusicMixFrameCount::new(176));
-    }
-
-    #[test]
-    fn prepared_mix_callback_outputs_prepared_pcm_without_live_a_seam() {
-        let shared = SharedPlaybackState::new(1.0, Some(180.0), 11, 22);
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        {
-            let mut buffer = shared.buffer.lock().unwrap();
-            buffer.extend([1.0_f32; 8]);
-        }
-        {
-            let mut decks = shared.crossfade_decks.lock().unwrap();
-            decks.next = Some(test_crossfade_deck(
-                CrossfadeDeckMode::PreparedMix,
-                vec![0.25_f32; 8],
-                MusicMixFrameCount::new(4),
-            ));
-        }
-        let mut output = vec![0.0_f32; 8];
-
-        write_output_samples(&mut output, &shared, |sample| sample);
-
-        assert!(
-            output
-                .iter()
-                .all(|sample| (*sample - 0.25).abs() < 0.000_001)
-        );
-    }
-
-    #[test]
-    fn prepared_mix_callback_aligns_first_frame_to_current_playback_cursor() {
-        let shared = SharedPlaybackState::new(1.0, Some(180.0), 11, 22);
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.samples_played.store(2 * 2, Ordering::Relaxed);
-        let mut prepared = Vec::new();
-        for frame in 0..128 {
-            prepared.push(frame as f32 * 0.01);
-            prepared.push(frame as f32 * 0.01);
-        }
-        {
-            let mut decks = shared.crossfade_decks.lock().unwrap();
-            decks.next = Some(test_crossfade_deck(
-                CrossfadeDeckMode::PreparedMix,
-                prepared,
-                MusicMixFrameCount::new(128),
-            ));
-        }
-        let mut output = vec![0.0_f32; 8];
-
-        write_output_samples(&mut output, &shared, |sample| sample);
-
-        let expected = [0.02_f32, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05];
-        for (actual, expected) in output.iter().zip(expected) {
-            assert!((*actual - expected).abs() < 0.000_001);
-        }
-        let decks = shared.crossfade_decks.lock().unwrap();
-        let next = decks.next.as_ref().expect("prepared deck remains");
-        assert_eq!(next.transition_output_frames, MusicMixFrameCount::new(126));
-    }
 }

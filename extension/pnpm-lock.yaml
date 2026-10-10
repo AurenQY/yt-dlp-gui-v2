@@ -17,6 +17,9 @@ importers:
       pcre2-wasm:
         specifier: 10.47.5
         version: 10.47.5
+      spotlight.js:
+        specifier: 0.7.8
+        version: 0.7.8
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^7.3.0
@@ -315,6 +318,9 @@ packages:
 
   path-to-regexp@6.3.0:
     resolution: {integrity: sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ==}
+
+  spotlight.js@0.7.8:
+    resolution: {tarball: https://registry.npmjs.org/spotlight.js/-/spotlight.js-0.7.8.tgz}
 
   pcre2-wasm@10.47.5:
     resolution: {integrity: sha512-pEohggyzxi/4ZcCRRzGzJoLMNyDdvrlRJ/0L4xoi2ek/VNI86nzT59sQ5gAKM++K7jv7bMoB9Tucdh3UcOMTrA==}
@@ -619,6 +625,8 @@ snapshots:
   path-to-regexp@6.3.0: {}
 
   pcre2-wasm@10.47.5: {}
+
+  spotlight.js@0.7.8: {}
 
   picocolors@1.1.1: {}
 

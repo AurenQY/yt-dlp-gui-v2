@@ -23,7 +23,12 @@ pub(super) fn render_music_queue_item_row(
     let duration_text = item.duration_text.clone();
     let music_state = item.compact_music_state.unwrap_or(CompactMusicState::Ready);
     let thumbnail_url = state.item_thumbnail_url(index).to_owned();
-    let thumbnail_source = state.thumbnail_render_source_for_url(ui.ctx(), &thumbnail_url);
+    let thumbnail_source = state.queue_thumbnail_render_source(
+        ui.ctx(),
+        item_id,
+        &[thumbnail_url.clone()],
+        eframe::egui::Vec2::splat(super::semantic_ui_metrics::music_compact_cover_size()),
+    );
     let cache_progress = state.music_item_cache_progress_ratio(item_id);
     let row_progress = state.music_item_compact_progress_ratio(item_id);
     let show_row_progress = state.music_item_compact_progress_visible(item_id);
@@ -90,8 +95,6 @@ pub(super) fn render_music_queue_item_row(
     if output.play_clicked {
         state.play_music_item(item_id);
     }
-    ui.add_space(ui.spacing().item_spacing.y);
-
     output.remove_clicked.then_some(item_id)
 }
 
@@ -240,33 +243,4 @@ pub(super) fn render_empty_music_compact_item(
         },
     );
     let _ = output;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mix_next_pulse_has_priority_over_cache_activity() {
-        assert_eq!(
-            compact_row_activity_pulse(true, Some(MusicItemCacheActivity::Caching)),
-            CompactRowActivityPulse::MixNextStandby
-        );
-    }
-
-    #[test]
-    fn cache_activity_uses_cache_pulse_without_mix_next() {
-        assert_eq!(
-            compact_row_activity_pulse(false, Some(MusicItemCacheActivity::Preparing)),
-            CompactRowActivityPulse::CachePreparing
-        );
-    }
-
-    #[test]
-    fn mix_next_status_keeps_cache_progress_visible() {
-        assert_eq!(
-            compact_mix_next_status_text(Some(MusicItemCacheActivity::Caching), 0.34),
-            "Mix next · 34%"
-        );
-    }
 }

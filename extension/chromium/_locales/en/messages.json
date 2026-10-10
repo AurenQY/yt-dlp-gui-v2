@@ -1,4 +1,86 @@
 {
+  "albumNotFound": { "message": "Album not found." },
+  "albumExpired": { "message": "Album data expired. Reopen it from the extension." },
+  "albumEmpty": { "message": "No items to view." },
+  "galleryPathMissing": { "message": "Folder and filename information is missing. Update V2 and analyze again." },
+  "galleryPathInvalid": { "message": "The gallery-dl path cannot safely be saved under the browser download folder." },
+  "mediaPermissionRequired": { "message": "Allow access to the selected media sites to download." },
+  "browserDownloadInterrupted": { "message": "Browser download interrupted." },
+  "albumOriginalNoXmp": { "message": "XMP is not embedded in this format; showing the original." },
+  "albumDownloadAuthorized": { "message": "Access granted. Preparing all items…" },
+  "albumActions": { "message": "Album selection and download" },
+  "albumMedia": { "message": "Album media" },
+  "albumGrid": { "message": "Album grid" },
+  "post": { "message": "Post" },
+  "postViewInfo": { "message": "View post information" },
+  "postInfo": { "message": "Post information" },
+  "postCloseInfo": { "message": "Close post information" },
+  "postEmpty": { "message": "This post has no text." },
+  "postOpenOriginal": { "message": "Open original post" },
+  "albumReading": { "message": "Loading…" },
+  "albumReadDone": { "message": "All items loaded" },
+  "albumReadRetry": { "message": "Retry loading" },
+  "albumReadMore": { "message": "Load more" },
+  "albumReadHint": { "message": "Scroll here to load more posts automatically" },
+  "albumNoMore": { "message": "No more posts" },
+  "albumProcessingImage": { "message": "Processing image…" },
+  "albumWaiting": { "message": "Waiting to load" },
+  "albumMutedVideoPreview": { "message": "Muted video preview" },
+  "creatingZip": { "message": "Creating ZIP…" },
+  "browserDownloadNoMedia": { "message": "No downloadable media in the selected range." },
+  "browserJobStateFailed": { "message": "Could not save download job state." },
+  "missingXmpMetadata": { "message": "XMP metadata is missing. Analyze this URL again from the extension." },
+  "timelineRangeMethod": { "message": "Range method" },
+  "rangePosts": { "message": "By post count" },
+  "rangeTime": { "message": "By time" },
+  "rangeSinceChoice": { "message": "From a date (UTC)" },
+  "rangeAll": { "message": "All" },
+  "rangeCount": { "message": "Post count (positive integer)" },
+  "rangeDays": { "message": "Recent days" },
+  "rangeDate": { "message": "Start date (UTC)" },
+  "rangeInvalid": { "message": "Enter a valid download range." },
+  "rangeRecent24h": { "message": "Last 24 hours" },
+  "zipItemsLimit": { "message": "ZIP supports up to 65,535 items." },
+  "zipSizeLimit": { "message": "This ZIP exceeds the 4 GiB limit. Download selected items instead." },
+  "galleryTimelineUpgradeRequired": { "message": "Update V2 to support timeline ranges and continued album loading." },
+  "timelineReadFailed": { "message": "Timeline loading failed." },
+  "albumSelected": { "message": "Selected {count}/{total}" },
+  "albumViewItem": { "message": "View item {number}" },
+  "albumSelectItem": { "message": "Select item {number}" },
+  "albumImage": { "message": "Image {number}" },
+  "albumProcessingNumber": { "message": "Processing image {number}…" },
+  "albumPreferencesFailed": { "message": "Could not load album settings: {message}" },
+  "albumViewerFailed": { "message": "Could not open viewer: {message}" },
+  "browserDownloadFailed": { "message": "Browser download failed: {message}" },
+  "processingMedia": { "message": "Processing {current}/{total} · {name}" },
+  "savingMedia": { "message": "Downloading {current}/{total} · {name}" },
+  "downloadCompletedXmp": { "message": "Completed {count} items. XMP preserved." },
+  "downloadCompletedOriginal": { "message": "Completed {count} items. {unsupported} formats do not support XMP; originals preserved." },
+  "browserJobInterrupted": { "message": "Background job interrupted. Check browser downloads before retrying; submitted files may have completed." },
+  "timelineReadProgress": { "message": "Reading timeline from post {number}…" },
+  "rangeLatest": { "message": "Latest {count} posts" },
+  "rangeRecentDays": { "message": "Last {days} days" },
+  "rangeSince": { "message": "Since {date} (UTC)" },
+  "albumSettings": { "message": "Album settings" },
+  "albumWheelOperation": { "message": "Mouse wheel" },
+  "albumWheelZoom": { "message": "Zoom (default)" },
+  "albumWheelNavigate": { "message": "Previous / next item" },
+  "albumWheelHint": { "message": "In the viewer: scroll up for the previous item, down for the next. Post text remains scrollable." },
+  "albumSettingsFailed": { "message": "Could not save album settings: {message}" },
+  "analysisTools": { "message": "Analysis tools" },
+  "analysisToolsHint": { "message": "Applies to the next analysis. Choices and the last detection are saved locally; opening the extension does not query V2." },
+  "detectTools": { "message": "Detect tools" },
+  "toolAvailable": { "message": "Available" },
+  "toolUnavailable": { "message": "Not found" },
+  "toolNotDetected": { "message": "Not detected" },
+  "lastToolDetection": { "message": "Last detected: {date}" },
+  "toolDetectionDone": { "message": "Tool availability updated. Existing choices were preserved." },
+  "toolDetectionLegacy": { "message": "This V2 version cannot report gallery-dl availability. Update V2 to detect both tools." },
+  "toolSettingsFailed": { "message": "Could not update tool settings: {message}" },
+  "selectAnalysisTool": { "message": "Enable at least one analysis tool in Settings." },
+  "summaryVideo": { "message": "Video" },
+  "summaryAudio": { "message": "Audio" },
+  "album": { "message": "Album" },
   "extensionName": {
     "message": "yt-dlp-gui"
   },
@@ -53,9 +135,10 @@
   "playlistLimit": {
     "message": "Playlist analysis limit"
   },
-  "playlistLimitCompact": {
-    "message": "Analyze up to"
+  "ytDlpFetchLimit": {
+    "message": "Fetch limit"
   },
+  "ytDlpFetchLimitHint": { "message": "Max items per yt-dlp playlist analysis (1–100)." },
   "itemsUnit": {
     "message": "items"
   },
@@ -103,6 +186,9 @@
   },
   "fileNameBaseHint": {
     "message": "The extension is determined by the output format."
+  },
+  "clearFileName": {
+    "message": "Clear file name"
   },
   "downloadRange": {
     "message": "Download range"
@@ -272,6 +358,9 @@
   "showFirstItems": {
     "message": "Showing the first {count} items"
   },
+  "galleryMediaCount": {
+    "message": "{count} media"
+  },
   "mediaCountLimit": {
     "message": "{count} media · limit {limit}"
   },
@@ -287,6 +376,7 @@
   "analysisFailed": {
     "message": "Analysis failed: {message}"
   },
+  "retryAnalysis": { "message": "Retry" },
   "noDownloadableMedia": {
     "message": "This page has no downloadable video or audio."
   },
@@ -493,5 +583,77 @@
   },
   "supportGenericBadge": {
     "message": "Generic"
+  },
+  "settings": {
+    "message": "Settings"
+  },
+  "saveSiteCookies": {
+    "message": "Save cookies to yt-dlp-gui"
+  },
+  "saveSiteCookiesHint": {
+    "message": "Save Cookies for this website's registrable domain, including all subdomains and paths. Regular-window analysis/download requests with Cookies refresh the corresponding file before using v2's configured Cookie source; saving first is not required. Incognito requests are not saved automatically."
+  },
+  "save": {
+    "message": "Save"
+  },
+  "cookieSaveNoPage": {
+    "message": "No active website is available."
+  },
+  "cookieSaveSuccess": {
+    "message": "Cookies saved for this website's complete scope. Regular-window Cookie requests also refresh the corresponding file before processing."
+  },
+  "cookieSaveFailed": {
+    "message": "Could not save website cookies."
+  },
+  "cookieSaveAutoUpdateUnavailable": {
+    "message": "Cookies were saved, but this Native Host does not support automatic updates. Update v2, then press Save again."
+  },
+  "analysisLaunchGalleryDl": {
+    "message": "Running gallery-dl"
+  },
+  "browserDownloadDestination": {
+    "message": "Browser default downloads folder"
+  },
+  "browserDownloadsStarted": {
+    "message": "Browser started {count} downloads; {failed} did not start. Check browser downloads for results."
+  },
+  "browserDownloadUnavailable": {
+    "message": "Browser downloads are unavailable."
+  },
+  "galleryAnalysisWarning": {
+    "message": "Partial gallery-dl results: {message}"
+  },
+  "nativeGalleryUpgradeRequired": {
+    "message": "Update the yt-dlp-gui-v2 executable to enable gallery-dl analysis."
+  },
+  "openAllPostsInNewTab": {
+    "message": "View all posts in a new tab"
+  },
+  "galleryAlbumOpenFailed": {
+    "message": "Could not open gallery."
+  },
+  "galleryDownloadUrlUnavailable": {
+    "message": "No individual post URL is available for V2 download."
+  },
+  "nativeGalleryDownloadUpgradeRequired": {
+    "message": "Please rebuild and update the V2 executable to enable gallery-dl downloads."
+  },
+  "galleryDownloadMode": {
+    "message": "Download method"
+  },
+  "galleryModeV2Direct": {
+    "message": "Application download"
+  },
+  "galleryModeBrowserFiles": {
+    "message": "Browser download"
+  },
+  "galleryDownloadChoiceSaveFailed": {
+    "message": "Could not save the download method: {message}"
+  },
+  "noMatchingExtractor": {
+    "message": "V2 found no matching yt-dlp or gallery-dl rule for this URL."
+  },
+  "nativeAnalysisUpgradeRequired": {
+    "message": "Update and rebuild the V2 executable to use unified URL analysis."
   }
 }

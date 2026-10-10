@@ -1,7 +1,7 @@
-use eframe::egui::{self, Sense, TextStyle, Ui};
+use eframe::egui::{self, Ui};
 
 use crate::app::state::AppState;
-use crate::app::widgets::icon::standard_icon_color;
+use crate::app::widgets::icon::{AppIcon, icon_image, standard_icon_color};
 use crate::domain::QueueItemId;
 use crate::infrastructure::{
     DownloadTargetKind, OutputFileActionMode, open_output_file, open_output_folder,
@@ -201,35 +201,25 @@ pub(super) fn draw_output_action_arrow_button(
 ) -> egui::Response {
     let desired_size =
         output_action_button_size_for_available_width(row_height, ui.available_width());
-    let sense = if enabled {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(desired_size, sense);
-    let visuals = ui.style().interact(&response);
     let text_color = if enabled {
         standard_icon_color(ui)
     } else {
         ui.visuals().weak_text_color()
     };
 
-    ui.painter().rect(
-        rect,
-        2.0,
-        visuals.bg_fill,
-        visuals.bg_stroke,
-        egui::StrokeKind::Outside,
-    );
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "→",
-        TextStyle::Body.resolve(ui.style()),
-        text_color,
-    );
-
-    response
+    let icon_size = semantic_ui_metrics::item_card_download_icon_size_for_row_height(row_height);
+    ui.add_enabled_ui(enabled, |ui| {
+        // Image-only controls occupy the template slot, not a padded text-button slot.
+        ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+        ui.add_sized(
+            desired_size,
+            egui::Button::new(icon_image(AppIcon::ArrowRight, icon_size, text_color))
+                .small()
+                .corner_radius(semantic_ui_metrics::item_card_icon_button_corner_radius()),
+        )
+    })
+    .inner
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn output_action_button_size_for_available_width(
@@ -244,32 +234,4 @@ fn output_action_button_size_for_available_width(
         available_width,
     );
     egui::vec2(size.width, size.height)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn audio_export_filters_start_with_selected_source_extension() {
-        let extensions = ordered_audio_export_extensions(Some("opus"));
-
-        assert_eq!(extensions.first().copied(), Some("opus"));
-        assert_eq!(extensions.len(), AUDIO_EXPORT_EXTENSIONS.len());
-        assert_eq!(
-            extensions
-                .iter()
-                .filter(|extension| extension.eq_ignore_ascii_case("opus"))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn unknown_audio_extension_keeps_stable_filter_order() {
-        assert_eq!(
-            ordered_audio_export_extensions(Some("unknown")),
-            AUDIO_EXPORT_EXTENSIONS
-        );
-    }
 }

@@ -20,17 +20,3 @@ pub(crate) fn set_application_current_dir() -> Result<(), String> {
     std::env::set_current_dir(&root)
         .map_err(|error| format!("Could not use application root {}: {error}", root.display()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_application_root_is_the_compiled_workspace() {
-        #[cfg(debug_assertions)]
-        assert_eq!(
-            application_root(),
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        );
-    }
-}

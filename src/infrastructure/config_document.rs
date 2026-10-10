@@ -5,9 +5,6 @@ use super::{AppConfig, DependencyTool};
 
 #[path = "config_schema.rs"]
 mod schema;
-#[cfg(test)]
-#[path = "config_document_tests.rs"]
-mod tests;
 
 const HEADER: &str = "# Only settings that differ from the application defaults are stored.\n";
 

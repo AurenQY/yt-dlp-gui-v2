@@ -1,5 +1,62 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "범위 지정 방법",
+        "gallery.range.time" => "기간별",
+        "gallery.range.posts" => "게시물 수별",
+        "gallery.range.date" => "시작 날짜 (UTC)",
+        "gallery.range.count" => "게시물 수 (양의 정수)",
+        "gallery.range.custom" => "사용자 지정",
+        "gallery.range.positive" => "양의 정수",
+        "gallery.range.invalid" => "유효한 다운로드 범위를 입력하세요.",
+        "gallery.range.invalid_date" => "유효한 UTC 날짜 (YYYY-MM-DD)를 입력하세요.",
+        "gallery.range.help" => "도움말",
+        "gallery.range.title" => "타임라인 다운로드 범위",
+        "gallery.range.time_or_all" => "기간 또는 전체를 선택하세요",
+        "gallery.range.latest" => "최근 {count}개 게시물",
+        "gallery.range.recent24h" => "최근 24시간",
+        "gallery.range.days" => "최근 {days}일",
+        "gallery.range.since" => "{date} 이후 (UTC)",
+        "gallery.status.finishing" => "마무리 중",
+        "gallery.status.waiting" => "다운로드 대기",
+        "gallery.status.analyzing" => "분석 중",
+        "gallery.posts_count" => "게시물 {count}개",
+        "gallery.media_count" => "미디어 {count}개",
+        "music.volume" => "음량",
+        "gallery.folder_pending" => "확인 대기",
+        "gallery.folder_opened" => "폴더를 열었습니다.",
+        "gallery.choice.downloader" => "다운로더 선택",
+        "gallery.choice.content" => "콘텐츠 선택",
+        "gallery.choice.add_title" => "추가할 콘텐츠 선택",
+        "gallery.choice.dual_hint" => "이 URL은 두 다운로더를 지원합니다. 하나 이상 선택하세요.",
+        "gallery.choice.origin_hint" => {
+            "분석할 콘텐츠를 선택하세요 (클래식 모드는 한 번에 한 종류)."
+        }
+        "gallery.choice.add_hint" => "추가할 콘텐츠를 선택하세요",
+        "gallery.choice.dual_media" => "영상과 이미지를 함께 추가할 수 있습니다.",
+        "gallery.choice.one_required" => "다운로더 하나를 선택하세요.",
+        "gallery.choice.tool_required" => "다운로더를 하나 이상 선택하세요.",
+        "gallery.choice.content_required" => "분석하거나 추가할 콘텐츠를 선택하세요.",
+        "gallery.choice.cancelled" => "선택을 취소했습니다.",
+        "gallery.range.help_steps" => "범위 지정 방법과 범위를 선택한 뒤 확인하면 적용됩니다.",
+        "gallery.range.help_multiple" => {
+            "이 소스는 여러 피드로 확장됩니다. 전체 게시물 수 제한은 지원하지 않으므로 기간 또는 전체를 선택하세요."
+        }
+        "gallery.range.help_order" => {
+            "게시물 수는 사이트 순서를 따르며 고정 게시물을 포함할 수 있습니다. 다시 시작하면 처음부터 검색하고 기존 파일은 건너뜁니다."
+        }
+        "gallery.range.help_time" => {
+            "기간은 게시 날짜로 판단합니다. Instagram은 오래된 고정 게시물을 건너뛰고 범위 밖의 일반 게시물에서 종료합니다. 다른 소스는 전체 타임라인을 검색할 수 있습니다. 유효한 날짜가 없으면 오류가 발생합니다."
+        }
+        "about.core_tools" => "기본 도구",
+        "about.extension_tools" => "추가 도구",
+        "about.gallery_dl_description" => "이미지 갤러리와 소셜 미디어 모음을 다운로드합니다.",
+        "about.aria2_description" => {
+            "yt-dlp용 외부 다운로더입니다. 성능은 사이트와 연결에 따라 달라집니다."
+        }
+        "about.required" => "필수",
+        "about.availability.ready" => "사용 가능",
+        "about.availability.missing" => "찾을 수 없음",
+        "advance.use_aria2_external_downloader" => "aria2를 외부 다운로더로 사용",
         "tab.advanced" => "고급",
         "advance.browser_integration" => "브라우저 연동",
         "advance.browser_connection" => "브라우저 연결",
@@ -17,6 +74,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "메시지",
         "about.check_updates" => "업데이트 확인",
         "about.update_all" => "모두 업데이트",
+        "about.install_dependencies" => "필수 구성 요소 설치",
         "about.restart" => "다시 시작",
         "about.open_release" => "Release 열기",
         "about.install" => "설치",
@@ -97,9 +155,11 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.codec" => "코덱",
         "picker.filter.sample_rate" => "샘플 레이트",
         "main.missing_yt_dlp_callout" => {
-            "yt-dlp가 없습니다. 설치하거나 옵션에서 yt-dlp.exe를 선택하세요."
+            "yt-dlp가 없습니다. 정보에서 설치하거나 yt-dlp.exe를 선택하세요."
         }
         "advance.source" => "소스",
+        "advance.analysis" => "분석",
+        "advance.force_analysis" => "강제 분석",
         "advance.config" => "설정",
         "advance.none" => "없음",
         "advance.network_access" => "네트워크 및 접근",
@@ -180,7 +240,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "브라우저",
         "advance.default" => "기본값",
         "advance.external_downloader" => "외부 다운로더",
-        "advance.use_aria2_for_faster_downloads" => "더 빠른 다운로드에 Aria2 사용",
         "advance.download_control" => "다운로드 제어",
         "advance.concurrent_fragments" => "동시 조각 수",
         "advance.live_streams" => "라이브 스트림",

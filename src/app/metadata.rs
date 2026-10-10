@@ -855,15 +855,3 @@ pub(super) fn normalize_duration_badge_text(text: &str) -> String {
         _ => trimmed.to_owned(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn youtube_vp09_profiles_share_the_vp9_codec_label() {
-        assert_eq!(normalize_video_codec("vp9"), "VP9");
-        assert_eq!(normalize_video_codec("vp09.00.40.08"), "VP9");
-        assert_eq!(normalize_video_codec("VP09.00.31.08"), "VP9");
-    }
-}

@@ -14,8 +14,10 @@ export default defineConfig({
     lib: {
       entry: {
         popup: source('./src/popup/main.js'),
+        album: source('./src/album/album.js'),
         background: source('./src/background/background.js'),
         'matcher-worker': source('./src/matcher/matcher-worker.js'),
+        'xmp-worker': source('./src/image/xmp-worker.js'),
       },
       formats: ['es'],
       fileName: (_format, entryName) => entryName + '.js',

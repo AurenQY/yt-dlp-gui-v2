@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::audio_queue_snapshot::AudioQueueItemSnapshot;
 
 impl AppState {
     pub(super) fn music_playable_item_ids(&self) -> Vec<QueueItemId> {
@@ -162,41 +163,21 @@ impl AppState {
         self.app_cache_root_path().join("audio")
     }
 
-    pub(super) fn audio_playlist_snapshot_path(&self) -> PathBuf {
-        self.app_cache_root_path().join("audio-playlist.yaml")
-    }
-
-    pub(super) fn restore_saved_audio_playlist(&mut self) {
-        let items = self.load_audio_playlist_snapshot_items();
-        if self.queue_display_mode == QueueDisplayMode::Audio {
-            self.queue_items = items;
-            self.rebuild_batch_input_from_queue();
-        } else {
-            self.music.audio_queue_items = items;
-        }
-    }
-
-    pub(super) fn load_audio_playlist_snapshot_items(&mut self) -> Vec<QueueItem> {
-        let path = self.audio_playlist_snapshot_path();
-        let Some(snapshot) = read_yaml_file::<AudioPlaylistSnapshot>(&path) else {
-            return Vec::new();
-        };
-        snapshot
-            .items
-            .into_iter()
-            .filter_map(|entry| self.queue_item_from_audio_playlist_snapshot(entry))
-            .collect()
-    }
-
     pub(super) fn queue_item_from_audio_playlist_snapshot(
         &mut self,
-        entry: AudioPlaylistItemSnapshot,
+        entry: AudioQueueItemSnapshot,
     ) -> Option<QueueItem> {
         let source = entry.source_url.trim().to_owned();
         if source.is_empty() {
             return None;
         }
-        let mut item = self.build_queue_item_from_url(&source);
+        let mut item = QueueItem::with_persistent_id(
+            self.alloc_queue_item_id(),
+            entry.persistent_id,
+            &source,
+            infer_title(&source, "Untitled task", "Imported {tail}"),
+        );
+        self.apply_queue_item_defaults(&mut item);
         item.view_kind = QueueItemViewKind::MusicCompact;
         item.compact_music_state = Some(CompactMusicState::Ready);
         item.metadata_state = MetadataState::Idle;
@@ -204,58 +185,21 @@ impl AppState {
             item.title = entry.title;
         }
         item.music_album_title = entry.album_title;
-        item.thumbnail_hint = if entry.thumbnail_hint.trim().is_empty() {
-            "item.thumbnail".to_owned()
-        } else {
-            entry.thumbnail_hint
-        };
         item.thumbnail_url = entry.thumbnail_url;
-        item.duration_text = entry.duration_text;
-        item.music_duration_seconds = entry
-            .duration_seconds
-            .or_else(|| duration_text_to_seconds(&item.duration_text));
+        item.duration_text = crate::domain::queue_preview::duration_text(entry.duration_millis);
+        item.music_duration_seconds = entry.duration_millis.map(|v| v as f64 / 1000.0);
         item.music_stream_url.clear();
         item.music_stream_headers.clear();
-        item.music_stream_ext = entry.stream_ext;
-        item.music_stream_format_id = entry.stream_format_id;
-        item.music_stream_acodec = entry.stream_acodec;
-        item.music_stream_expected_bytes = entry.expected_bytes;
-        item.music_cache_key = if entry.cache_key.trim().is_empty() {
-            music_cache_key(&item.source_url, "flat", "", "")
-        } else {
-            entry.cache_key
-        };
+        item.music_cache_key = music_cache_key(&item.source_url, "flat", "", "");
         item.selection.use_cookies = entry.use_cookies;
         item.last_error = None;
         self.restore_music_compact_cache_hit_for_item(&mut item);
         Some(item)
     }
 
-    pub(super) fn save_active_audio_playlist_if_needed(&self) {
-        if self.queue_display_mode == QueueDisplayMode::Audio {
-            self.save_audio_playlist_items(&self.queue_items);
-        } else {
-            self.save_audio_playlist_items(&self.music.audio_queue_items);
-        }
-    }
-
-    pub(super) fn save_audio_playlist_items(&self, items: &[QueueItem]) {
-        let snapshot = AudioPlaylistSnapshot {
-            version: 1,
-            items: items
-                .iter()
-                .filter(|item| item.view_kind == QueueItemViewKind::MusicCompact)
-                .filter(|item| !item.source_url.trim().is_empty())
-                .map(audio_playlist_item_snapshot)
-                .collect(),
-        };
-        let path = self.audio_playlist_snapshot_path();
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        if let Err(error) = write_yaml_file(&path, &snapshot) {
-            eprintln!("[music-playlist] save skipped: {error}");
-        }
+    /// Existing audio event hooks request the same complete snapshot as desktop redraws.
+    pub(super) fn save_active_audio_playlist_if_needed(&mut self) {
+        self.save_queue_if_changed();
     }
 
     pub(super) fn restore_music_compact_cache_hit_for_item(&self, item: &mut QueueItem) {

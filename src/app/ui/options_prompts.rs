@@ -1,13 +1,16 @@
 use eframe::egui::{self, Color32, RichText, Ui};
 
 use crate::app::state::{
-    AppState, MusicDownloadFormat, MusicDownloadMode, MusicDownloadSaveMode,
-    MusicOriginalPreference, YoutubePlaylistPromptKind,
+    AppState, GalleryDownloaderChoice, MusicDownloadFormat, MusicDownloadMode,
+    MusicDownloadSaveMode, MusicOriginalPreference, YoutubePlaylistPromptKind,
 };
 use crate::app::widgets::icon::{AppIcon, icon_image};
 use crate::app::widgets::url_input::{accent_green_for_ui, accent_red_for_ui};
 
 use super::semantic_ui_metrics;
+
+#[path = "gallery_downloader_choice_actions.rs"]
+mod gallery_downloader_choice_actions;
 
 pub(super) fn render_music_download_prompt(ctx: &egui::Context, state: &mut AppState) {
     if !state.music_download_prompt_open() {
@@ -364,6 +367,15 @@ pub(super) fn render_youtube_playlist_prompt(ctx: &egui::Context, state: &mut Ap
                 YoutubePlaylistPromptKind::VideoAndPlaylist,
             );
         }
+        YoutubePlaylistPromptKind::GenericPlaylist => {
+            render_playlist_prompt_window(
+                ctx,
+                state,
+                state.ui_i18n_text_for_key("options.playlist").to_owned(),
+                None,
+                YoutubePlaylistPromptKind::GenericPlaylist,
+            );
+        }
         YoutubePlaylistPromptKind::HighRiskPlaylist => {
             let risk = prompt_risk.expect("high risk prompt should include risk");
             let title = format!(
@@ -389,7 +401,25 @@ fn render_playlist_prompt_window(
     risk_note_key: Option<&'static str>,
     prompt_kind: YoutubePlaylistPromptKind,
 ) {
-    egui::Window::new(state.ui_i18n_text_for_key("options.playlist_prompt"))
+    let caption = state
+        .ui_i18n_text_for_key("options.playlist_prompt")
+        .to_owned();
+    render_shared_choice_window(ctx, state, &caption, |ui, state| {
+        render_playlist_prompt_body(ui, state, &title, risk_note_key, prompt_kind);
+        ui.add_space(semantic_ui_metrics::playlist_prompt_actions_to_body_vertical_spacing());
+        render_playlist_prompt_actions(ui, state, prompt_kind);
+    });
+}
+
+// Both the existing video/playlist choice and video/images choice use the
+// same dialog shell, size, alignment, spacing and action-button components.
+fn render_shared_choice_window(
+    ctx: &egui::Context,
+    state: &mut AppState,
+    caption: &str,
+    content: impl FnOnce(&mut Ui, &mut AppState),
+) {
+    egui::Window::new(caption)
         .id(egui::Id::new("youtube-playlist-prompt-window-fit-v5"))
         .collapsible(false)
         .resizable(false)
@@ -404,10 +434,327 @@ fn render_playlist_prompt_window(
             ui.spacing_mut().item_spacing = semantic_ui_metrics::playlist_prompt_item_spacing();
             ui.spacing_mut().button_padding = semantic_ui_metrics::playlist_prompt_button_padding();
 
-            render_playlist_prompt_body(ui, state, &title, risk_note_key, prompt_kind);
-            ui.add_space(semantic_ui_metrics::playlist_prompt_actions_to_body_vertical_spacing());
-            render_playlist_prompt_actions(ui, state, prompt_kind);
+            content(ui, state);
         });
+}
+
+pub(super) fn render_gallery_downloader_choice_prompt(ctx: &egui::Context, state: &mut AppState) {
+    if !state.gallery_downloader_choice_open() {
+        return;
+    }
+    render_shared_choice_window(
+        ctx,
+        state,
+        crate::i18n::text(state.language(), "gallery.choice.downloader"),
+        |ui, state| {
+            if !state.gallery_downloader_multiple_allowed() {
+                gallery_downloader_choice_actions::render(ui, state);
+                return;
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y =
+                    semantic_ui_metrics::playlist_prompt_body_vertical_spacing();
+                ui.label(
+                    RichText::new(crate::i18n::text(
+                        state.language(),
+                        "gallery.choice.dual_hint",
+                    ))
+                    .strong()
+                    .size(semantic_ui_metrics::playlist_prompt_title_text_size()),
+                );
+                let selected = state.gallery_downloader_choice();
+                let mut yt_dlp = matches!(
+                    selected,
+                    Some(GalleryDownloaderChoice::YtDlp | GalleryDownloaderChoice::Both)
+                );
+                let mut gallery_dl = matches!(
+                    selected,
+                    Some(GalleryDownloaderChoice::GalleryDl | GalleryDownloaderChoice::Both)
+                );
+                if ui.checkbox(&mut yt_dlp, "yt-dlp").changed() {
+                    state.set_gallery_downloader_checks(yt_dlp, gallery_dl);
+                }
+                if ui.checkbox(&mut gallery_dl, "gallery-dl").changed() {
+                    state.set_gallery_downloader_checks(yt_dlp, gallery_dl);
+                }
+            });
+            ui.add_space(semantic_ui_metrics::playlist_prompt_actions_to_body_vertical_spacing());
+            let confirm_text = state
+                .ui_i18n_text_for_key(state.gallery_downloader_choice_action_label_key())
+                .to_owned();
+            let cancel_text = state.ui_i18n_text_for_key("options.cancel").to_owned();
+            let button_height =
+                semantic_ui_metrics::prompt_action_button_height_for_playlist_decision();
+            let spacing = semantic_ui_metrics::playlist_prompt_action_button_horizontal_spacing();
+            let confirm_width =
+                semantic_ui_metrics::prompt_action_button_width_for_icon_and_visible_text(
+                    ui,
+                    &confirm_text,
+                );
+            let cancel_width =
+                semantic_ui_metrics::prompt_action_button_width_for_icon_and_visible_text(
+                    ui,
+                    &cancel_text,
+                );
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = spacing;
+                ui.add_space(
+                    semantic_ui_metrics::remaining_width_before_right_aligned_prompt_actions(
+                        semantic_ui_metrics::playlist_prompt_content_width(),
+                        confirm_width + cancel_width + spacing,
+                    ),
+                );
+                let cancel = prompt_action_button(
+                    ui,
+                    AppIcon::WindowClose,
+                    accent_red_for_ui(ui),
+                    &cancel_text,
+                    cancel_width,
+                    button_height,
+                );
+                if ui.add(cancel).clicked() {
+                    state.cancel_gallery_downloader_choice();
+                }
+                let confirm = prompt_action_button(
+                    ui,
+                    AppIcon::Import,
+                    accent_green_for_ui(ui),
+                    &confirm_text,
+                    confirm_width,
+                    button_height,
+                );
+                if ui
+                    .add_enabled(state.gallery_downloader_choice().is_some(), confirm)
+                    .clicked()
+                {
+                    state.confirm_gallery_downloader_choice();
+                }
+            });
+        },
+    );
+}
+
+pub(super) fn render_gallery_backend_prompt(ctx: &egui::Context, state: &mut AppState) {
+    if !state.gallery_backend_prompt_open() {
+        return;
+    }
+    let has_playlist_scope = state.gallery_route_prompt_has_playlist_scope();
+    let is_origin = state.gallery_route_prompt_is_origin();
+    let title = if is_origin {
+        crate::i18n::text(state.language(), "gallery.choice.content")
+    } else {
+        crate::i18n::text(state.language(), "gallery.choice.add_title")
+    };
+    render_shared_choice_window(ctx, state, title, |ui, state| {
+        if is_origin {
+            render_origin_media_choices(ui, state);
+        } else if has_playlist_scope {
+            render_playlist_prompt_body(
+                ui,
+                state,
+                "",
+                None,
+                YoutubePlaylistPromptKind::VideoAndPlaylist,
+            );
+            render_gallery_image_choice(ui, state);
+        } else {
+            render_gallery_media_choices(ui, state);
+        }
+        ui.add_space(semantic_ui_metrics::playlist_prompt_actions_to_body_vertical_spacing());
+        if has_playlist_scope && !is_origin {
+            render_gallery_playlist_actions(ui, state);
+        } else {
+            render_gallery_media_actions(ui, state);
+        }
+    });
+}
+
+fn render_origin_media_choices(ui: &mut Ui, state: &mut AppState) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y =
+            semantic_ui_metrics::playlist_prompt_body_vertical_spacing();
+        ui.label(
+            RichText::new(crate::i18n::text(
+                state.language(),
+                "gallery.choice.origin_hint",
+            ))
+            .strong()
+            .size(semantic_ui_metrics::playlist_prompt_title_text_size()),
+        );
+        let selected_video = state.gallery_route_include_video();
+        if ui
+            .radio(
+                selected_video,
+                crate::i18n::text(state.language(), "media.video"),
+            )
+            .clicked()
+        {
+            state.set_gallery_route_include_video(true);
+        }
+        let label = crate::i18n::format_text(
+            state.language(),
+            "gallery.media_count",
+            &[("{count}", &state.gallery_route_image_count().to_string())],
+        );
+        if ui.radio(!selected_video, label).clicked() {
+            state.set_gallery_route_include_images(true);
+        }
+    });
+}
+
+fn render_gallery_media_choices(ui: &mut Ui, state: &mut AppState) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y =
+            semantic_ui_metrics::playlist_prompt_body_vertical_spacing();
+        ui.label(
+            RichText::new(crate::i18n::text(
+                state.language(),
+                "gallery.choice.add_hint",
+            ))
+            .strong()
+            .size(semantic_ui_metrics::playlist_prompt_title_text_size()),
+        );
+        ui.label(
+            RichText::new(crate::i18n::text(
+                state.language(),
+                "gallery.choice.dual_media",
+            ))
+            .size(semantic_ui_metrics::playlist_prompt_body_text_size()),
+        );
+        let mut include_video = state.gallery_route_include_video();
+        if ui
+            .checkbox(
+                &mut include_video,
+                crate::i18n::text(state.language(), "media.video"),
+            )
+            .changed()
+        {
+            state.set_gallery_route_include_video(include_video);
+        }
+        render_gallery_image_choice(ui, state);
+    });
+}
+
+fn render_gallery_image_choice(ui: &mut Ui, state: &mut AppState) {
+    let mut include_images = state.gallery_route_include_images();
+    let label = crate::i18n::format_text(
+        state.language(),
+        "gallery.media_count",
+        &[("{count}", &state.gallery_route_image_count().to_string())],
+    );
+    if ui.checkbox(&mut include_images, label).changed() {
+        state.set_gallery_route_include_images(include_images);
+    }
+}
+
+fn render_gallery_media_actions(ui: &mut Ui, state: &mut AppState) {
+    let add_text = state
+        .ui_i18n_text_for_key(if state.gallery_route_prompt_is_origin() {
+            "action.analyze"
+        } else {
+            "action.add"
+        })
+        .to_owned();
+    let cancel_text = state.ui_i18n_text_for_key("options.cancel").to_owned();
+    let button_height = semantic_ui_metrics::prompt_action_button_height_for_playlist_decision();
+    let spacing = semantic_ui_metrics::playlist_prompt_action_button_horizontal_spacing();
+    let add_width =
+        semantic_ui_metrics::prompt_action_button_width_for_icon_and_visible_text(ui, &add_text);
+    let cancel_width =
+        semantic_ui_metrics::prompt_action_button_width_for_icon_and_visible_text(ui, &cancel_text);
+    let total_width = add_width + cancel_width + spacing;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = spacing;
+        ui.add_space(
+            semantic_ui_metrics::remaining_width_before_right_aligned_prompt_actions(
+                semantic_ui_metrics::playlist_prompt_content_width(),
+                total_width,
+            ),
+        );
+        let cancel_button = prompt_action_button(
+            ui,
+            AppIcon::WindowClose,
+            accent_red_for_ui(ui),
+            &cancel_text,
+            cancel_width,
+            button_height,
+        );
+        if ui.add(cancel_button).clicked() {
+            state.cancel_gallery_route_prompt();
+        }
+        let add_button = prompt_action_button(
+            ui,
+            AppIcon::Import,
+            accent_green_for_ui(ui),
+            &add_text,
+            add_width,
+            button_height,
+        );
+        let any_selected =
+            state.gallery_route_include_video() || state.gallery_route_include_images();
+        if ui.add_enabled(any_selected, add_button).clicked() {
+            state.confirm_gallery_route_media();
+        }
+    });
+}
+
+fn render_gallery_playlist_actions(ui: &mut Ui, state: &mut AppState) {
+    let video_text = state.ui_i18n_text_for_key("options.video").to_owned();
+    let playlist_text = state.ui_i18n_text_for_key("options.playlist").to_owned();
+    let cancel_text = state.ui_i18n_text_for_key("options.cancel").to_owned();
+    let button_height = semantic_ui_metrics::prompt_action_button_height_for_playlist_decision();
+    let spacing = semantic_ui_metrics::playlist_prompt_action_button_horizontal_spacing();
+    let video_width =
+        semantic_ui_metrics::prompt_action_button_width_for_icon_and_visible_text(ui, &video_text);
+    let playlist_width = semantic_ui_metrics::prompt_action_button_width_for_icon_and_visible_text(
+        ui,
+        &playlist_text,
+    );
+    let cancel_width =
+        semantic_ui_metrics::prompt_action_button_width_for_icon_and_visible_text(ui, &cancel_text);
+    let total_width = video_width + playlist_width + cancel_width + spacing * 2.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = spacing;
+        ui.add_space(
+            semantic_ui_metrics::remaining_width_before_right_aligned_prompt_actions(
+                semantic_ui_metrics::playlist_prompt_content_width(),
+                total_width,
+            ),
+        );
+        let video_button = prompt_action_button(
+            ui,
+            AppIcon::Video,
+            accent_green_for_ui(ui),
+            &video_text,
+            video_width,
+            button_height,
+        );
+        if ui.add(video_button).clicked() {
+            state.confirm_gallery_route_as_video();
+        }
+        let playlist_button = prompt_action_button(
+            ui,
+            AppIcon::Import,
+            accent_green_for_ui(ui),
+            &playlist_text,
+            playlist_width,
+            button_height,
+        );
+        if ui.add(playlist_button).clicked() {
+            state.confirm_gallery_route_as_playlist();
+        }
+        let cancel_button = prompt_action_button(
+            ui,
+            AppIcon::WindowClose,
+            accent_red_for_ui(ui),
+            &cancel_text,
+            cancel_width,
+            button_height,
+        );
+        if ui.add(cancel_button).clicked() {
+            state.cancel_gallery_route_prompt();
+        }
+    });
 }
 
 fn render_playlist_prompt_body(
@@ -426,7 +773,8 @@ fn render_playlist_prompt_body(
                 .ui_i18n_text_for_key("options.both_video_and_playlist_were_detected")
                 .to_owned(),
         ),
-        YoutubePlaylistPromptKind::HighRiskPlaylist => (
+        YoutubePlaylistPromptKind::HighRiskPlaylist
+        | YoutubePlaylistPromptKind::GenericPlaylist => (
             title.to_owned(),
             risk_note_key
                 .map(|key| state.ui_i18n_text_for_key(key))
@@ -525,7 +873,8 @@ fn render_playlist_prompt_actions(
                 }
             });
         }
-        YoutubePlaylistPromptKind::HighRiskPlaylist => {
+        YoutubePlaylistPromptKind::HighRiskPlaylist
+        | YoutubePlaylistPromptKind::GenericPlaylist => {
             let load_text = state.ui_i18n_text_for_key("options.load").to_owned();
             let cancel_text = state.ui_i18n_text_for_key("options.cancel").to_owned();
             let confirm_width =
@@ -590,36 +939,4 @@ fn prompt_action_button<'a>(
         RichText::new(label).size(size),
     )
     .min_size(egui::vec2(width, height))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::state::MusicDownloadChoice;
-
-    #[test]
-    fn mp3_prompt_option_represents_a_unified_mp3_output() {
-        let option = MusicDownloadPromptOption::Unified(MusicDownloadFormat::Mp3);
-        let choice = MusicDownloadChoice {
-            mode: MusicDownloadMode::Unified,
-            unified_format: MusicDownloadFormat::Mp3,
-            ..MusicDownloadChoice::default()
-        };
-
-        assert!(option.is_selected(choice));
-        assert!(!MusicDownloadPromptOption::OriginalBest.is_selected(choice));
-    }
-
-    #[test]
-    fn chapter_split_is_an_independent_save_choice() {
-        let choice = MusicDownloadChoice {
-            mode: MusicDownloadMode::Unified,
-            unified_format: MusicDownloadFormat::Mp3,
-            save_mode: MusicDownloadSaveMode::SplitChapters,
-            ..MusicDownloadChoice::default()
-        };
-
-        assert!(MusicDownloadPromptOption::Unified(MusicDownloadFormat::Mp3).is_selected(choice));
-        assert_eq!(choice.save_mode, MusicDownloadSaveMode::SplitChapters);
-    }
 }

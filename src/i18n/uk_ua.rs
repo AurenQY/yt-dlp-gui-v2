@@ -1,5 +1,68 @@
 pub fn text<'a>(key: &'a str) -> &'a str {
     match key {
+        "gallery.range.method" => "Спосіб вибору діапазону",
+        "gallery.range.time" => "За часом",
+        "gallery.range.posts" => "За кількістю дописів",
+        "gallery.range.date" => "Початкова дата (UTC)",
+        "gallery.range.count" => "Кількість дописів (додатне ціле)",
+        "gallery.range.custom" => "Власний діапазон",
+        "gallery.range.positive" => "Додатне ціле",
+        "gallery.range.invalid" => "Введіть допустимий діапазон завантаження.",
+        "gallery.range.invalid_date" => "Введіть допустиму дату UTC (YYYY-MM-DD).",
+        "gallery.range.help" => "Довідка",
+        "gallery.range.title" => "Діапазон завантаження стрічки",
+        "gallery.range.time_or_all" => "Виберіть період або все",
+        "gallery.range.latest" => "Останні {count} дописів",
+        "gallery.range.recent24h" => "Останні 24 години",
+        "gallery.range.days" => "Останні {days} днів",
+        "gallery.range.since" => "Від {date} (UTC)",
+        "gallery.status.finishing" => "Завершення",
+        "gallery.status.waiting" => "Очікування завантаження",
+        "gallery.status.analyzing" => "Аналіз",
+        "gallery.posts_count" => "{count} дописів",
+        "gallery.media_count" => "{count} медіафайлів",
+        "music.volume" => "Гучність",
+        "gallery.folder_pending" => "Очікує підтвердження",
+        "gallery.folder_opened" => "Папку відкрито.",
+        "gallery.choice.downloader" => "Виберіть завантажувач",
+        "gallery.choice.content" => "Виберіть вміст",
+        "gallery.choice.add_title" => "Виберіть вміст для додавання",
+        "gallery.choice.dual_hint" => {
+            "Цей URL підтримують два завантажувачі. Виберіть щонайменше один."
+        }
+        "gallery.choice.origin_hint" => {
+            "Виберіть вміст для аналізу (класичний режим: один тип за раз)."
+        }
+        "gallery.choice.add_hint" => "Виберіть вміст для додавання",
+        "gallery.choice.dual_media" => "Відео й зображення можна додавати разом.",
+        "gallery.choice.one_required" => "Виберіть один завантажувач.",
+        "gallery.choice.tool_required" => "Виберіть щонайменше один завантажувач.",
+        "gallery.choice.content_required" => "Виберіть вміст для аналізу або додавання.",
+        "gallery.choice.cancelled" => "Вибір скасовано.",
+        "gallery.range.help_steps" => "Виберіть спосіб і межі діапазону, потім підтвердьте.",
+        "gallery.range.help_multiple" => {
+            "Джерело містить кілька стрічок. Загальне обмеження дописів недоступне; виберіть період або все."
+        }
+        "gallery.range.help_order" => {
+            "Дописи відповідають порядку сайту й можуть містити закріплені. Після перезапуску пошук починається спочатку та пропускає наявні файли."
+        }
+        "gallery.range.help_time" => {
+            "Період визначається датами дописів. Instagram пропускає старі закріплені дописи та зупиняється на звичайному дописі поза діапазоном. Інші джерела можуть переглядати всю стрічку. Відсутність допустимих дат спричиняє помилку."
+        }
+        "about.core_tools" => "Основні інструменти",
+        "about.extension_tools" => "Додаткові інструменти",
+        "about.gallery_dl_description" => {
+            "Завантажує галереї зображень і добірки із соціальних мереж."
+        }
+        "about.aria2_description" => {
+            "Зовнішній завантажувач для yt-dlp; швидкість залежить від сайту та з’єднання."
+        }
+        "about.required" => "Обов’язково",
+        "about.availability.ready" => "Доступно",
+        "about.availability.missing" => "Не знайдено",
+        "advance.use_aria2_external_downloader" => {
+            "Використовувати aria2 як зовнішній завантажувач"
+        }
         "tab.advanced" => "Додатково",
         "advance.browser_integration" => "Інтеграція з браузером",
         "advance.browser_connection" => "Підключення браузера",
@@ -17,6 +80,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "about.message" => "Повідомлення",
         "about.check_updates" => "Перевірити оновлення",
         "about.update_all" => "Оновити все",
+        "about.install_dependencies" => "Встановити залежності",
         "about.restart" => "Перезапустити",
         "about.open_release" => "Відкрити Release",
         "about.install" => "Установити",
@@ -97,9 +161,11 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "picker.filter.codec" => "Кодек",
         "picker.filter.sample_rate" => "Частота дискретизації",
         "main.missing_yt_dlp_callout" => {
-            "yt-dlp відсутній. Установіть його або виберіть yt-dlp.exe у параметрах."
+            "yt-dlp відсутній. Установіть його або виберіть yt-dlp.exe у розділі Про програму."
         }
         "advance.source" => "Джерело",
+        "advance.analysis" => "Аналіз",
+        "advance.force_analysis" => "Примусовий аналіз",
         "advance.config" => "Конфігурація",
         "advance.none" => "Немає",
         "advance.network_access" => "Мережа та доступ",
@@ -186,9 +252,6 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.browser" => "Браузер",
         "advance.default" => "За замовчуванням",
         "advance.external_downloader" => "Зовнішній завантажувач",
-        "advance.use_aria2_for_faster_downloads" => {
-            "Використовувати Aria2 для швидшого завантаження"
-        }
         "advance.download_control" => "Керування завантаженням",
         "advance.concurrent_fragments" => "Одночасні фрагменти",
         "advance.live_streams" => "Прямі трансляції",

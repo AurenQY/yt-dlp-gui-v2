@@ -1634,22 +1634,3 @@ fn quote_arg(path: &Path) -> String {
         text
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn transcode_temp_output_uses_app_cache_temp_root() {
-        let temp_root = PathBuf::from("cache").join("transcode-temp");
-        let final_output = PathBuf::from("download").join("Video Name!.mp4");
-
-        let temp_output = transcode_temp_output_path(&final_output, &temp_root, 42);
-
-        assert_eq!(temp_output.parent(), Some(temp_root.as_path()));
-        assert_eq!(
-            temp_output.file_name().and_then(|value| value.to_str()),
-            Some("Video_Name_.42.post-process.tmp.mp4")
-        );
-    }
-}

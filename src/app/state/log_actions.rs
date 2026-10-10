@@ -25,7 +25,7 @@ impl AppState {
             return;
         }
         self.logs.runtime_log.push_back(message);
-        while self.logs.runtime_log.len() > 20 {
+        while self.logs.runtime_log.len() > 200 {
             self.logs.runtime_log.pop_front();
         }
     }
@@ -160,8 +160,16 @@ impl AppState {
         self.logs.viewer_selected_step = None;
     }
     fn trim_tool_logs(&mut self) {
-        while self.logs.tool_logs.len() > 20 {
-            let removed = self.logs.tool_logs.pop_front();
+        while self.logs.tool_logs.len() > 200 {
+            let Some(index) = self
+                .logs
+                .tool_logs
+                .iter()
+                .position(|entry| entry.status != ToolLogStatus::Running)
+            else {
+                break;
+            };
+            let removed = self.logs.tool_logs.remove(index);
             if let Some(removed) = removed {
                 if self.logs.viewer_expanded_action == Some(removed.id) {
                     self.logs.viewer_expanded_action = None;

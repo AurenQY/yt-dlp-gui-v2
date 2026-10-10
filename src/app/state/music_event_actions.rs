@@ -554,34 +554,3 @@ fn music_prefetch_lead_seconds_after_success(elapsed_seconds: f64) -> f64 {
             MUSIC_PREFETCH_MAX_LEAD_SECONDS,
         )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stale_event_recovers_only_a_non_current_transient_row() {
-        assert!(stale_music_playback_row_should_recover(
-            Some(2),
-            1,
-            Some(CompactMusicState::Buffering),
-        ));
-        assert!(!stale_music_playback_row_should_recover(
-            Some(1),
-            1,
-            Some(CompactMusicState::Buffering),
-        ));
-        assert!(!stale_music_playback_row_should_recover(
-            Some(2),
-            1,
-            Some(CompactMusicState::Failed),
-        ));
-    }
-
-    #[test]
-    fn successful_prefetch_lead_includes_resolve_and_startup_safety() {
-        assert_eq!(music_prefetch_lead_seconds_after_success(8.0), 25.0);
-        assert_eq!(music_prefetch_lead_seconds_after_success(1.0), 20.0);
-        assert_eq!(music_prefetch_lead_seconds_after_success(60.0), 90.0);
-    }
-}

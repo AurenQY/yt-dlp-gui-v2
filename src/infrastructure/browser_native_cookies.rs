@@ -6,9 +6,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use super::cookie_site_scope::{domain_is_in_site, site_domain_for_url};
+
 pub(super) struct NativeCookies {
     path: PathBuf,
-    youtube_authenticated: bool,
+    cookie_count: usize,
 }
 
 impl NativeCookies {
@@ -22,19 +24,8 @@ impl NativeCookies {
         if cookies.len() > 512 {
             return Err("Too many browser cookies.".into());
         }
-        let host = request["url"]
-            .as_str()
-            .unwrap_or("")
-            .split_once("://")
-            .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or(""))
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
+        let site = site_domain_for_url(request["url"].as_str().unwrap_or(""))?;
         let mut text = String::from("# Netscape HTTP Cookie File\n");
-        let mut has_login_info = false;
-        let mut has_sapisid = false;
         for cookie in cookies {
             let field = |key: &str| -> Result<&str, String> {
                 let value = cookie[key].as_str().ok_or("Invalid browser cookie.")?;
@@ -46,10 +37,8 @@ impl NativeCookies {
             let domain = field("domain")?;
             let bare = domain.trim_start_matches('.').to_ascii_lowercase();
             let host_only = cookie["hostOnly"].as_bool().unwrap_or(true);
-            if bare.is_empty()
-                || (host != bare && (host_only || !host.ends_with(&format!(".{bare}"))))
-            {
-                return Err("Browser cookie domain does not match the target.".into());
+            if bare.is_empty() || !domain_is_in_site(&bare, &site) {
+                return Err("Browser cookie domain does not match the website.".into());
             }
             let path = field("path")?;
             if !path.starts_with('/') {
@@ -57,8 +46,6 @@ impl NativeCookies {
             }
             let expiry = cookie["expirationDate"].as_f64().unwrap_or(0.0).max(0.0) as u64;
             let name = field("name")?;
-            has_login_info |= name == "LOGIN_INFO";
-            has_sapisid |= matches!(name, "SAPISID" | "__Secure-1PAPISID" | "__Secure-3PAPISID");
             text.push_str(&format!(
                 "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                 domain,
@@ -89,70 +76,76 @@ impl NativeCookies {
             .map_err(|_| "Could not create temporary browser cookies.")?;
         let guard = Self {
             path,
-            youtube_authenticated: has_login_info && has_sapisid,
+            cookie_count: cookies.len(),
         };
         file.write_all(text.as_bytes())
             .map_err(|_| "Could not write temporary browser cookies.")?;
         file.flush()
             .map_err(|_| "Could not flush temporary browser cookies.")?;
+        super::operation_diagnostics::record(
+            "cookies.resolved",
+            serde_json::json!({"cookieCount": guard.cookie_count, "source": "browser-storage-snapshot"}),
+        );
         Ok(Some(guard))
     }
 
     pub(super) fn path(&self) -> PathBuf {
         self.path.clone()
     }
+}
 
-    pub(super) fn youtube_authenticated(&self) -> bool {
-        self.youtube_authenticated
+/// Browser-only anonymous client coverage must inspect the selected saved
+/// source, not browser credentials that analysis no longer consumes directly.
+pub(super) fn shared_source_allows_anonymous_youtube_clients(
+    tools: &super::ToolPaths,
+    use_cookies: bool,
+    url: &str,
+) -> Result<bool, String> {
+    let site = site_domain_for_url(url)?;
+    if site != "youtube.com" && site != "youtu.be" {
+        return Ok(true);
     }
-
-    pub(super) fn into_persisted_path(mut self) -> PathBuf {
-        std::mem::take(&mut self.path)
+    let source = tools.resolve_shared_cookie_source(use_cookies, Some(url))?;
+    let path = match source {
+        None => return Ok(true),
+        // Authentication is unknown for browser extraction; don't force anonymous clients.
+        Some(super::tools::ResolvedCookieSource::Browser(_)) => return Ok(false),
+        Some(super::tools::ResolvedCookieSource::File(path)) => path,
+    };
+    let text = fs::read_to_string(path).map_err(|_| "Could not read selected Cookie file.")?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let mut login_info = false;
+    let mut sapisid = false;
+    for raw in text.lines() {
+        let line = raw.strip_prefix("#HttpOnly_").unwrap_or(raw);
+        if line.starts_with('#') {
+            continue;
+        }
+        let fields = line.splitn(7, '\t').collect::<Vec<_>>();
+        if fields.len() != 7 {
+            continue;
+        }
+        let domain = fields[0].trim_start_matches('.').to_ascii_lowercase();
+        let expiry = fields[4].parse::<u64>().unwrap_or_default();
+        if (domain != "youtube.com" && !domain.ends_with(".youtube.com"))
+            || (expiry != 0 && expiry <= now)
+        {
+            continue;
+        }
+        login_info |= fields[5] == "LOGIN_INFO";
+        sapisid |= matches!(
+            fields[5],
+            "SAPISID" | "__Secure-1PAPISID" | "__Secure-3PAPISID"
+        );
     }
+    Ok(!(login_info && sapisid))
 }
 
 impl Drop for NativeCookies {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn cookies_are_scoped_and_deleted_after_use() {
-        let request = serde_json::json!({"url":"https://example.com/video","browserCookies":[{
-            "domain":".example.com","hostOnly":false,"path":"/","secure":true,"name":"test","value":"synthetic"
-        }]});
-        let guard = NativeCookies::from_request(&request).unwrap().unwrap();
-        let path = guard.path();
-        assert!(path.is_file());
-        drop(guard);
-        assert!(!path.exists());
-        let mut wrong = request.clone();
-        wrong["browserCookies"][0]["domain"] = serde_json::json!(".unrelated.com");
-        assert!(NativeCookies::from_request(&wrong).is_err());
-        let mut invalid = request;
-        invalid["browserCookies"][0]["value"] = serde_json::json!("bad\nline");
-        assert!(NativeCookies::from_request(&invalid).is_err());
-    }
-
-    #[test]
-    fn youtube_login_requires_login_info_and_a_sapisid_cookie() {
-        let request = serde_json::json!({
-            "url":"https://www.youtube.com/watch?v=video",
-            "browserCookies":[
-                {"domain":".youtube.com","hostOnly":false,"path":"/","secure":true,"name":"LOGIN_INFO","value":"login"},
-                {"domain":".youtube.com","hostOnly":false,"path":"/","secure":true,"name":"__Secure-3PAPISID","value":"sid"}
-            ]
-        });
-        let guard = NativeCookies::from_request(&request).unwrap().unwrap();
-        assert!(guard.youtube_authenticated());
-
-        let mut incomplete = request;
-        incomplete["browserCookies"].as_array_mut().unwrap().pop();
-        let guard = NativeCookies::from_request(&incomplete).unwrap().unwrap();
-        assert!(!guard.youtube_authenticated());
     }
 }

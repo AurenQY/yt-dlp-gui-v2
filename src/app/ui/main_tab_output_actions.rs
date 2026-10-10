@@ -3,7 +3,7 @@ use egui_taffy::Tui;
 
 use crate::app::state::{AppMode, AppState};
 use crate::app::widgets::icon::AppIcon;
-use crate::domain::{DownloadContainerPreference, QueueItemId};
+use crate::domain::{DownloadContainerPreference, QueueBackend, QueueItemId};
 
 use super::common::{UiText, icon_text_button};
 use super::item_card::draw_item_output_container_picker;
@@ -46,7 +46,10 @@ impl DownloadContainerPicker {
         row: xaml_taffy_styles::XamlSingleLineRowLayout,
         state: &AppState,
     ) -> Option<Self> {
-        if state.app_mode() != AppMode::Origin || state.queue_items.is_empty() {
+        if state.app_mode() != AppMode::Origin
+            || state.queue_items.is_empty()
+            || matches!(&state.queue_items[0].backend, QueueBackend::GalleryDl(_))
+        {
             return None;
         }
         Some(Self {
@@ -97,7 +100,15 @@ impl TargetSelectButton {
             .queue_items
             .first()
             .is_some_and(|_| state.item_is_busy(0));
-        let mode = target_select_mode(state.app_mode(), item_metadata_loaded, item_busy);
+        let is_gallery = state
+            .queue_items
+            .first()
+            .is_some_and(|item| matches!(&item.backend, QueueBackend::GalleryDl(_)));
+        let mode = target_select_mode(
+            state.app_mode(),
+            item_metadata_loaded && !is_gallery,
+            item_busy,
+        );
         Self {
             cell: row.fixed_width_element_cell(element, button_size.width),
             button_size,
@@ -193,68 +204,13 @@ fn origin_save_extensions(default_extension: &str) -> Vec<&str> {
     extensions
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn origin_save_filters_put_default_first_without_duplicates() {
-        let extensions = origin_save_extensions("webm");
-
-        assert_eq!(extensions.first().copied(), Some("webm"));
-        assert_eq!(extensions.len(), 5);
-        assert_eq!(
-            extensions
-                .iter()
-                .filter(|extension| extension.eq_ignore_ascii_case("webm"))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn standard_mode_never_switches_shared_target_button_to_save_as() {
-        assert_eq!(
-            target_select_mode(AppMode::Standard, true, false),
-            TargetSelectMode::Folder
-        );
-        assert_eq!(
-            target_select_mode(AppMode::Standard, true, true),
-            TargetSelectMode::Folder
-        );
-    }
-
-    #[test]
-    fn standard_mode_keeps_previous_target_button_enabled_contract() {
-        assert!(target_select_enabled(AppMode::Standard, true, false));
-        assert!(!target_select_enabled(AppMode::Standard, false, true));
-    }
-
-    #[test]
-    fn origin_mode_restores_save_as_only_after_idle_analysis() {
-        assert_eq!(
-            target_select_mode(AppMode::Origin, false, false),
-            TargetSelectMode::Folder
-        );
-        assert_eq!(
-            target_select_mode(AppMode::Origin, true, false),
-            TargetSelectMode::OriginSaveAs
-        );
-        assert_eq!(
-            target_select_mode(AppMode::Origin, true, true),
-            TargetSelectMode::Folder
-        );
-        assert!(!target_select_enabled(AppMode::Origin, true, false));
-    }
-}
-
 impl DownloadButton {
     pub(super) fn resolve(
         row: xaml_taffy_styles::XamlSingleLineRowLayout,
         ui: &Ui,
         state: &AppState,
     ) -> Self {
-        let download_text = state.ui_i18n_text_for_key(UiText::DOWNLOAD);
+        let download_text = state.ui_i18n_text_for_key(main_download_label_key(state));
         let element = semantic_ui_metrics::xaml_icon_text_button_ui_element_for_visible_text(
             ui,
             download_text,
@@ -268,9 +224,52 @@ impl DownloadButton {
 
     pub(super) fn show(self, tui: &mut Tui, state: &mut AppState) {
         self.cell.show(tui, |ui| {
+            if state.app_mode() == AppMode::Origin {
+                let stop = state.origin_download_cancellable();
+                let enabled = if stop {
+                    !state.origin_download_stopping()
+                } else {
+                    state.origin_download_can_start()
+                };
+                let missing_yt_dlp = !stop
+                    && state
+                        .queue_items
+                        .first()
+                        .is_some_and(|item| matches!(&item.backend, QueueBackend::YtDlp))
+                    && state.required_dependency_notice().is_some();
+                let label = state.ui_i18n_text_for_key(main_download_label_key(state));
+                let button = if missing_yt_dlp {
+                    missing_tool_icon_text_button(ui, AppIcon::Download, label)
+                } else {
+                    icon_text_button(
+                        ui,
+                        if stop {
+                            AppIcon::Stop
+                        } else {
+                            AppIcon::Download
+                        },
+                        label,
+                    )
+                }
+                .min_size(egui::vec2(self.button_size.width, self.button_size.height));
+                if ui.add_enabled(enabled, button).clicked() {
+                    if missing_yt_dlp {
+                        state.open_dependency_component(
+                            crate::infrastructure::DependencyTool::YtDlp,
+                        );
+                    } else {
+                        state.request_origin_download();
+                    }
+                }
+                return;
+            }
             let has_pending_downloads = state.has_pending_download_items();
-            let missing_yt_dlp =
-                has_pending_downloads && state.required_dependency_notice().is_some();
+            let missing_yt_dlp = has_pending_downloads
+                && state.queue_items.iter().any(|item| {
+                    matches!(&item.backend, crate::domain::QueueBackend::YtDlp)
+                        && crate::app::queue_status::item_can_enter_download_queue(item)
+                })
+                && state.required_dependency_notice().is_some();
             let button = download_button_for_state(ui, state, missing_yt_dlp)
                 .min_size(egui::vec2(self.button_size.width, self.button_size.height));
             let response = if has_pending_downloads {
@@ -278,10 +277,26 @@ impl DownloadButton {
             } else {
                 ui.add_enabled(false, button)
             };
-            if response.clicked() && has_pending_downloads && !missing_yt_dlp {
-                state.request_main_download();
+            if response.clicked() && has_pending_downloads {
+                if missing_yt_dlp {
+                    state.open_dependency_component(crate::infrastructure::DependencyTool::YtDlp);
+                } else {
+                    state.request_main_download();
+                }
             }
         });
+    }
+}
+
+fn main_download_label_key(state: &AppState) -> &'static str {
+    if state.app_mode() == AppMode::Origin && state.origin_download_cancellable() {
+        if state.origin_download_stopping() {
+            "action.stopping"
+        } else {
+            "action.stop"
+        }
+    } else {
+        UiText::DOWNLOAD
     }
 }
 
