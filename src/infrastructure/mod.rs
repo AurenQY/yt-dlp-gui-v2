@@ -1,4 +1,5 @@
 pub(crate) mod app_identity;
+pub(crate) mod aria2_progress;
 pub(crate) mod async_http;
 mod browser_cookie_persistence;
 mod browser_gallery_media;

@@ -1348,7 +1348,12 @@ fn selector_uses_separate_streams(selector: &str) -> bool {
 }
 
 fn aria2_downloader_args(proxy_url: Option<&str>, no_check_certificates: bool) -> Option<String> {
-    let mut args = Vec::new();
+    // Piped downloads still need periodic readouts for the shared GUI parser.
+    let mut args = vec![
+        "--summary-interval=1".to_owned(),
+        "--show-console-readout=true".to_owned(),
+        "--enable-color=false".to_owned(),
+    ];
     if let Some(proxy_url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) {
         args.push(format!("--all-proxy={proxy_url}"));
     }

@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufReader, Read, Write},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -1211,22 +1211,39 @@ fn forward_process_lines(
 ) {
     let mut reader = BufReader::new(stream);
     let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
     loop {
-        bytes.clear();
-        match reader.read_until(b'\n', &mut bytes) {
+        let size = match reader.read(&mut chunk) {
             Ok(0) | Err(_) => break,
-            Ok(_) => {
-                let line = String::from_utf8_lossy(&bytes)
-                    .trim_end_matches(['\r', '\n'])
-                    .to_owned();
-                if tx.send((is_stderr, line)).is_err() {
-                    break;
+            Ok(size) => size,
+        };
+        for &byte in &chunk[..size] {
+            if matches!(byte, b'\r' | b'\n') {
+                if !bytes.is_empty() {
+                    let line = String::from_utf8_lossy(&bytes).into_owned();
+                    if tx.send((is_stderr, line)).is_err() {
+                        return;
+                    }
+                    bytes.clear();
                 }
+            } else {
+                bytes.push(byte);
             }
         }
     }
+    if !bytes.is_empty() {
+        let _ = tx.send((is_stderr, String::from_utf8_lossy(&bytes).into_owned()));
+    }
 }
 fn progress_event(line: &str) -> Option<Value> {
+    if let Some(progress) = super::aria2_progress::parse_aria2_progress(line) {
+        return Some(json!({
+            "event": "progress", "percent": progress.percent,
+            "downloaded": progress.downloaded, "total": progress.total,
+            "speed": progress.speed, "connections": progress.connections,
+            "eta": progress.eta.unwrap_or_default()
+        }));
+    }
     let payload = line.trim().strip_prefix("[yt-dlp],")?;
     let fields = payload.split(',').map(str::trim).collect::<Vec<_>>();
     let percent_index = if fields.first()?.contains('%') { 0 } else { 1 };

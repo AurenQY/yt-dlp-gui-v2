@@ -102,6 +102,8 @@ pub(super) fn format_download_progress_detail(
     push_detail_line(&mut lines, "Total", detail.total.as_deref());
     push_detail_line(&mut lines, "Speed", detail.speed.as_deref());
     push_detail_line(&mut lines, "Elapsed", detail.elapsed.as_deref());
+    push_detail_line(&mut lines, "ETA", detail.eta.as_deref());
+    push_detail_line(&mut lines, "Connections", detail.connections.as_deref());
     push_detail_line(&mut lines, "Frame", detail.frame.as_deref());
     push_detail_line(&mut lines, "FPS", detail.fps.as_deref());
     push_detail_line(&mut lines, "Time", detail.time.as_deref());

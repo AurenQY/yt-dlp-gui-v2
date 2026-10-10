@@ -90,6 +90,8 @@ pub(super) struct DownloadProgressDetail {
     pub total: Option<String>,
     pub speed: Option<String>,
     pub elapsed: Option<String>,
+    pub eta: Option<String>,
+    pub connections: Option<String>,
     pub frame: Option<String>,
     pub fps: Option<String>,
     pub time: Option<String>,
@@ -404,18 +406,23 @@ fn run_download_attempt(
         *guard = Some(child);
     }
     let progress_context = DownloadProgressContext::new(request);
+    let progress_slot = Arc::new(Mutex::new(progress_context.initial_slot()));
 
     let stdout_handle = stdout.map(|stdout| {
         let tx = tx.clone();
         let context = progress_context.clone();
+        let slot = progress_slot.clone();
         thread::spawn(move || {
-            read_download_stream(stdout, false, item_id, workflow_id, tx, context)
+            read_download_stream(stdout, false, item_id, workflow_id, tx, context, slot)
         })
     });
     let stderr_handle = stderr.map(|stderr| {
         let tx = tx.clone();
         let context = progress_context.clone();
-        thread::spawn(move || read_download_stream(stderr, true, item_id, workflow_id, tx, context))
+        let slot = progress_slot.clone();
+        thread::spawn(move || {
+            read_download_stream(stderr, true, item_id, workflow_id, tx, context, slot)
+        })
     });
 
     let status = wait_download_child(child_handle, cancel_requested);
@@ -1114,9 +1121,9 @@ fn read_download_stream(
     workflow_id: WorkflowRunId,
     tx: mpsc::Sender<DownloadEvent>,
     context: DownloadProgressContext,
+    current_slot: Arc<Mutex<DownloadProgressSlot>>,
 ) -> Vec<String> {
     let mut reader = BufReader::new(stream);
-    let mut current_slot = context.initial_slot();
     let mut progress_state = DownloadProgressEmitState::default();
     let mut lines = Vec::new();
     let mut pending = Vec::new();
@@ -1140,7 +1147,7 @@ fn read_download_stream(
                     workflow_id,
                     &tx,
                     &context,
-                    &mut current_slot,
+                    &current_slot,
                     &mut progress_state,
                     &mut lines,
                 );
@@ -1159,7 +1166,7 @@ fn read_download_stream(
             workflow_id,
             &tx,
             &context,
-            &mut current_slot,
+            &current_slot,
             &mut progress_state,
             &mut lines,
         );
@@ -1260,7 +1267,7 @@ fn process_download_line(
     workflow_id: WorkflowRunId,
     tx: &mpsc::Sender<DownloadEvent>,
     context: &DownloadProgressContext,
-    current_slot: &mut DownloadProgressSlot,
+    current_slot: &Arc<Mutex<DownloadProgressSlot>>,
     progress_state: &mut DownloadProgressEmitState,
     lines: &mut Vec<String>,
 ) {
@@ -1280,6 +1287,12 @@ fn process_download_line(
         let _ = tx.send(DownloadEvent::Metadata { item_id, json });
         return;
     }
+
+    // Destination lines and external-downloader readouts can use different
+    // pipes. Share their slot so stderr audio progress is not routed to video.
+    let mut current_slot = current_slot
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
 
     if let Some(slot) = detect_download_slot(&line, context) {
         *current_slot = slot;
@@ -1313,6 +1326,26 @@ fn process_download_line(
             slot,
             progress.percent,
             progress.detail,
+            progress_state,
+        );
+        return;
+    }
+
+    if let Some(progress) = crate::infrastructure::aria2_progress::parse_aria2_progress(&line) {
+        emit_download_progress(
+            tx,
+            item_id,
+            workflow_id,
+            *current_slot,
+            progress.percent,
+            Some(DownloadProgressDetail {
+                downloaded: Some(progress.downloaded),
+                total: Some(progress.total),
+                speed: Some(progress.speed),
+                eta: progress.eta,
+                connections: Some(progress.connections),
+                ..Default::default()
+            }),
             progress_state,
         );
         return;
