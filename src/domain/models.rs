@@ -412,6 +412,8 @@ pub struct QueueItem {
     pub music_stream_expected_bytes: Option<u64>,
     pub music_cache_key: String,
     pub music_duration_seconds: Option<f64>,
+    /// In-memory source naming metadata from stream resolution, not cache schema.
+    pub music_naming_metadata: Option<VideoMetadata>,
     pub completed_selection: Option<CompletedSelection>,
     pub last_output_path: Option<String>,
     pub last_error: Option<String>,
@@ -458,6 +460,7 @@ impl QueueItem {
             music_stream_expected_bytes: None,
             music_cache_key: String::new(),
             music_duration_seconds: None,
+            music_naming_metadata: None,
             completed_selection: None,
             last_output_path: None,
             last_error: None,
@@ -538,9 +541,18 @@ pub enum MetadataState {
     Failed(String),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputNameOrigin {
+    Automatic,
+    Explicit,
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DownloadSelection {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_origin: Option<OutputNameOrigin>,
     #[serde(skip_serializing_if = "quality_is_best")]
     pub quality: QualityPreset,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -634,6 +646,7 @@ impl CompletedSelection {
 impl Default for DownloadSelection {
     fn default() -> Self {
         Self {
+            name_origin: None,
             quality: QualityPreset::Best,
             video_selector: String::new(),
             audio_selector: String::new(),

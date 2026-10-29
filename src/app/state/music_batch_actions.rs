@@ -282,6 +282,7 @@ impl AppState {
         thread::spawn(move || {
             let mut command_line = String::new();
             let result = (|| -> Result<PlaylistEntrySeed, String> {
+                let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
                 let mut command =
                     tool_paths.prepare_music_flat_update_command(&source, use_cookies)?;
                 command_line = format_process_command_line(&command);
@@ -319,6 +320,9 @@ impl AppState {
                         Err(error) => {
                             terminate_child_process(&mut child);
                             let _ = child.wait();
+                            if let Some(handle) = stderr_handle {
+                                let _ = handle.join();
+                            }
                             return Err(format!(
                                 "Could not read yt-dlp music flat output: {error}"
                             ));
@@ -346,12 +350,17 @@ impl AppState {
                         break;
                     }
                 }
-                let status = child.wait().map_err(|error| {
-                    format!("Could not wait for yt-dlp music flat import: {error}")
-                })?;
+                let status = child.wait();
+                if status.is_err() {
+                    terminate_child_process(&mut child);
+                    let _ = child.wait();
+                }
                 let stderr_text = stderr_handle
                     .and_then(|handle| handle.join().ok())
                     .unwrap_or_default();
+                let status = status.map_err(|error| {
+                    format!("Could not wait for yt-dlp music flat import: {error}")
+                })?;
                 if let Some(seed) = first_seed {
                     return Ok(seed);
                 }

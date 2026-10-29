@@ -28,12 +28,16 @@ mod metadata_diagnostics;
 #[derive(Clone, Debug)]
 pub struct GalleryDlRuntime {
     program: PathBuf,
+    #[cfg(test)]
+    source_harness: bool,
 }
 
 impl GalleryDlRuntime {
     pub fn standalone(path: impl Into<PathBuf>) -> Self {
         Self {
             program: path.into(),
+            #[cfg(test)]
+            source_harness: false,
         }
     }
 
@@ -44,7 +48,25 @@ impl GalleryDlRuntime {
                 self.program.display()
             ));
         }
-        None
+        self.acquire().err()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn source_harness(path: impl Into<PathBuf>) -> Self {
+        Self {
+            program: path.into(),
+            source_harness: true,
+        }
+    }
+
+    fn acquire(
+        &self,
+    ) -> Result<Option<super::gallery_runtime_policy::GalleryRuntimeGuard>, String> {
+        #[cfg(test)]
+        if self.source_harness {
+            return Ok(None);
+        }
+        super::gallery_runtime_policy::acquire(&self.program).map(Some)
     }
 
     fn command(&self) -> Command {
@@ -137,10 +159,16 @@ impl GalleryDlBackend {
         use_cookies: bool,
         resolve_intermediaries: bool,
     ) -> Result<GalleryDlAnalyzeOutput, super::AnalyzeError> {
-        let mut command = self.base_command().map_err(|message| super::AnalyzeError {
-            message,
-            command_line: None,
-        })?;
+        let _storage_lease =
+            super::storage_paths::use_cache().map_err(|message| super::AnalyzeError {
+                message,
+                command_line: None,
+            })?;
+        let (mut command, _runtime_guard) =
+            self.base_command().map_err(|message| super::AnalyzeError {
+                message,
+                command_line: None,
+            })?;
         command
             .arg("--config-ignore")
             .arg("--no-input")
@@ -150,6 +178,19 @@ impl GalleryDlBackend {
             } else {
                 "--dump-json"
             });
+        let _storage_work = super::storage_paths::CacheWorkDirectory::new().map_err(|message| {
+            super::AnalyzeError {
+                message,
+                command_line: None,
+            }
+        })?;
+        append_gallery_storage_args(&mut command, Some(&_storage_work.path)).map_err(
+            |message| super::AnalyzeError {
+                message,
+                command_line: None,
+            },
+        )?;
+        append_gallery_ytdl_ffmpeg_args(&mut command, tool_paths);
         if !resolve_intermediaries {
             command.arg("-o").arg("cookies-update=false");
         }
@@ -269,8 +310,10 @@ impl GalleryDlBackend {
         end: u32,
         on_post: impl FnMut(&GalleryAnalysis, usize) -> Result<(), String>,
     ) -> Result<GalleryDlAnalyzeOutput, String> {
-        let mut prepared =
-            self.prepare_item_download(url, &std::env::temp_dir(), tool_paths, use_cookies)?;
+        let destination = super::storage_paths::require_ready()?
+            .cache_root
+            .join("gallery-dl-temp/metadata");
+        let mut prepared = self.prepare_item_command(url, &destination, tool_paths, use_cookies)?;
         prepared
             .command
             .arg("-o")
@@ -333,11 +376,25 @@ impl GalleryDlBackend {
         tool_paths: &ToolPaths,
         use_cookies: bool,
     ) -> Result<PreparedGalleryDlDownload, String> {
+        super::storage_paths::validate_output_destination(destination)?;
+        self.prepare_item_command(url, destination, tool_paths, use_cookies)
+    }
+
+    // Metadata-only callers use an owned nominal path and disable all media
+    // writes before execution. Final-download callers validate ownership above.
+    fn prepare_item_command(
+        &self,
+        url: &str,
+        destination: &Path,
+        tool_paths: &ToolPaths,
+        use_cookies: bool,
+    ) -> Result<PreparedGalleryDlDownload, String> {
         if destination.as_os_str().is_empty() {
             return Err("gallery-dl download destination is empty.".to_owned());
         }
 
-        let mut command = self.base_command()?;
+        let (mut command, runtime_guard) = self.base_command()?;
+        let storage_work = super::storage_paths::CacheWorkDirectory::new()?;
         command
             .arg("--config-ignore")
             .arg("--no-input")
@@ -360,6 +417,7 @@ impl GalleryDlBackend {
                 gallery_metadata_postprocessors(false)
             ));
         append_shared_cookie_args(&mut command, tool_paths, use_cookies, url)?;
+        append_gallery_storage_args(&mut command, Some(&storage_work.path))?;
         append_gallery_ytdl_ffmpeg_args(&mut command, tool_paths);
         // MetadataPP writes stdout without flushing; stream events as they happen.
         command
@@ -372,17 +430,25 @@ impl GalleryDlBackend {
             command,
             destination: destination.to_path_buf(),
             command_line,
+            storage_work,
+            runtime_guard,
         })
     }
 
-    fn base_command(&self) -> Result<Command, String> {
-        if let Some(error) = self.runtime.availability_error() {
-            return Err(error);
-        }
+    fn base_command(
+        &self,
+    ) -> Result<
+        (
+            Command,
+            Option<super::gallery_runtime_policy::GalleryRuntimeGuard>,
+        ),
+        String,
+    > {
+        let runtime_guard = self.runtime.acquire()?;
         let mut command = self.runtime.command();
         configure_background_command(&mut command);
         analysis_policy::append_profile_feed_policy(&mut command);
-        Ok(command)
+        Ok((command, runtime_guard))
     }
 }
 
@@ -390,10 +456,19 @@ pub struct PreparedGalleryDlDownload {
     pub command: Command,
     pub destination: PathBuf,
     pub command_line: String,
+    pub(crate) storage_work: super::storage_paths::CacheWorkDirectory,
+    pub(crate) runtime_guard: Option<super::gallery_runtime_policy::GalleryRuntimeGuard>,
 }
 
 fn gallery_metadata_postprocessors(browser_sources: bool) -> serde_json::Value {
-    let mut excluded = vec!["_ytdl_manifest_data", "_http_headers"];
+    // The ytdl extractor carries a self-referencing info dictionary and a live
+    // YoutubeDL object. Neither is metadata transport or safe to JSON-encode.
+    let mut excluded = vec![
+        "_ytdl_manifest_data",
+        "_ytdl_info_dict",
+        "_ytdl_instance",
+        "_http_headers",
+    ];
     if !browser_sources {
         excluded.push("_fallback");
     }
@@ -808,6 +883,33 @@ fn append_shared_cookie_args(
             command.arg("--cookies-from-browser").arg(browser);
         }
         None => {}
+    }
+    Ok(())
+}
+
+fn append_gallery_storage_args(command: &mut Command, work: Option<&Path>) -> Result<(), String> {
+    let cachedir = super::storage_paths::cache_directory("yt-dlp")?;
+    let raw_options = serde_json::json!({"cachedir": cachedir});
+    // Extractor-level settings also cover ytdl-generic and prepared yt-dlp instances.
+    for owner in ["extractor", "downloader.ytdl"] {
+        command
+            .arg("-o")
+            .arg(format!("{owner}.raw-options={raw_options}"));
+    }
+    if let Some(work) = work {
+        let runtime_temp = work.join("runtime-temp");
+        super::storage_paths::reject_links(&runtime_temp)?;
+        std::fs::create_dir_all(&runtime_temp)
+            .map_err(|e| format!("Could not create gallery runtime temporary folder: {e}"))?;
+        command
+            .env("TEMP", &runtime_temp)
+            .env("TMP", &runtime_temp)
+            .env("PYTHONDONTWRITEBYTECODE", "1");
+        command
+            .arg("-o")
+            .arg("part=true")
+            .arg("-o")
+            .arg(format!("part-directory={}", serde_json::json!(work)));
     }
     Ok(())
 }

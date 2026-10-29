@@ -441,9 +441,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "ファイル操作",
         "options.action_button" => "操作ボタン",
         "options.file_action.show_menu" => "メニューを表示",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "キャッシュ",
         "options.cache_location" => "キャッシュ位置",
         "options.cache_location.default" => "既定",
+        "options.cache_location.portable" => "アプリのフォルダー（ポータブル）",
+        "options.cache_location.system_temp" => "システムの一時フォルダー",
+        "options.cache_current_folder" => "現在のキャッシュフォルダー",
+        "options.cache_after_restart" => "再起動後",
+        "options.cache_restart_required" => "再起動が必要です",
+        "options.cache_location_help" => {
+            "変更は再起動後に適用されます。古いキャッシュは元の場所に残ります。使用量と削除は現在のフォルダーが対象です。状態と復旧データはアプリのフォルダーに保存されます。一時ファイルはシステムにより削除される場合があります。"
+        }
+        "options.cache_legacy_notice" => {
+            "以前の「既定」はアプリのフォルダー（ポータブル）に変更されました。すべてのアプリキャッシュが選択した場所を使用します。"
+        }
         "options.cache_usage" => "使用量",
         "options.cache_usage_detail" => "合計: {total} · 音声: {audio} · 期限切れ: {expired}",
         "options.cache_cleanup" => "クリーンアップ",

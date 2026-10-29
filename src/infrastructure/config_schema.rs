@@ -8,6 +8,21 @@ pub(super) struct Field {
 
 pub(super) const FIELDS: &[Field] = &[
     Field {
+        source: "output_naming",
+        path: "storage.output.naming",
+        comment: "Automatic filename rule: title | title_id | uploader_title_id | custom.",
+    },
+    Field {
+        source: "output_existing_file",
+        path: "storage.output.existing_file",
+        comment: "Existing output policy: keep_both | skip. Existing files are never silently replaced.",
+    },
+    Field {
+        source: "output_template",
+        path: "storage.output.template",
+        comment: "Custom basename fields: {title}, {id}, {uploader}, {upload_date}; {{ and }} escape braces. No directory or extension.",
+    },
+    Field {
         source: "download_dir",
         path: "storage.download_dir",
         comment: "Download directory. Relative paths use the application data root.",
@@ -15,12 +30,12 @@ pub(super) const FIELDS: &[Field] = &[
     Field {
         source: "cache_location_mode",
         path: "storage.cache.mode",
-        comment: "Cache location: v2_cache | yt_dlp_default | windows_temp.",
+        comment: "Application cache location: v2_cache | windows_temp. Changes take effect after restart; legacy yt_dlp_default maps to v2_cache.",
     },
     Field {
         source: "cache_dir",
         path: "storage.cache.dir",
-        comment: "Cache directory used by the selected cache mode.",
+        comment: "Portable cache directory, used by v2_cache. Relative paths use the application root; a missing directory is created on startup.",
     },
     Field {
         source: "yt_dlp_path",

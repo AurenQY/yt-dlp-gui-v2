@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::infrastructure::{output_policy::OutputDisposition, output_transaction::OutputOutcome};
 use serde_json::Value;
 
 use super::download_resilience::{
@@ -29,9 +30,16 @@ pub(super) struct DownloadResult {
     pub workflow_kind: WorkflowKind,
     pub target_kind: DownloadTargetKind,
     pub result: Result<String, String>,
+    pub disposition: OutputDisposition,
+    pub processed_before_publication: bool,
 }
 
 pub(super) enum DownloadEvent {
+    OutputStatus {
+        item_id: QueueItemId,
+        workflow_id: WorkflowRunId,
+        detail: String,
+    },
     Metadata {
         item_id: QueueItemId,
         json: Value,
@@ -129,8 +137,38 @@ pub(super) fn run_download_worker(
     let policy = DownloadResiliencePolicy::default();
     let mut context = DownloadAttemptContext::new();
     let mut current_request = request.clone();
+    current_request.output.cancel = cancel_requested.clone();
+    let status_tx = tx.clone();
+    current_request.output.status = Some(Arc::new(move |detail| {
+        let _ = status_tx.send(DownloadEvent::OutputStatus {
+            item_id,
+            workflow_id,
+            detail: detail.into(),
+        });
+    }));
+    // Prepare once to reserve before any media request, then share the owner
+    // across every retry and the complete processing/publication lifetime.
+    let configured_tools = tool_paths.for_output(&current_request.output);
+    let preparation = configured_tools
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|tools| tools.prepare_download(&current_request));
+    let tool_paths = configured_tools.unwrap_or(tool_paths);
+    let owner = preparation
+        .as_ref()
+        .ok()
+        .and_then(|p| p.output_transaction.clone());
+    current_request.output.transaction = owner.clone();
+    let early = preparation.err();
+    let skipped = owner.as_ref().and_then(|o| o.lock().ok()?.skipped.clone());
 
     let result = loop {
+        if let Some(error) = &early {
+            break Err(error.clone());
+        }
+        if let Some(path) = &skipped {
+            break Ok(path.display().to_string());
+        }
         let attempt = run_download_attempt(
             &tool_paths,
             &current_request,
@@ -237,13 +275,216 @@ pub(super) fn run_download_worker(
         }
     };
 
+    let mut disposition = OutputDisposition::Published;
+    let mut result = if skipped.is_some() {
+        disposition = OutputDisposition::SkippedExisting;
+        result
+    } else {
+        result.and_then(|path| {
+            let path = if let Some(settings) = &current_request.output.transcode {
+                process_staged_output(
+                    &tool_paths,
+                    settings,
+                    &path,
+                    &current_request,
+                    item_id,
+                    workflow_id,
+                    &tx,
+                    &child_handle,
+                    &cancel_requested,
+                )?
+            } else {
+                path
+            };
+            let owner = owner.as_ref().ok_or("Output transaction is missing")?;
+            match owner
+                .lock()
+                .map_err(|_| "Output transaction unavailable")?
+                .publish(Path::new(&path), &cancel_requested)?
+            {
+                OutputOutcome::Published(paths) => Ok(paths
+                    .first()
+                    .ok_or("No output was published")?
+                    .display()
+                    .to_string()),
+                OutputOutcome::SkippedExisting(path) => {
+                    disposition = OutputDisposition::SkippedExisting;
+                    Ok(path.display().to_string())
+                }
+            }
+        })
+    };
+    if result.is_err() {
+        disposition = if owner
+            .as_ref()
+            .is_some_and(|o| o.lock().is_ok_and(|g| !g.published.is_empty()))
+        {
+            OutputDisposition::PartialFailure
+        } else if cancel_requested.load(Ordering::Acquire) {
+            OutputDisposition::Cancelled
+        } else {
+            OutputDisposition::Failed
+        };
+    }
+    if disposition == OutputDisposition::Cancelled {
+        result = Err(DOWNLOAD_CANCELLED_MESSAGE.into());
+    }
     let _ = tx.send(DownloadEvent::Finished(DownloadResult {
         item_id,
         workflow_id,
         workflow_kind,
         target_kind: request.target_kind,
         result,
+        disposition,
+        processed_before_publication: true,
     }));
+}
+
+fn process_staged_output(
+    tools: &ToolPaths,
+    settings: &crate::infrastructure::TranscodeIntentSettings,
+    path: &str,
+    request: &DownloadRequest,
+    item_id: QueueItemId,
+    workflow_id: WorkflowRunId,
+    tx: &mpsc::Sender<DownloadEvent>,
+    child: &Arc<Mutex<Option<Child>>>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    if request.download_section_args.len() > 1 {
+        let input = Path::new(path);
+        let mut result = path.to_owned();
+        let parent = input.parent().ok_or("Section output has no parent")?;
+        let mut inputs = fs::read_dir(parent)
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.extension() == input.extension()
+                    && p.file_stem()
+                        .is_some_and(|s| s.to_string_lossy().starts_with("output - "))
+            })
+            .collect::<Vec<_>>();
+        inputs.sort();
+        for section in inputs {
+            let converted = process_one_staged_output(
+                tools,
+                settings,
+                &section.display().to_string(),
+                request,
+                item_id,
+                workflow_id,
+                tx,
+                child,
+                cancel,
+            )?;
+            if section == input {
+                result = converted;
+            }
+        }
+        return Ok(result);
+    }
+    process_one_staged_output(
+        tools,
+        settings,
+        path,
+        request,
+        item_id,
+        workflow_id,
+        tx,
+        child,
+        cancel,
+    )
+}
+
+fn process_one_staged_output(
+    tools: &ToolPaths,
+    settings: &crate::infrastructure::TranscodeIntentSettings,
+    path: &str,
+    request: &DownloadRequest,
+    item_id: QueueItemId,
+    workflow_id: WorkflowRunId,
+    tx: &mpsc::Sender<DownloadEvent>,
+    child: &Arc<Mutex<Option<Child>>>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    use super::post_process_worker::PostProcessEvent;
+    request.output.validate_work(Path::new(path))?;
+    let temp = request
+        .output
+        .transaction
+        .as_ref()
+        .ok_or("Output owner missing")?
+        .lock()
+        .map_err(|_| "Output owner unavailable")?
+        .work
+        .join(".conversion");
+    let (sender, receiver) = mpsc::channel();
+    let events = tx.clone();
+    let kind = request.target_kind;
+    let bridge = thread::spawn(move || {
+        for event in receiver {
+            let translated = match event {
+                PostProcessEvent::Progress { percent, .. } => DownloadEvent::Progress {
+                    item_id,
+                    workflow_id,
+                    slot: DownloadProgressSlot::Both,
+                    percent,
+                    detail: None,
+                },
+                PostProcessEvent::ToolCommandFinished {
+                    command_line,
+                    success,
+                    detail,
+                    ..
+                } => DownloadEvent::ToolCommandFinished {
+                    item_id,
+                    workflow_id,
+                    target_kind: kind,
+                    command_line,
+                    success,
+                    detail,
+                },
+                PostProcessEvent::RecoveryStep {
+                    action,
+                    detail,
+                    recover_previous_failure,
+                    resolved_success,
+                    ..
+                } => DownloadEvent::RecoveryStep {
+                    item_id,
+                    workflow_id,
+                    target_kind: kind,
+                    action,
+                    detail,
+                    recover_previous_failure,
+                    resolved_success,
+                },
+                PostProcessEvent::Finished(_) => continue,
+            };
+            let _ = events.send(translated);
+        }
+    });
+    let result = super::post_process_worker::run_output_conversion_attempt(
+        tools,
+        settings,
+        path,
+        &temp,
+        item_id,
+        workflow_id,
+        sender,
+        child,
+        cancel,
+    );
+    let _ = bridge.join();
+    result.map_err(|e| {
+        if cancel.load(Ordering::Acquire) {
+            DOWNLOAD_CANCELLED_MESSAGE.into()
+        } else {
+            e
+        }
+    })
 }
 
 fn emit_recovery_step(
@@ -378,6 +619,8 @@ fn run_download_attempt(
     child_handle: &Arc<Mutex<Option<Child>>>,
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<String, DownloadAttemptFailure> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache()
+        .map_err(DownloadAttemptFailure::from_tool_setup_error)?;
     let prepared = tool_paths
         .prepare_download(request)
         .map_err(DownloadAttemptFailure::from_tool_setup_error)?;
@@ -389,6 +632,7 @@ fn run_download_attempt(
         mut command,
         output_path,
         command_line,
+        output_transaction: _output_owner,
     } = prepared;
 
     let mut child = command.spawn().map_err(|error| {
@@ -602,6 +846,8 @@ pub(super) fn wait_download_child(
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    terminate_child_process_tree(child);
+                    let _ = child.wait();
                     *guard = None;
                     return Some(Err(error));
                 }
@@ -623,7 +869,7 @@ pub(super) fn wait_download_child(
 }
 
 #[cfg(target_os = "windows")]
-fn terminate_child_process_tree(child: &mut Child) {
+pub(super) fn terminate_child_process_tree(child: &mut Child) {
     let mut command = std::process::Command::new("taskkill");
     configure_background_command(&mut command);
     let _ = command
@@ -635,7 +881,7 @@ fn terminate_child_process_tree(child: &mut Child) {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn terminate_child_process_tree(child: &mut Child) {
+pub(super) fn terminate_child_process_tree(child: &mut Child) {
     let _ = child.kill();
 }
 
@@ -655,6 +901,7 @@ fn finalize_download_output(
             actual_output_paths.push(resolve_completed_output_path(output_path, stdout_lines));
         }
         for actual_output_path in &actual_output_paths {
+            request.output.validate_work(actual_output_path)?;
             apply_file_time_mode(tool_paths, request, actual_output_path, stdout_lines);
         }
         let representative_output_path = actual_output_paths

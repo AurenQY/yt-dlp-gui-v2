@@ -136,6 +136,10 @@ fn startup_font_profile(config: &AppConfig) -> FontLoadProfile {
 }
 
 impl NgDlpApp {
+    #[cfg(cache_review_gui)]
+    pub(crate) fn review_gui_state(&mut self) -> &mut AppState {
+        &mut self.state
+    }
     pub fn new(cc: &CreationContext<'_>) -> Self {
         let (config, tool_paths) = AppConfig::load_runtime();
         Self::new_with_runtime(cc, config, tool_paths)
@@ -157,6 +161,7 @@ impl NgDlpApp {
             .spawn(move || load_windows_ui_fonts(startup_font_profile))
             .ok();
         let mut state = AppState::from_runtime(config, tool_paths);
+        state.bind_gallery_repaint(&cc.egui_ctx);
         state.runtime_renderer =
             Some(crate::infrastructure::wgpu_api::RuntimeRendererInfo::from_creation(cc));
         record_startup_checkpoint("app state built");
@@ -471,6 +476,20 @@ impl NgDlpApp {
     }
 
     fn apply_fonts(&mut self, ctx: &egui::Context) {
+        self.dynamic_font_scripts
+            .observe_text(&self.state.output_draft.template);
+        self.dynamic_font_scripts
+            .observe_text(&self.state.output_settings_feedback);
+        // Cache paths are runtime/saved data, so they can introduce scripts
+        // independently of queue-content revisions or the interface language.
+        self.dynamic_font_scripts
+            .observe_text(&self.state.cache_location_display());
+        if let Some(path) = self.state.pending_cache_location_display() {
+            self.dynamic_font_scripts.observe_text(&path);
+        }
+        if let Some(error) = self.state.cache_storage_error() {
+            self.dynamic_font_scripts.observe_text(error);
+        }
         let profile = FontLoadProfile {
             language: self.state.language(),
             language_picker_visible: matches!(

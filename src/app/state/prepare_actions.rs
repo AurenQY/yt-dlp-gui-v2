@@ -1,23 +1,35 @@
 use super::*;
 
 impl AppState {
-    pub fn available_cache_location_modes(&self) -> [CacheLocationMode; 3] {
-        [
-            CacheLocationMode::YtDlpDefault,
-            CacheLocationMode::V2Cache,
-            CacheLocationMode::WindowsTemp,
-        ]
+    pub fn available_cache_location_modes(&self) -> [CacheLocationMode; 2] {
+        [CacheLocationMode::V2Cache, CacheLocationMode::WindowsTemp]
     }
 
     pub fn set_cache_location_mode(&mut self, mode: CacheLocationMode) {
-        self.tool_paths.cache_mode = mode;
-        self.config.cache_location_mode = match mode {
-            CacheLocationMode::YtDlpDefault => SerializableCacheLocationMode::YtDlpDefault,
-            CacheLocationMode::V2Cache => SerializableCacheLocationMode::V2Cache,
-            CacheLocationMode::WindowsTemp => SerializableCacheLocationMode::WindowsTemp,
-        };
-        let _ = self.config.save();
-        self.refresh_prepare_report();
+        match self.config.with_saved_cache_location(mode) {
+            Ok(candidate) => {
+                self.config = candidate;
+                self.last_action = if self.cache_storage_error().is_none()
+                    && self.pending_cache_location_display().is_none()
+                {
+                    "Cache location saved. This location is already active."
+                } else {
+                    "Cache location saved. Restart the application to apply it."
+                }
+                .to_owned();
+            }
+            Err(error) => {
+                self.last_action = format!("Could not save cache location: {error}");
+                self.config.cache_settings_error = Some(error);
+            }
+        }
+    }
+
+    pub fn saved_cache_location_mode(&self) -> CacheLocationMode {
+        match self.config.cache_location_mode {
+            SerializableCacheLocationMode::WindowsTemp => CacheLocationMode::WindowsTemp,
+            _ => CacheLocationMode::V2Cache,
+        }
     }
 
     pub fn should_show_prepare_tab(&self) -> bool {
@@ -35,8 +47,16 @@ impl AppState {
     }
 
     pub fn refresh_prepare_report(&mut self) {
-        self.prepare_report =
-            collect_prepare_report(&self.tool_paths, &self.item_defaults.output_dir);
+        self.request_gallery_readiness(false);
+        self.collect_current_prepare_report();
+    }
+
+    fn collect_current_prepare_report(&mut self) {
+        self.prepare_report = collect_prepare_report(
+            &self.tool_paths,
+            &self.item_defaults.output_dir,
+            self.gallery_readiness.result.as_ref(),
+        );
         if !self.should_show_prepare_tab() && self.active_tab == AppTab::Prepare {
             self.active_tab = AppTab::Main;
         }
@@ -65,7 +85,7 @@ impl AppState {
                 continue;
             }
 
-            let installed = dependency_tool_is_available(tool, self.dependency_tool_path(tool));
+            let installed = self.dependency_tool_is_installed(tool);
             let entry = self.component_update_snapshot.ensure_entry_mut(id);
             entry.status = if installed {
                 ComponentUpdateStatus::Unknown
@@ -356,7 +376,7 @@ impl AppState {
             self.last_action = "Update check is already running.".to_owned();
             return;
         }
-        self.refresh_prepare_report();
+        self.collect_current_prepare_report();
         if let Some(reason) = self.component_update_block_reason(None) {
             self.last_action = reason;
             return;
@@ -381,7 +401,16 @@ impl AppState {
         );
     }
 
-    fn update_dependency_tools_for_prepare(&mut self, tools: Vec<DependencyTool>) {
+    fn update_dependency_tools_for_prepare(&mut self, mut tools: Vec<DependencyTool>) {
+        let pending_gallery =
+            self.gallery_readiness_pending() && tools.contains(&DependencyTool::GalleryDl);
+        if pending_gallery {
+            tools.retain(|tool| *tool != DependencyTool::GalleryDl);
+            if tools.is_empty() {
+                self.last_action = self.gallery_readiness_detail();
+                return;
+            }
+        }
         let ids = tools
             .into_iter()
             .map(ManagedComponentId::for_dependency_tool)
@@ -415,6 +444,10 @@ impl AppState {
     }
 
     pub fn update_component(&mut self, id: ManagedComponentId) {
+        if id == ManagedComponentId::GalleryDl && self.gallery_readiness_pending() {
+            self.last_action = self.gallery_readiness_detail();
+            return;
+        }
         if let Some(tool) = id.as_dependency_tool() {
             if self.dependency_tool_is_installed(tool)
                 && !self.dependency_tool_uses_managed_path(tool)
@@ -428,7 +461,7 @@ impl AppState {
             self.last_action = "Update check is already running.".to_owned();
             return;
         }
-        self.refresh_prepare_report();
+        self.collect_current_prepare_report();
         if let Some(reason) = self.component_update_block_reason(Some(id)) {
             self.last_action = reason;
             return;
@@ -524,12 +557,20 @@ impl AppState {
         for tool in available_tools {
             let current_path = self.dependency_tool_path(tool).to_owned();
             if !current_path.trim().is_empty()
-                && dependency_tool_is_available(tool, current_path.as_str())
+                && if tool == DependencyTool::GalleryDl {
+                    crate::infrastructure::dependency_tool_exists(current_path.as_str())
+                } else {
+                    dependency_tool_is_available(tool, current_path.as_str())
+                }
             {
                 continue;
             }
             let managed_path = tool.default_portable_path().to_owned();
-            if !dependency_tool_is_available(tool, managed_path.as_str()) {
+            if !if tool == DependencyTool::GalleryDl {
+                crate::infrastructure::dependency_tool_exists(managed_path.as_str())
+            } else {
+                dependency_tool_is_available(tool, managed_path.as_str())
+            } {
                 continue;
             }
             changed |= self.set_dependency_tool_path_without_refresh(tool, managed_path);
@@ -655,7 +696,11 @@ impl AppState {
     }
 
     pub fn dependency_tool_is_installed(&self, tool: DependencyTool) -> bool {
-        dependency_tool_is_available(tool, self.dependency_tool_path(tool))
+        if tool == DependencyTool::GalleryDl {
+            self.gallery_is_ready_for_display()
+        } else {
+            dependency_tool_is_available(tool, self.dependency_tool_path(tool))
+        }
     }
 
     pub fn dependency_tool_uses_managed_path(&self, tool: DependencyTool) -> bool {

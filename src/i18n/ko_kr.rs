@@ -429,9 +429,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "파일 작업",
         "options.action_button" => "동작 버튼",
         "options.file_action.show_menu" => "메뉴 표시",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "캐시",
         "options.cache_location" => "캐시 위치",
         "options.cache_location.default" => "기본값",
+        "options.cache_location.portable" => "앱 폴더(포터블)",
+        "options.cache_location.system_temp" => "시스템 임시 폴더",
+        "options.cache_current_folder" => "현재 캐시 폴더",
+        "options.cache_after_restart" => "다시 시작 후",
+        "options.cache_restart_required" => "다시 시작 필요",
+        "options.cache_location_help" => {
+            "변경 사항은 다시 시작한 후 적용됩니다. 기존 캐시는 원래 위치에 남습니다. 사용량과 정리는 현재 폴더에만 적용됩니다. 상태 및 복구 데이터는 앱 폴더에 저장됩니다. 시스템 정리가 임시 파일을 삭제할 수 있습니다."
+        }
+        "options.cache_legacy_notice" => {
+            "기존 기본값 옵션은 이제 앱 폴더(포터블)를 사용합니다. 모든 앱 캐시는 선택한 위치를 따릅니다."
+        }
         "options.cache_usage" => "사용량",
         "options.cache_usage_detail" => "전체: {total} · 오디오: {audio} · 만료됨: {expired}",
         "options.cache_cleanup" => "정리",

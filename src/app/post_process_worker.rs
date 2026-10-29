@@ -14,8 +14,8 @@ use crate::app::media_probe::{
 use crate::domain::{QueueItemId, WorkflowRunId};
 use crate::infrastructure::{
     AudioPolicy, ContainerPolicy, SubtitlePolicy, ToolPaths, TranscodeIntentSettings,
-    VideoCodecPolicy, configure_background_command, resolve_tool_path, run_tracked_command_output,
-    track_child_process,
+    VideoCodecPolicy, configure_background_command, resolve_tool_path,
+    run_tracked_command_output_cancellable, track_child_process,
 };
 
 pub(super) const POST_PROCESS_CANCELLED_MESSAGE: &str = "Post-processing cancelled.";
@@ -24,6 +24,7 @@ pub(super) struct PostProcessResult {
     pub item_id: QueueItemId,
     pub workflow_id: WorkflowRunId,
     pub result: Result<String, String>,
+    pub disposition: crate::infrastructure::output_policy::OutputDisposition,
 }
 
 pub(super) enum PostProcessEvent {
@@ -398,23 +399,102 @@ pub(super) fn run_builtin_transcode_worker(
     tx: mpsc::Sender<PostProcessEvent>,
     child_handle: Arc<Mutex<Option<Child>>>,
     cancel_requested: Arc<AtomicBool>,
+    output: crate::infrastructure::output_policy::OutputRequest,
 ) {
-    let result = run_output_conversion_attempt(
-        &tool_paths,
-        &settings,
-        &input_path,
-        &temp_root,
-        item_id,
-        workflow_id,
-        tx.clone(),
-        &child_handle,
-        &cancel_requested,
-    );
+    use crate::infrastructure::{
+        output_policy::OutputDisposition,
+        output_transaction::{OutputArtifacts, OutputOutcome, OutputTransaction},
+    };
+    let mut disposition = OutputDisposition::Published;
+    let mut result = (|| {
+        let source = Path::new(&input_path);
+        let owner = match &output.transaction {
+            Some(owner) => owner.clone(),
+            None => Arc::new(Mutex::new(OutputTransaction::new(
+                source.parent().ok_or("Input has no directory")?,
+                &source
+                    .file_stem()
+                    .ok_or("Input has no filename")?
+                    .to_string_lossy(),
+                OutputArtifacts::file(
+                    output_path_for(source, settings.container_policy)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("mp4"),
+                ),
+                output.preferences.existing,
+                &cancel_requested,
+            )?)),
+        };
+        if let Some(path) = owner
+            .lock()
+            .map_err(|_| "Output owner unavailable")?
+            .skipped
+            .clone()
+        {
+            disposition = OutputDisposition::SkippedExisting;
+            return Ok(path.display().to_string());
+        }
+        let work = owner
+            .lock()
+            .map_err(|_| "Output owner unavailable")?
+            .work
+            .clone();
+        let staged = if output.transaction.is_some() {
+            output.validate_work(source)?;
+            source.to_owned()
+        } else {
+            let path = work.join(format!(
+                "output.{}",
+                source.extension().and_then(|s| s.to_str()).unwrap_or("mp4")
+            ));
+            fs::copy(source, &path)
+                .map_err(|e| format!("Could not stage conversion input: {e}"))?;
+            path
+        };
+        let converted = run_output_conversion_attempt(
+            &tool_paths,
+            &settings,
+            &staged.display().to_string(),
+            &work.join(".conversion"),
+            item_id,
+            workflow_id,
+            tx.clone(),
+            &child_handle,
+            &cancel_requested,
+        )?;
+        let _ = temp_root; // Kept for compatibility with the existing dispatch API.
+        let mut guard = owner.lock().map_err(|_| "Output owner unavailable")?;
+        match guard.publish(Path::new(&converted), &cancel_requested) {
+            Ok(OutputOutcome::Published(paths)) => Ok(paths[0].display().to_string()),
+            Ok(OutputOutcome::SkippedExisting(path)) => {
+                disposition = OutputDisposition::SkippedExisting;
+                Ok(path.display().to_string())
+            }
+            Err(error) => {
+                if !guard.published.is_empty() {
+                    disposition = OutputDisposition::PartialFailure;
+                }
+                Err(error.to_string())
+            }
+        }
+    })();
+    if result.is_err() && disposition != OutputDisposition::PartialFailure {
+        disposition = if cancel_requested.load(Ordering::Acquire) {
+            OutputDisposition::Cancelled
+        } else {
+            OutputDisposition::Failed
+        };
+    }
+    if disposition == OutputDisposition::Cancelled {
+        result = Err(POST_PROCESS_CANCELLED_MESSAGE.into());
+    }
 
     let _ = tx.send(PostProcessEvent::Finished(PostProcessResult {
         item_id,
         workflow_id,
         result,
+        disposition,
     }));
 }
 
@@ -470,7 +550,7 @@ fn emit_post_process_recovery_step(
     });
 }
 
-fn run_output_conversion_attempt(
+pub(super) fn run_output_conversion_attempt(
     tool_paths: &ToolPaths,
     settings: &TranscodeIntentSettings,
     input_path: &str,
@@ -481,6 +561,8 @@ fn run_output_conversion_attempt(
     child_handle: &Arc<Mutex<Option<Child>>>,
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<String, String> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
+    check_post_process_cancelled(cancel_requested)?;
     let input_path = PathBuf::from(input_path);
     if !input_path.is_file() {
         return Err(format!(
@@ -490,7 +572,7 @@ fn run_output_conversion_attempt(
     }
 
     let ffmpeg = validate_ffmpeg_available(tool_paths)?;
-    let media_probe = probe_input_media(&ffmpeg, &input_path);
+    let media_probe = probe_input_media(&ffmpeg, &input_path, cancel_requested)?;
     let sidecar_subtitle = find_sidecar_subtitle(&input_path);
     let mut effective_settings = settings.clone();
     if settings.subtitle_policy == SubtitlePolicy::Burn
@@ -516,13 +598,15 @@ fn run_output_conversion_attempt(
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create post-process temp folder: {error}"))?;
     }
-    let video_attempts = video_encoder_attempts(&ffmpeg, &effective_settings, &input_path);
+    let video_attempts =
+        video_encoder_attempts(&ffmpeg, &effective_settings, &input_path, cancel_requested)?;
     if video_attempts.is_empty() {
         return Err("No usable FFmpeg video encoder was found for the selected output.".to_owned());
     }
 
     let mut failed_attempts = Vec::new();
     for encoder in video_attempts {
+        check_post_process_cancelled(cancel_requested)?;
         remove_existing_temp_output(&temp_output)?;
         match run_ffmpeg_output_conversion(
             &ffmpeg,
@@ -618,9 +702,24 @@ fn has_extension(path: &Path, expected: &str) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case(expected))
 }
 
-fn probe_input_media(ffmpeg: &Path, input_path: &Path) -> Option<MediaProbeInfo> {
+fn check_post_process_cancelled(cancel: &AtomicBool) -> Result<(), String> {
+    if cancel.load(Ordering::Acquire) {
+        Err(POST_PROCESS_CANCELLED_MESSAGE.into())
+    } else {
+        Ok(())
+    }
+}
+
+fn probe_input_media(
+    ffmpeg: &Path,
+    input_path: &Path,
+    cancel: &AtomicBool,
+) -> Result<Option<MediaProbeInfo>, String> {
+    check_post_process_cancelled(cancel)?;
     let ffprobe = ffprobe_companion_path_for_ffmpeg(ffmpeg);
-    match probe_media_with_ffprobe(&ffprobe, input_path) {
+    let result = probe_media_with_ffprobe(&ffprobe, input_path, cancel);
+    check_post_process_cancelled(cancel)?;
+    Ok(match result {
         Ok(info) => Some(info),
         Err(error) => {
             eprintln!(
@@ -628,7 +727,7 @@ fn probe_input_media(ffmpeg: &Path, input_path: &Path) -> Option<MediaProbeInfo>
             );
             None
         }
-    }
+    })
 }
 
 fn normalize_output_settings(
@@ -735,7 +834,8 @@ fn video_encoder_attempts(
     ffmpeg: &Path,
     settings: &TranscodeIntentSettings,
     input_path: &Path,
-) -> Vec<VideoEncoderKind> {
+    cancel: &AtomicBool,
+) -> Result<Vec<VideoEncoderKind>, String> {
     let all = match settings.video_codec_policy {
         VideoCodecPolicy::Auto if settings.subtitle_policy == SubtitlePolicy::Burn => {
             auto_burn_video_encoder_attempts(settings.container_policy, input_path)
@@ -762,7 +862,7 @@ fn video_encoder_attempts(
         ],
     };
 
-    filter_available_video_encoders(ffmpeg, all)
+    filter_available_video_encoders(ffmpeg, all, cancel)
 }
 
 fn auto_burn_video_encoder_attempts(
@@ -798,8 +898,9 @@ fn auto_burn_video_encoder_attempts(
 fn filter_available_video_encoders(
     ffmpeg: &Path,
     encoders: Vec<VideoEncoderKind>,
-) -> Vec<VideoEncoderKind> {
-    match available_ffmpeg_encoders(ffmpeg) {
+    cancel: &AtomicBool,
+) -> Result<Vec<VideoEncoderKind>, String> {
+    Ok(match available_ffmpeg_encoders(ffmpeg, cancel)? {
         Some(available) => encoders
             .into_iter()
             .filter(|encoder| match encoder.ffmpeg_name() {
@@ -808,10 +909,11 @@ fn filter_available_video_encoders(
             })
             .collect(),
         None => encoders,
-    }
+    })
 }
 
-fn available_ffmpeg_encoders(ffmpeg: &Path) -> Option<String> {
+fn available_ffmpeg_encoders(ffmpeg: &Path, cancel: &AtomicBool) -> Result<Option<String>, String> {
+    check_post_process_cancelled(cancel)?;
     let mut command = Command::new(ffmpeg);
     configure_background_command(&mut command);
     let output = {
@@ -819,12 +921,19 @@ fn available_ffmpeg_encoders(ffmpeg: &Path) -> Option<String> {
             .arg("-hide_banner")
             .arg("-encoders")
             .stdin(Stdio::null());
-        run_tracked_command_output(&mut command, "ffmpeg encoder probe").ok()?
+        run_tracked_command_output_cancellable(&mut command, "ffmpeg encoder probe", cancel)
     };
+    check_post_process_cancelled(cancel)?;
+    let Ok(output) = output else {
+        return Ok(None);
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
     let mut text = String::new();
     text.push_str(&String::from_utf8_lossy(&output.stdout));
     text.push_str(&String::from_utf8_lossy(&output.stderr));
-    Some(text)
+    Ok(Some(text))
 }
 
 fn ffmpeg_encoder_is_available(encoders: &str, encoder_name: &str) -> bool {
@@ -851,6 +960,7 @@ fn run_ffmpeg_output_conversion(
     child_handle: &Arc<Mutex<Option<Child>>>,
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<(), String> {
+    check_post_process_cancelled(cancel_requested)?;
     let mut command = build_output_conversion_command(
         ffmpeg,
         settings,
@@ -871,6 +981,7 @@ fn run_ffmpeg_output_conversion(
     println!("[post-process] output encoder: {}", encoder.label());
     println!("[post-process] output command: {command_line}");
 
+    check_post_process_cancelled(cancel_requested)?;
     let mut child = command
         .spawn()
         .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
@@ -1272,6 +1383,19 @@ fn replace_with_transcoded_output(
     temp_output: &Path,
     final_output: &Path,
 ) -> Result<(), String> {
+    if let Ok(metadata) = fs::metadata(input_path) {
+        if let Ok(file) = fs::OpenOptions::new().write(true).open(temp_output) {
+            let mut times = fs::FileTimes::new();
+            if let Ok(time) = metadata.modified() {
+                times = times.set_modified(time);
+            }
+            if let Ok(time) = metadata.accessed() {
+                times = times.set_accessed(time);
+            }
+            file.set_times(times)
+                .map_err(|e| format!("Could not preserve converted file times: {e}"))?;
+        }
+    }
     if same_path(input_path, final_output) {
         replace_file(temp_output, input_path)?;
         return Ok(());

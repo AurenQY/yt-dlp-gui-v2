@@ -55,6 +55,5 @@ fn write_component_update_cache_to_path(path: &Path, cache: &Value) -> Result<()
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
     }
-    fs::write(path, document)
-        .map_err(|error| format!("Could not write {}: {error}", path.display()))
+    super::super::yaml_store::atomic_write(path, document.as_bytes())
 }

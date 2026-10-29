@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::async_http::{self, ClientOptions};
 use super::sha256::sha256_hex_file;
 use super::tool_install::{self, DependencyTool};
-use super::yaml_store::{read_yaml_file, write_yaml_file};
+use super::yaml_store::{read_yaml_file, write_persistent_yaml, write_yaml_file};
 
 const USER_AGENT: &str = "yt-dlp-gui";
 // GitHub owner: かんなぎ (Kannagi) / Shirase Hiyori.
@@ -31,10 +31,6 @@ const YT_DLP_ASSET_NAME: &str = "yt-dlp.exe";
 const YT_DLP_DIRECT_ASSET_URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
 const YT_DLP_LATEST_RELEASE_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest";
-const GALLERY_DL_ASSET_NAME: &str = "gallery-dl.exe";
-const GALLERY_DL_DIRECT_ASSET_URL: &str =
-    "https://codeberg.org/mikf/gallery-dl/releases/download/latest/gallery-dl.exe";
-const GALLERY_DL_LATEST_RELEASE_URL: &str = "https://codeberg.org/mikf/gallery-dl/releases/latest";
 const FFMPEG_ASSET_NAME: &str = "ffmpeg-master-latest-win64-gpl.zip";
 const FFMPEG_DIRECT_ASSET_URL: &str = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
 const FFMPEG_LATEST_RELEASE_URL: &str = "https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest";
@@ -47,7 +43,7 @@ const DENO_LATEST_RELEASE_URL: &str = "https://github.com/denoland/deno/releases
 enum ComponentUpdateProviderKind {
     AppGithubRelease,
     YtDlpNativeLikeRelease,
-    GalleryDlCodebergRelease,
+    GalleryDlCompatibleBundle,
     FfmpegAutoBuildRelease,
     DenoGithubRelease,
     Aria2cGithubRelease,
@@ -82,12 +78,12 @@ fn component_update_provider(id: ManagedComponentId) -> ComponentUpdateProvider 
             direct_asset_url: Some(YT_DLP_DIRECT_ASSET_URL),
         },
         ManagedComponentId::GalleryDl => ComponentUpdateProvider {
-            kind: ComponentUpdateProviderKind::GalleryDlCodebergRelease,
+            kind: ComponentUpdateProviderKind::GalleryDlCompatibleBundle,
             owner: "mikf",
             repo: "gallery-dl",
-            asset_name: Some(GALLERY_DL_ASSET_NAME),
-            direct_release_url: Some(GALLERY_DL_LATEST_RELEASE_URL),
-            direct_asset_url: Some(GALLERY_DL_DIRECT_ASSET_URL),
+            asset_name: None,
+            direct_release_url: None,
+            direct_asset_url: None,
         },
         ManagedComponentId::Ffmpeg => ComponentUpdateProvider {
             kind: ComponentUpdateProviderKind::FfmpegAutoBuildRelease,
@@ -487,6 +483,7 @@ impl Drop for AppInstanceGuard {
 }
 
 pub fn register_app_instance() -> Option<AppInstanceGuard> {
+    super::storage_paths::require_ready().ok()?;
     let dir = runtime_instance_dir();
     fs::create_dir_all(&dir).ok()?;
     let current_exe = std::env::current_exe().ok()?;
@@ -496,7 +493,7 @@ pub fn register_app_instance() -> Option<AppInstanceGuard> {
         started_at_unix: now_unix(),
     };
     let path = dir.join(format!("{}.yaml", record.pid));
-    write_yaml_file(&path, &record).ok()?;
+    write_persistent_yaml(&path, &record).ok()?;
     Some(AppInstanceGuard { path })
 }
 
@@ -608,6 +605,9 @@ fn reset_cached_entry_remote_check_state_for_session(entry: &mut ComponentUpdate
 }
 
 pub fn save_component_update_cache(snapshot: &ComponentUpdateSnapshot) {
+    if super::storage_paths::require_ready().is_err() {
+        return;
+    }
     // Persist only the history needed by About. Active transfers, remote
     // download URLs and release notes are transient and can be large.
     let mut history = snapshot.clone();
@@ -621,25 +621,24 @@ pub fn save_component_update_cache(snapshot: &ComponentUpdateSnapshot) {
         entry.message.clear();
     }
     if let Ok(cache) = serde_yaml::to_value(&history) {
-        if super::config::write_runtime_component_update_cache(&cache).is_ok() {
-            // Only remove the legacy file after successful persistence into
-            // the exe-named YAML; do not lose history on a failed save.
-            let _ = fs::remove_file(legacy_component_update_state_path());
-        }
+        let _ = super::config::write_runtime_component_update_cache(&cache);
     }
 }
 
 fn legacy_component_update_state_path() -> PathBuf {
-    manifest_cache_dir().join("state.yaml")
+    portable_root_dir().join("cache/manifest/state.yaml")
 }
 
 fn read_component_update_history() -> ComponentUpdateSnapshot {
+    if super::storage_paths::require_ready().is_err() {
+        return super::config::read_runtime_component_update_cache()
+            .and_then(|value| serde_yaml::from_value(value).ok())
+            .unwrap_or_default();
+    }
     if let Some(snapshot) = super::config::read_runtime_component_update_cache()
         .and_then(|value| serde_yaml::from_value::<ComponentUpdateSnapshot>(value).ok())
     {
-        // The unified config already contains a usable snapshot; a leftover
-        // standalone file is redundant and must not be imported later.
-        let _ = fs::remove_file(legacy_component_update_state_path());
+        // Keep the legacy source for recovery; the usable main-YAML snapshot wins.
         return snapshot;
     }
     // One-time import of the old separate state.yaml from existing installs.
@@ -687,6 +686,16 @@ pub fn run_component_update_action(
     proxy_url: Option<String>,
     mut emit: impl FnMut(ComponentUpdateEvent),
 ) {
+    let _storage_use = match super::storage_paths::use_cache() {
+        Ok(guard) => guard,
+        Err(error) => {
+            let mut snapshot = component_update_cache_snapshot();
+            snapshot.running = false;
+            snapshot.message = error;
+            emit(ComponentUpdateEvent::Finished(snapshot));
+            return;
+        }
+    };
     let mut snapshot = component_update_cache_snapshot();
     snapshot.running = true;
     snapshot.message = match &action {
@@ -1013,6 +1022,9 @@ fn update_component_to_entry_with_progress(
     proxy_url: Option<&str>,
     mut progress: impl FnMut(ComponentUpdateEntry),
 ) -> ComponentUpdateEntry {
+    if id == ManagedComponentId::GalleryDl {
+        return update_compatible_gallery(&mut progress);
+    }
     let mut entry = check_component(id, proxy_url);
     progress(entry.clone());
     if matches!(
@@ -1124,7 +1136,80 @@ fn update_one_component(
     Ok(())
 }
 
+fn check_compatible_gallery() -> ComponentUpdateEntry {
+    use super::gallery_runtime_policy as policy;
+    let mut entry = ComponentUpdateEntry::new(ManagedComponentId::GalleryDl);
+    entry.ownership = component_ownership(entry.id);
+    let program = tool_path(DependencyTool::GalleryDl);
+    let ready = policy::readiness(&program);
+    entry.status = if ready.is_ok() {
+        ComponentUpdateStatus::UpToDate
+    } else if program.exists() {
+        ComponentUpdateStatus::Failed
+    } else {
+        ComponentUpdateStatus::Missing
+    };
+    entry.message = ready.err().unwrap_or_else(|| policy::PINNED.to_owned());
+    let current = program
+        .parent()
+        .and_then(|root| policy::manifest_identity(root).ok());
+    if entry.status == ComponentUpdateStatus::UpToDate {
+        entry.local_version = current
+            .as_ref()
+            .map(|m| format!("{} (cache policy {})", m.upstream_version, m.patch_revision));
+    }
+    if let Ok(bundle) = policy::local_bundle() {
+        if let Ok(available) = policy::manifest_identity(&bundle) {
+            entry.latest_version = Some(format!(
+                "{} (cache policy {})",
+                available.upstream_version, available.patch_revision
+            ));
+            if entry.status != ComponentUpdateStatus::UpToDate
+                || current
+                    .as_ref()
+                    .is_none_or(|m| m.bundle_id != available.bundle_id)
+            {
+                entry.status = ComponentUpdateStatus::UpdateAvailable;
+                entry.message = "A compatible gallery-dl bundle is available locally.".to_owned();
+            }
+        }
+    }
+    entry
+}
+
+fn update_compatible_gallery(
+    progress: &mut impl FnMut(ComponentUpdateEntry),
+) -> ComponentUpdateEntry {
+    let mut entry = check_compatible_gallery();
+    progress(entry.clone());
+    if matches!(
+        entry.ownership,
+        ComponentOwnership::External | ComponentOwnership::Unknown
+    ) {
+        entry.status = ComponentUpdateStatus::Skipped;
+        entry.message = "external component is not managed by v2".to_owned();
+    } else if entry.status != ComponentUpdateStatus::UpToDate {
+        match super::gallery_runtime_policy::install_managed() {
+            Ok(_) => {
+                entry = check_compatible_gallery();
+                entry.status = ComponentUpdateStatus::Installed;
+                entry.progress = Some(100);
+                entry.message = "Compatible gallery-dl runtime installed.".to_owned();
+            }
+            Err(error) => {
+                entry.status = ComponentUpdateStatus::Skipped;
+                entry.message = error;
+            }
+        }
+    }
+    progress(entry.clone());
+    entry
+}
+
 fn check_component(id: ManagedComponentId, proxy_url: Option<&str>) -> ComponentUpdateEntry {
+    if id == ManagedComponentId::GalleryDl {
+        return check_compatible_gallery();
+    }
     if id == ManagedComponentId::App && app_self_update_disabled_for_custom_edition() {
         return custom_edition_app_update_blocked_entry();
     }
@@ -1249,11 +1334,7 @@ fn resolve_remote_release(
                 asset.name.eq_ignore_ascii_case(YT_DLP_ASSET_NAME)
             })
         }),
-        ManagedComponentId::GalleryDl => resolve_release_with_direct_asset_fallback(id, || {
-            codeberg_latest_release(id, "mikf", "gallery-dl", proxy_url, |asset| {
-                asset.name.eq_ignore_ascii_case(GALLERY_DL_ASSET_NAME)
-            })
-        }),
+        ManagedComponentId::GalleryDl => Err(super::gallery_runtime_policy::PINNED.to_owned()),
         ManagedComponentId::Ffmpeg => resolve_release_with_direct_asset_fallback(id, || {
             github_latest_release_required_asset(id, "BtbN", "FFmpeg-Builds", proxy_url, |asset| {
                 asset.name.eq_ignore_ascii_case(FFMPEG_ASSET_NAME)
@@ -1385,17 +1466,6 @@ fn github_latest_release(
     latest_release_from_api(id, &url, proxy_url, select_asset)
 }
 
-fn codeberg_latest_release(
-    id: ManagedComponentId,
-    owner: &str,
-    repo: &str,
-    proxy_url: Option<&str>,
-    select_asset: impl Fn(&GithubReleaseAsset) -> bool,
-) -> Result<RemoteRelease, String> {
-    let url = format!("https://codeberg.org/api/v1/repos/{owner}/{repo}/releases/latest");
-    latest_release_from_api(id, &url, proxy_url, select_asset)
-}
-
 fn latest_release_from_api(
     id: ManagedComponentId,
     url: &str,
@@ -1484,7 +1554,7 @@ fn component_release_asset_checksum_sha256(
     let provider = component_update_provider(id);
     match provider.kind {
         ComponentUpdateProviderKind::YtDlpNativeLikeRelease
-        | ComponentUpdateProviderKind::GalleryDlCodebergRelease
+        | ComponentUpdateProviderKind::GalleryDlCompatibleBundle
         | ComponentUpdateProviderKind::FfmpegAutoBuildRelease
         | ComponentUpdateProviderKind::DenoGithubRelease => {}
         _ => return None,
@@ -1872,7 +1942,7 @@ fn read_installed_component_manifest() -> InstalledComponentManifest {
 }
 
 fn save_installed_component_manifest(manifest: &InstalledComponentManifest) -> Result<(), String> {
-    write_yaml_file(&installed_component_manifest_path(), manifest)
+    write_persistent_yaml(&installed_component_manifest_path(), manifest)
 }
 
 fn write_installed_component_record(
@@ -2013,7 +2083,12 @@ fn component_ownership(id: ManagedComponentId) -> ComponentOwnership {
         return ComponentOwnership::Unknown;
     };
     let path = tool_path(tool);
-    if !tool_install::dependency_tool_is_available(tool, &path.display().to_string()) {
+    let present = if tool == DependencyTool::GalleryDl {
+        path.is_file()
+    } else {
+        tool_install::dependency_tool_is_available(tool, &path.display().to_string())
+    };
+    if !present {
         return ComponentOwnership::Missing;
     }
     let root = canonical_or_original(portable_root_dir());
@@ -2040,9 +2115,15 @@ pub fn probe_dependency_tool_version(
 ) -> Option<String> {
     let path = tool_install::resolve_support_path(configured_path);
     match tool {
-        DependencyTool::YtDlp | DependencyTool::GalleryDl => {
-            command_first_line(path, &["--version"])
+        DependencyTool::GalleryDl => {
+            let _guard = super::gallery_runtime_policy::acquire(&path).ok()?;
+            let manifest = super::gallery_runtime_policy::manifest_identity(path.parent()?).ok()?;
+            Some(format!(
+                "{} (cache policy {})",
+                manifest.upstream_version, manifest.patch_revision
+            ))
         }
+        DependencyTool::YtDlp => command_first_line(path, &["--version"]),
         DependencyTool::Ffmpeg => command_first_line(path, &["-version"])
             .and_then(|line| line.split_whitespace().nth(2).map(str::to_owned)),
         DependencyTool::Deno => command_first_line(path, &["--version"])
@@ -2103,6 +2184,9 @@ fn download_asset_resumable(
     proxy_url: Option<&str>,
     mut progress: impl FnMut(DownloadAssetProgress),
 ) -> Result<DownloadedAsset, String> {
+    if id == ManagedComponentId::GalleryDl {
+        return Err(super::gallery_runtime_policy::PINNED.to_owned());
+    }
     let mut last_error = None;
     for attempt_index in 0..DOWNLOAD_RETRY_ATTEMPTS {
         match download_asset_resumable_once(id, asset, proxy_url, &mut progress) {
@@ -2393,6 +2477,9 @@ fn apply_tool_update(
     downloaded: &DownloadedAsset,
     mut progress: impl FnMut(Option<u8>),
 ) -> Result<(), String> {
+    if id == ManagedComponentId::GalleryDl {
+        return Err(super::gallery_runtime_policy::PINNED.to_owned());
+    }
     let tool = id
         .as_dependency_tool()
         .ok_or_else(|| "component is not a dependency tool".to_owned())?;
@@ -2595,12 +2682,14 @@ fn prepare_update_runner() -> Result<PathBuf, String> {
 }
 
 pub fn launch_pending_app_update(restart: bool) -> Result<(), String> {
+    let _storage_use = super::storage_paths::use_cache()?;
     if app_self_update_disabled_for_custom_edition() {
         return Err("App self-update is disabled for Custom Edition.".to_owned());
     }
 
     let mut manifest = pending_app_update_manifest()
         .ok_or_else(|| "No pending app update was found.".to_owned())?;
+    validate_pending_storage(&manifest, super::storage_paths::paths())?;
     if !app_update_release_is_newer(current_app_build_version().as_deref(), &manifest.version) {
         return Err(
             "Staged App update is not newer than the running build; refusing to replace the EXE."
@@ -2608,10 +2697,13 @@ pub fn launch_pending_app_update(restart: bool) -> Result<(), String> {
         );
     }
     if !manifest.staged_exe.is_file() {
-        return Err(format!(
-            "Staged executable was not found: {}",
+        manifest.state = PendingAppUpdateState::Failed;
+        manifest.last_error = Some(format!(
+            "Staged update files are missing: {}. Download the update again.",
             manifest.staged_exe.display()
         ));
+        write_pending_manifest(&manifest)?;
+        return Err(manifest.last_error.unwrap());
     }
     if other_registered_app_instances() > 0 {
         return Err(
@@ -2703,6 +2795,7 @@ pub fn parse_apply_update_args() -> Option<ApplyUpdateArgs> {
 }
 
 pub fn resume_pending_app_update_on_launch() -> Result<bool, String> {
+    let _storage_use = super::storage_paths::use_cache()?;
     if app_self_update_disabled_for_custom_edition() {
         return Ok(false);
     }
@@ -2710,10 +2803,22 @@ pub fn resume_pending_app_update_on_launch() -> Result<bool, String> {
     let Some(manifest) = pending_app_update_manifest() else {
         return Ok(false);
     };
-    if manifest.state != PendingAppUpdateState::ApplyRequested {
+    validate_pending_storage(&manifest, super::storage_paths::paths())?;
+    if matches!(
+        manifest.state,
+        PendingAppUpdateState::Applied | PendingAppUpdateState::Failed
+    ) {
         return Ok(false);
     }
     if !manifest.staged_exe.is_file() {
+        let mut manifest = manifest;
+        manifest.state = PendingAppUpdateState::Failed;
+        manifest.last_error =
+            Some("Staged update files are missing. Download the update again.".to_owned());
+        write_pending_manifest(&manifest)?;
+        return Err(manifest.last_error.unwrap());
+    }
+    if manifest.state != PendingAppUpdateState::ApplyRequested {
         return Ok(false);
     }
     let runner_exe = prepare_update_runner()?;
@@ -2738,18 +2843,67 @@ pub fn resume_pending_app_update_on_launch() -> Result<bool, String> {
 }
 
 pub fn run_apply_update(args: ApplyUpdateArgs) -> Result<(), String> {
-    wait_for_parent_exit(args.parent_pid);
-    let mut manifest = read_manifest_from(&args.manifest).unwrap_or(PendingAppUpdateManifest {
+    let target_root = args
+        .target_exe
+        .parent()
+        .ok_or("Update target has no application folder")?;
+    let portable = super::config::AppConfig::portable_cache_for_target(&args.target_exe)?;
+    let paths = super::storage_paths::resolve(
+        target_root,
+        &std::env::temp_dir(),
+        super::tools::CacheLocationMode::V2Cache,
+        &portable,
+    )?;
+    let expected_manifest = target_root.join("state/component-update/pending_app_update.yaml");
+    let legacy_manifest = target_root.join("cache/manifest/pending_app_update.yaml");
+    if super::storage_paths::normalized(&args.manifest)
+        != super::storage_paths::normalized(&expected_manifest)
+        && super::storage_paths::normalized(&args.manifest)
+            != super::storage_paths::normalized(&legacy_manifest)
+    {
+        return Err(
+            "Update manifest is outside the target installation's state folders.".to_owned(),
+        );
+    }
+    let supplied = PendingAppUpdateManifest {
         state: PendingAppUpdateState::Applying,
         version: String::new(),
         staged_exe: args.staged_exe.clone(),
         target_exe: args.target_exe.clone(),
         backup_exe: args.backup_exe.clone(),
         release_url: None,
-        downloaded_at_unix: now_unix(),
-        attempt_count: 1,
+        downloaded_at_unix: 0,
+        attempt_count: 0,
         last_error: None,
-    });
+    };
+    validate_pending_storage(&supplied, &paths)?;
+    let _session =
+        super::storage_paths::open_lock(&target_root.join("state/runtime/storage-session.lock"))?;
+    _session
+        .try_lock_shared()
+        .map_err(|_| "Storage migration is in progress; update deferred".to_owned())?;
+    let _cache_use =
+        super::storage_paths::open_lock(&target_root.join("state/runtime/cache-use.lock"))?;
+    _cache_use
+        .try_lock_shared()
+        .map_err(|_| "Cache cleanup is in progress; update deferred".to_owned())?;
+    wait_for_parent_exit(args.parent_pid);
+    let mut manifest = read_manifest_from(&args.manifest)
+        .ok_or("Pending update manifest is missing or invalid")?;
+    validate_pending_storage(&manifest, &paths)?;
+    if manifest.staged_exe != args.staged_exe
+        || manifest.target_exe != args.target_exe
+        || manifest.backup_exe != args.backup_exe
+    {
+        return Err("Updater arguments do not match the pending transaction.".to_owned());
+    }
+    if !args.staged_exe.is_file() {
+        manifest.state = PendingAppUpdateState::Failed;
+        manifest.last_error =
+            Some("Staged update files are missing. Download the update again.".to_owned());
+        write_manifest_to(&args.manifest, &manifest)?;
+        return Err(manifest.last_error.unwrap());
+    }
     manifest.state = PendingAppUpdateState::Applying;
     write_manifest_to(&args.manifest, &manifest)?;
 
@@ -2773,7 +2927,14 @@ pub fn run_apply_update(args: ApplyUpdateArgs) -> Result<(), String> {
     manifest.last_error = None;
     write_manifest_to(&args.manifest, &manifest)?;
     if !manifest.version.trim().is_empty() {
-        let _ = write_installed_app_version(&manifest.version);
+        let record = InstalledAppVersionManifest {
+            version: manifest.version.clone(),
+            installed_at_unix: now_unix(),
+        };
+        write_persistent_yaml(
+            &target_root.join("state/component-update/installed_app_version.yaml"),
+            &record,
+        )?;
     }
 
     if args.restart {
@@ -2827,13 +2988,26 @@ fn wait_for_parent_exit(_pid: u32) {
 }
 
 pub fn cleanup_applied_update() {
+    let Ok(_guard) = super::storage_paths::exclusive_cleanup() else {
+        return;
+    };
     if let Some(manifest) = pending_app_update_manifest() {
+        if let Err(error) = validate_pending_storage(&manifest, super::storage_paths::paths()) {
+            eprintln!("[self-update] {error}");
+            return;
+        }
         if manifest.state == PendingAppUpdateState::Applied {
-            let _ = fs::remove_dir_all(update_staged_dir().join("app"));
-            let _ = fs::remove_dir_all(update_runner_dir());
+            if let Some(stage) = manifest.staged_exe.parent() {
+                let _ = super::storage_paths::remove_owned_tree(stage);
+                if let Some(transaction_root) = stage.parent().and_then(Path::parent) {
+                    let _ =
+                        super::storage_paths::remove_owned_tree(&transaction_root.join("runner"));
+                }
+            }
             clear_pending_app_update_manifest();
         }
     }
+    super::portable_cleanup::cleanup_update_recovery_backups();
 }
 
 fn installed_app_version() -> Option<String> {
@@ -2848,7 +3022,7 @@ fn write_installed_app_version(version: &str) -> Result<(), String> {
         version: version.to_owned(),
         installed_at_unix: now_unix(),
     };
-    write_yaml_file(&installed_app_version_manifest_path(), &manifest)
+    write_persistent_yaml(&installed_app_version_manifest_path(), &manifest)
 }
 
 fn write_pending_manifest(manifest: &PendingAppUpdateManifest) -> Result<(), String> {
@@ -2860,7 +3034,7 @@ fn read_manifest_from(path: &Path) -> Option<PendingAppUpdateManifest> {
 }
 
 fn write_manifest_to(path: &Path, manifest: &PendingAppUpdateManifest) -> Result<(), String> {
-    write_yaml_file(path, manifest)
+    write_persistent_yaml(path, manifest)
 }
 
 fn request_json<T: for<'de> Deserialize<'de>>(
@@ -2961,9 +3135,73 @@ fn find_file_recursive(root: &Path, file_name: &str) -> Option<PathBuf> {
 }
 
 fn reset_dir(path: &Path) -> Result<(), String> {
-    let _ = fs::remove_dir_all(path);
+    super::storage_paths::remove_owned_tree(path)?;
     fs::create_dir_all(path)
         .map_err(|error| format!("Could not create {}: {error}", path.display()))
+}
+
+pub(crate) fn validate_persistent_update_document(
+    name: &str,
+    value: serde_yaml::Value,
+) -> Result<(), String> {
+    match name {
+        "installed.yaml" => serde_yaml::from_value::<InstalledComponentManifest>(value).map(|_| ()),
+        "installed_app_version.yaml" => {
+            serde_yaml::from_value::<InstalledAppVersionManifest>(value).map(|_| ())
+        }
+        _ => return Err(format!("Unsupported persistent update document: {name}")),
+    }
+    .map_err(|e| format!("Invalid {name}: {e}"))
+}
+
+pub(crate) fn validate_pending_storage(
+    manifest: &PendingAppUpdateManifest,
+    paths: &super::storage_paths::RuntimeStoragePaths,
+) -> Result<(), String> {
+    use super::storage_paths::{normalized, reject_links};
+    let app = normalized(&paths.application_root);
+    let target = normalized(&manifest.target_exe);
+    if target.parent() != Some(app.as_path()) {
+        return Err("Pending update targets a different application folder.".to_owned());
+    }
+    let stage = normalized(&manifest.staged_exe);
+    let roots = [
+        &paths.cache_root,
+        &paths.portable_root,
+        &paths.temporary_root,
+    ];
+    let legacy = app.join("cache");
+    let known_root = roots
+        .into_iter()
+        .chain([&legacy])
+        .any(|root| stage.starts_with(root.join("temp/manifest/staged/app")));
+    // A retained transaction can outlive a change of the system TEMP setting.
+    let retained_root = stage
+        .ancestors()
+        .nth(5)
+        .filter(|root| stage.parent() == Some(root.join("temp/manifest/staged/app").as_path()));
+    let retained_owned = if let Some(root) = retained_root {
+        super::storage_paths::cache_owned_by(root, &paths.installation_id)?
+    } else {
+        false
+    };
+    if !known_root && !retained_owned {
+        return Err(
+            "Pending update staging is outside this installation's cache folders.".to_owned(),
+        );
+    }
+    let backup = normalized(&manifest.backup_exe);
+    if !backup.starts_with(paths.state_root.join("component-update/backup"))
+        && !backup.starts_with(legacy.join("manifest/backup"))
+    {
+        return Err(
+            "Pending update backup is outside this installation's recovery folder.".to_owned(),
+        );
+    }
+    for path in [&target, &stage, &backup] {
+        reject_links(path)?;
+    }
+    Ok(())
 }
 
 fn tool_path(tool: DependencyTool) -> PathBuf {
@@ -2997,7 +3235,7 @@ fn now_unix() -> u64 {
 }
 
 fn manifest_cache_dir() -> PathBuf {
-    portable_root_dir().join("cache").join("manifest")
+    super::storage_paths::state_path("component-update")
 }
 
 fn manifest_transient_dir() -> PathBuf {
@@ -3037,7 +3275,5 @@ fn installed_component_manifest_path() -> PathBuf {
 }
 
 fn runtime_instance_dir() -> PathBuf {
-    tool_install::portable_temp_cache_dir()
-        .join("runtime")
-        .join("instances")
+    super::storage_paths::state_path("runtime/instances")
 }

@@ -13,6 +13,12 @@ use app::{NgDlpApp, app_icon::app_window_icon};
 use eframe::egui::{self, ViewportBuilder};
 use infrastructure::{AppConfig, ThemeMode, WindowPosition, WindowSize};
 
+#[cfg(cache_review_gui)]
+fn main() -> eframe::Result<()> {
+    infrastructure::cache_review_gui::run()
+}
+
+#[cfg(not(cache_review_gui))]
 fn main() -> eframe::Result<()> {
     if infrastructure::browser_native_messaging::run_native_host_if_requested() {
         return Ok(());
@@ -63,7 +69,10 @@ fn main() -> eframe::Result<()> {
     let runtime_edition = infrastructure::load_current_runtime_edition();
     infrastructure::set_runtime_edition(runtime_edition.clone());
 
-    if !runtime_edition.is_custom_edition() {
+    let (mut config, tool_paths) = AppConfig::load_runtime();
+    if !runtime_edition.is_custom_edition()
+        && infrastructure::storage_paths::require_ready().is_ok()
+    {
         match infrastructure::resume_pending_app_update_on_launch() {
             Ok(true) => return Ok(()),
             Ok(false) => {}
@@ -76,7 +85,6 @@ fn main() -> eframe::Result<()> {
         eprintln!("[app-identity] Windows process identity unavailable: {error}");
     }
 
-    let (mut config, tool_paths) = AppConfig::load_runtime();
     infrastructure::record_startup_checkpoint("config loaded");
     #[cfg(target_os = "windows")]
     match infrastructure::browser_native_messaging::synchronize_browser_integration(

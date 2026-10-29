@@ -20,6 +20,28 @@ fn stale_music_playback_row_should_recover(
 impl AppState {
     pub(super) fn apply_music_stream_result(&mut self, message: MusicStreamResolveEvent) {
         match message {
+            MusicStreamResolveEvent::PreparationFailed {
+                action_id,
+                action,
+                error,
+            } => {
+                let status = if action == "prefetch resolve" {
+                    ToolLogStatus::Skipped
+                } else {
+                    ToolLogStatus::Failed
+                };
+                self.push_tool_log_step_internal(
+                    action_id,
+                    status,
+                    "v2",
+                    "prepare configuration",
+                    String::new(),
+                    Some(format!(
+                        "Configuration preparation failed before launching yt-dlp: {error}"
+                    )),
+                    true,
+                );
+            }
             MusicStreamResolveEvent::ToolCommandFinished {
                 action_id,
                 tool,
@@ -115,6 +137,8 @@ impl AppState {
                         let cookies_fallback = seed.cookies_fallback;
                         let mut updated_item = None;
                         if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                            item.source_media_id = seed.source_media_id;
+                            item.music_naming_metadata = Some(seed.naming_metadata);
                             item.source_url = seed.source_url;
                             item.title = seed.title;
                             if !seed.album_title.trim().is_empty() {
@@ -216,6 +240,17 @@ impl AppState {
 
     pub(super) fn apply_music_download_event(&mut self, event: MusicDownloadEvent) {
         match event {
+            MusicDownloadEvent::OutputStatus {
+                item_id,
+                workflow_id,
+                detail,
+            } => {
+                if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                    if let Some(run) = item.workflows.iter_mut().find(|run| run.id == workflow_id) {
+                        run.detail = detail;
+                    }
+                }
+            }
             MusicDownloadEvent::Progress {
                 item_id,
                 workflow_id,
@@ -252,6 +287,7 @@ impl AppState {
                 );
             }
             MusicDownloadEvent::Finished {
+                disposition,
                 item_id,
                 workflow_id,
                 source_kind,
@@ -271,7 +307,7 @@ impl AppState {
                                 item.progress.audio = 100.0;
                                 item.progress.video = 100.0;
                                 item.last_output_path = Some(output_path.clone());
-                                if !chapters_split {
+                                if !chapters_split && disposition != crate::infrastructure::output_policy::OutputDisposition::SkippedExisting {
                                     if let Some(actual_file_name) = Path::new(output_path)
                                         .file_name()
                                         .and_then(|value| value.to_str())
@@ -280,8 +316,8 @@ impl AppState {
                                         item.selection.file_name = actual_file_name;
                                     }
                                 }
-                                item.completed_selection =
-                                    Some(CompletedSelection::from_selection(&item.selection));
+                                if disposition == crate::infrastructure::output_policy::OutputDisposition::Published { item.completed_selection = Some(CompletedSelection::from_selection(&item.selection)); }
+                                if disposition == crate::infrastructure::output_policy::OutputDisposition::SkippedExisting { run.detail = format!("Skipped existing destination: {output_path}"); } else { run.detail = format!("Saved as {output_path}"); }
                                 item.last_error = None;
                             }
                             Err(error) if error == DOWNLOAD_CANCELLED_MESSAGE => {
@@ -310,7 +346,7 @@ impl AppState {
                         self.push_runtime_log(format!(
                             "Music download finished ({source_label}): {output_path}"
                         ));
-                        if split_chapters_requested && !chapters_split {
+                        if disposition == crate::infrastructure::output_policy::OutputDisposition::SkippedExisting { self.last_action = format!("Skipped existing destination: {output_path}"); } else if split_chapters_requested && !chapters_split {
                             self.last_action = self
                                 .ui_i18n_text_for_key("notification.no_chapters_saved_full_audio")
                                 .to_owned();

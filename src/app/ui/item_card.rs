@@ -116,6 +116,7 @@ pub(super) fn render_video_queue_item(
     let show_section_row = state.item_shows_download_section_row(index);
     let section_summary = state.selected_download_section_summary(index);
     let item_error_text = state.item_error_text(index);
+    let output_feedback = state.item_output_feedback_text(index);
     let item_label_width = visible_item_label_width(
         ui,
         state,
@@ -263,6 +264,23 @@ pub(super) fn render_video_queue_item(
                         &state.localize_message(error_text),
                         error_color,
                     );
+                }
+                if let Some(feedback) = output_feedback.as_deref() {
+                    tui.style(taffy::Style {
+                        size: taffy::Size {
+                            width: taffy::style_helpers::percent(1.0_f32),
+                            height: taffy::style_helpers::auto(),
+                        },
+                        min_size: taffy::Size {
+                            width: taffy::style_helpers::length(0.0_f32),
+                            height: taffy::style_helpers::auto(),
+                        },
+                        flex_shrink: 0.0,
+                        ..Default::default()
+                    })
+                    .ui(|ui| {
+                        ui.add(egui::Label::new(feedback).wrap().selectable(true));
+                    });
                 }
                 item_taffy_spacer(tui, body_spacer);
                 item_file_name_input_row(tui, state, index, !item_locked, item_label_width);

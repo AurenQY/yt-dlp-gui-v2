@@ -225,6 +225,9 @@ impl DownloadQueueItemSnapshot {
         item.thumbnail_url = self.thumbnail_url;
         item.duration_text = queue_preview::duration_text(self.duration_millis);
         item.selection = self.selection;
+        if item.selection.name_origin.is_none() && item.selection.file_name.trim().is_empty() {
+            item.selection.name_origin = Some(super::OutputNameOrigin::Automatic);
+        }
         item.restored_chapters_unresolved = !item
             .selection
             .download_range

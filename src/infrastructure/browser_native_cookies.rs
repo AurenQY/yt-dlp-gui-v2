@@ -11,6 +11,7 @@ use super::cookie_site_scope::{domain_is_in_site, site_domain_for_url};
 pub(super) struct NativeCookies {
     path: PathBuf,
     cookie_count: usize,
+    _storage_lease: super::storage_paths::StorageUseGuard,
 }
 
 impl NativeCookies {
@@ -65,23 +66,23 @@ impl NativeCookies {
             .duration_since(UNIX_EPOCH)
             .map_err(|_| "Clock unavailable.")?
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "yt-dlp-native-{}-{stamp}.cookies",
-            std::process::id()
-        ));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|_| "Could not create temporary browser cookies.")?;
+        let storage_lease = super::storage_paths::use_cache()?;
+        let root = super::storage_paths::cache_directory("temp/native-cookies")?;
+        let (path, mut file) = create_snapshot(&root, stamp)?;
         let guard = Self {
             path,
             cookie_count: cookies.len(),
+            _storage_lease: storage_lease,
         };
-        file.write_all(text.as_bytes())
-            .map_err(|_| "Could not write temporary browser cookies.")?;
-        file.flush()
-            .map_err(|_| "Could not flush temporary browser cookies.")?;
+        let result = file.write_all(text.as_bytes()).and_then(|()| file.flush());
+        // Close before the guard tries to remove the snapshot, especially on Windows.
+        drop(file);
+        result.map_err(|error| {
+            format!(
+                "Could not write temporary browser cookies {}: {error}",
+                guard.path.display()
+            )
+        })?;
         super::operation_diagnostics::record(
             "cookies.resolved",
             serde_json::json!({"cookieCount": guard.cookie_count, "source": "browser-storage-snapshot"}),
@@ -92,6 +93,36 @@ impl NativeCookies {
     pub(super) fn path(&self) -> PathBuf {
         self.path.clone()
     }
+}
+
+fn create_snapshot(
+    root: &std::path::Path,
+    stamp: u128,
+) -> Result<(PathBuf, std::fs::File), String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..16 {
+        let path = root.join(format!(
+            "yt-dlp-native-{}-{stamp}-{}.cookies",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        super::storage_paths::reject_links(&path)?;
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Could not create temporary browser cookies {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "Could not allocate a unique browser Cookie snapshot in {}",
+        root.display()
+    ))
 }
 
 /// Browser-only anonymous client coverage must inspect the selected saved
@@ -146,6 +177,8 @@ pub(super) fn shared_source_allows_anonymous_youtube_clients(
 
 impl Drop for NativeCookies {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        if super::storage_paths::reject_links(&self.path).is_ok() {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 }

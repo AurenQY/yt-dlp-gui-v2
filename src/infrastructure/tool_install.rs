@@ -167,6 +167,9 @@ pub fn dependency_tool_exists(path: &str) -> bool {
 
 pub fn dependency_tool_is_available(tool: DependencyTool, path: &str) -> bool {
     match tool {
+        DependencyTool::GalleryDl => {
+            super::gallery_runtime_policy::readiness(&resolve_support_path(path)).is_ok()
+        }
         DependencyTool::Ffmpeg => {
             dependency_tool_exists(path) && ffprobe_companion_path(path).is_file()
         }
@@ -362,10 +365,24 @@ pub fn install_dependency_tool_with_progress_using_proxy(
     cancel_token: Option<ToolInstallCancelToken>,
     mut progress: impl FnMut(ToolInstallProgress),
 ) -> Result<InstalledDependencyTool, String> {
+    let _storage_use = super::storage_paths::use_cache()?;
     if !cfg!(target_os = "windows") {
         return Err("Dependency deployment currently only supports Windows.".to_owned());
     }
-
+    if tool == DependencyTool::GalleryDl {
+        let installed = super::gallery_runtime_policy::install_managed_with_cancel(&|| {
+            cancel_token
+                .as_ref()
+                .is_some_and(|token| token.check().is_err())
+        })?;
+        progress(ToolInstallProgress {
+            tool,
+            stage: ToolInstallStage::Completed,
+            percent: Some(100),
+            message: "tool_install.stage.completed".to_owned(),
+        });
+        return Ok(InstalledDependencyTool { path: installed });
+    }
     let cancel_token = cancel_token.unwrap_or_else(|| ToolInstallCancelHandle::new().token());
     progress(ToolInstallProgress {
         tool,
@@ -378,6 +395,7 @@ pub fn install_dependency_tool_with_progress_using_proxy(
         .join("tools")
         .join(tool.install_dir_name());
     let temp_root = tool_install_cache_dir().join(unique_temp_dir_name(tool));
+    super::storage_paths::reject_links(&temp_root)?;
     fs::create_dir_all(&install_dir).map_err(|error| {
         format!(
             "Could not create tools folder {}: {error}",
@@ -473,28 +491,13 @@ fn install_yt_dlp(
 }
 
 fn install_gallery_dl(
-    install_dir: &Path,
-    temp_root: &Path,
-    proxy_url: Option<&str>,
-    cancel_token: &ToolInstallCancelToken,
-    progress: &mut impl FnMut(ToolInstallProgress),
+    _install_dir: &Path,
+    _temp_root: &Path,
+    _proxy_url: Option<&str>,
+    _cancel_token: &ToolInstallCancelToken,
+    _progress: &mut impl FnMut(ToolInstallProgress),
 ) -> Result<InstalledDependencyTool, String> {
-    let temp_file = temp_root.join("gallery-dl.exe");
-    download_file(
-        DependencyTool::GalleryDl,
-        "https://codeberg.org/mikf/gallery-dl/releases/download/latest/gallery-dl.exe",
-        &temp_file,
-        proxy_url,
-        cancel_token,
-        progress,
-    )?;
-    copy_installed_file(
-        DependencyTool::GalleryDl,
-        &temp_file,
-        &install_dir.join("gallery-dl.exe"),
-        cancel_token,
-        progress,
-    )
+    super::gallery_runtime_policy::install_managed().map(|path| InstalledDependencyTool { path })
 }
 
 fn install_ffmpeg(
@@ -989,7 +992,7 @@ pub(crate) fn tool_install_cache_dir() -> PathBuf {
 }
 
 pub(crate) fn portable_temp_cache_dir() -> PathBuf {
-    portable_root_dir().join("cache").join("temp")
+    super::storage_paths::paths().cache_root.join("temp")
 }
 
 pub(crate) fn portable_root_dir() -> PathBuf {

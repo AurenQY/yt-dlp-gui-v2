@@ -1260,6 +1260,8 @@ fn run_gallery_download(
         serde_json::json!({"itemId": item_id, "workflowId": workflow_id, "command": crate::infrastructure::operation_diagnostics::command_context(&prepared.command)}),
     );
     let mut command = prepared.command;
+    let _runtime_guard = prepared.runtime_guard;
+    let _storage_work = prepared.storage_work;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1459,6 +1461,8 @@ fn run_gallery_download(
         detail: result.as_ref().err().cloned(),
     });
     let _ = tx.send(DownloadEvent::Finished(DownloadResult {
+        disposition: crate::infrastructure::output_policy::OutputDisposition::Published,
+        processed_before_publication: false,
         item_id,
         workflow_id,
         workflow_kind: WorkflowKind::DownloadMedia,

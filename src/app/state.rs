@@ -64,7 +64,7 @@ use crate::domain::{
 use crate::infrastructure::cookie_site_index::{
     CookieSiteIndexEntry, read_cookie_site_index_or_default, write_cookie_site_index,
 };
-use crate::infrastructure::yaml_store::{read_yaml_file, write_yaml_file};
+use crate::infrastructure::yaml_store::read_yaml_file;
 use crate::infrastructure::{
     AnalyzeError, AnalyzeOutput, AppConfig, AppInstanceGuard, CacheLocationMode,
     ComponentUpdateAction, ComponentUpdateEntry, ComponentUpdateEvent, ComponentUpdateSnapshot,
@@ -87,6 +87,12 @@ use crate::infrastructure::{
 };
 
 mod app_state;
+
+pub(crate) fn validate_music_cue_memory(value: serde_yaml::Value) -> Result<(), String> {
+    serde_yaml::from_value::<self::music_runtime::MusicStageCueMemoryStore>(value)
+        .map(|_| ())
+        .map_err(|error| format!("Invalid music cue-memory state: {error}"))
+}
 mod background_poll_actions;
 mod cache_actions;
 mod cookie_actions;
@@ -99,6 +105,8 @@ mod gallery_range_actions;
 mod url_source_preview;
 pub(crate) use gallery_queue_actions::GalleryDownloaderChoice;
 pub use gallery_range_actions::{GalleryRangePicker, GalleryRangeSection};
+#[cfg(test)]
+mod cache_review_round2_tests;
 mod item_format_actions;
 mod log;
 mod log_actions;
@@ -119,6 +127,9 @@ mod music_types;
 mod music_worker_helpers;
 mod options_actions;
 mod origin_download_actions;
+#[cfg(test)]
+mod output_review_tests;
+mod gallery_readiness_actions;
 mod prepare_actions;
 mod prepare_visibility_helpers;
 mod queue_batch_helpers;

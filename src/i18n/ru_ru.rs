@@ -447,9 +447,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "Действия с файлом",
         "options.action_button" => "Кнопка действия",
         "options.file_action.show_menu" => "Показать меню",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "Кэш",
         "options.cache_location" => "Расположение кэша",
         "options.cache_location.default" => "По умолчанию",
+        "options.cache_location.portable" => "Папка приложения (переносная)",
+        "options.cache_location.system_temp" => "Системная временная папка",
+        "options.cache_current_folder" => "Текущая папка кэша",
+        "options.cache_after_restart" => "После перезапуска",
+        "options.cache_restart_required" => "Требуется перезапуск",
+        "options.cache_location_help" => {
+            "Изменения вступят в силу после перезапуска. Старый кэш останется на месте. Объём и очистка относятся к текущей папке. Данные состояния и восстановления остаются в папке приложения. Система может удалять временные файлы."
+        }
+        "options.cache_legacy_notice" => {
+            "Прежний вариант «По умолчанию» теперь использует папку приложения (переносную). Все кэши приложения следуют выбранному расположению."
+        }
         "options.cache_usage" => "Использование",
         "options.cache_usage_detail" => "Всего: {total} · Аудио: {audio} · Истекшие: {expired}",
         "options.cache_cleanup" => "Очистка",

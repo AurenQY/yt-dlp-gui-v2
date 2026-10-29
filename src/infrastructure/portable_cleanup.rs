@@ -9,7 +9,6 @@ use super::component_update::{
     PendingAppUpdateManifest, PendingAppUpdateState, other_registered_app_instances,
     pending_app_update_manifest,
 };
-use super::tool_install::portable_root_dir;
 use super::yaml_store::read_yaml_file;
 
 const TRANSIENT_STALE_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -19,6 +18,16 @@ const YT_DLP_SIGFUNCS_STALE_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 6
 const STARTUP_CLEANUP_DELAY: Duration = Duration::from_secs(2);
 
 const CURRENT_CACHE_POLICIES: &[CacheCleanupPolicy] = &[
+    CacheCleanupPolicy {
+        relative_path: &["temp", "native-cookies"],
+        action: CacheCleanupAction::StaleChildren,
+        stale_age: TRANSIENT_STALE_AGE,
+    },
+    CacheCleanupPolicy {
+        relative_path: &["gallery-dl-temp"],
+        action: CacheCleanupAction::StaleChildren,
+        stale_age: TRANSIENT_STALE_AGE,
+    },
     CacheCleanupPolicy {
         relative_path: &["temp", "tool-install"],
         action: CacheCleanupAction::StaleChildren,
@@ -145,23 +154,38 @@ impl PortableCleanupSummary {
 
 pub fn cleanup_startup_transient_files() -> PortableCleanupSummary {
     let mut summary = PortableCleanupSummary::default();
+    let Ok(_guard) = super::storage_paths::exclusive_cleanup() else {
+        return summary;
+    };
 
     if other_registered_app_instances() > 0 {
         return summary;
     }
 
-    let root = portable_root_dir();
-    let cache_root = root.join("cache");
+    let cache_root = super::storage_paths::paths().cache_root.clone();
     if !cache_root.is_dir() {
         return summary;
     }
 
     let pending_app_update = pending_app_update_manifest();
     cleanup_current_transient_locations(&cache_root, pending_app_update.as_ref(), &mut summary);
-    cleanup_legacy_transient_locations(&cache_root, pending_app_update.as_ref(), &mut summary);
-    cleanup_obsolete_v2_json_files(&cache_root, &mut summary);
 
     summary
+}
+
+/// Recovery retention belongs to the updater lifecycle, not generic cache clearing.
+pub(crate) fn cleanup_update_recovery_backups() {
+    let pending = pending_app_update_manifest();
+    let mut summary = PortableCleanupSummary::default();
+    cleanup_app_update_backups(
+        &super::storage_paths::state_path("component-update/backup"),
+        pending.as_ref(),
+        APP_UPDATE_BACKUP_STALE_AGE,
+        &mut summary,
+    );
+    for error in summary.errors {
+        eprintln!("[update-recovery] {error}");
+    }
 }
 
 pub fn schedule_startup_transient_cleanup() {
@@ -220,6 +244,17 @@ fn cleanup_cache_policies(
 ) {
     for policy in policies {
         let root = policy_path(cache_root, policy.relative_path);
+        if policy.relative_path == ["manifest", "backup"]
+            || policy.relative_path == ["temp", "runtime", "instances"]
+        {
+            continue;
+        }
+        if super::storage_paths::reject_links(&root).is_err() {
+            continue;
+        }
+        if policy.relative_path == ["temp", "manifest"] && pending_app_update.is_some() {
+            continue;
+        }
         match policy.action {
             CacheCleanupAction::StaleChildren => {
                 cleanup_stale_children_older_than(&root, policy.stale_age, summary);
@@ -300,6 +335,9 @@ fn cleanup_app_update_backups(
     stale_age: Duration,
     summary: &mut PortableCleanupSummary,
 ) {
+    if super::storage_paths::reject_links(backup_root).is_err() {
+        return;
+    }
     let Ok(entries) = fs::read_dir(backup_root) else {
         return;
     };
@@ -400,6 +438,9 @@ fn remove_stale_child_older_than(
 }
 
 fn path_is_stale(path: &Path, stale_age: Duration) -> bool {
+    if super::storage_paths::reject_links(path).is_err() {
+        return false;
+    }
     fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .ok()
@@ -420,32 +461,11 @@ fn now_unix_seconds() -> u64 {
 }
 
 fn path_size_bytes(path: &Path) -> u64 {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return 0;
-    };
-    if metadata.is_file() {
-        return metadata.len();
-    }
-    if !metadata.is_dir() {
-        return 0;
-    }
-
-    fs::read_dir(path)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|entry| path_size_bytes(&entry.path()))
-        .sum()
+    super::storage_paths::tree_size(path)
 }
 
 fn remove_path(path: &Path) -> std::io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    }
+    super::storage_paths::remove_owned_tree(path).map_err(std::io::Error::other)
 }
 
 fn remove_counted_path(path: &Path, summary: &mut PortableCleanupSummary) {

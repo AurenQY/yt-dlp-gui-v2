@@ -120,6 +120,7 @@ impl QueueThumbnailCache {
         request: &QueueThumbnailCacheRequest,
         allow_smaller: bool,
     ) -> Result<Option<DynamicImage>, String> {
+        let _storage_use = super::storage_paths::use_cache()?;
         let _guard = self.io.lock().unwrap();
         let mut files = self.files()?;
         files.retain(|(_, name)| {
@@ -180,6 +181,7 @@ impl QueueThumbnailCache {
         request: &QueueThumbnailCacheRequest,
         pixels: &RgbaImage,
     ) -> Result<(), String> {
+        let _storage_use = super::storage_paths::use_cache()?;
         let Some(hash) = &request.source_hash else {
             return Ok(());
         };
@@ -251,6 +253,7 @@ impl QueueThumbnailCache {
     }
 
     pub(crate) fn prune(&self) -> Result<(), String> {
+        let _storage_use = super::storage_paths::use_cache()?;
         let _guard = self.io.lock().unwrap();
         let state = self.ownership.lock().unwrap();
         if !state.cleanup_allowed {

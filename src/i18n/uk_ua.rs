@@ -447,9 +447,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "Дії з файлом",
         "options.action_button" => "Кнопка дії",
         "options.file_action.show_menu" => "Показати меню",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "Кеш",
         "options.cache_location" => "Розташування кешу",
         "options.cache_location.default" => "За замовчуванням",
+        "options.cache_location.portable" => "Папка програми (портативна)",
+        "options.cache_location.system_temp" => "Системна тимчасова папка",
+        "options.cache_current_folder" => "Поточна папка кешу",
+        "options.cache_after_restart" => "Після перезапуску",
+        "options.cache_restart_required" => "Потрібен перезапуск",
+        "options.cache_location_help" => {
+            "Зміни набудуть чинності після перезапуску. Старий кеш залишиться на місці. Обсяг і очищення стосуються поточної папки. Дані стану й відновлення залишаються в папці програми. Система може видаляти тимчасові файли."
+        }
+        "options.cache_legacy_notice" => {
+            "Попередній варіант «За замовчуванням» тепер використовує папку програми (портативну). Усі кеші програми використовують вибране розташування."
+        }
         "options.cache_usage" => "Використання",
         "options.cache_usage_detail" => "Усього: {total} · Аудіо: {audio} · Прострочено: {expired}",
         "options.cache_cleanup" => "Очищення",

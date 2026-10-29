@@ -1,6 +1,20 @@
 use super::*;
 
 impl AppState {
+    pub fn item_output_feedback_text(&self, item_index: usize) -> Option<String> {
+        let run = self.queue_items.get(item_index)?.workflows.last()?;
+        let detail = run.error.as_deref().unwrap_or(&run.detail);
+        [
+            "Saved as ",
+            "Skipped existing destination: ",
+            "Output destination is in use.",
+            "Output publication failed: ",
+            "Download cancelled. Complete published files:",
+        ]
+        .iter()
+        .any(|prefix| detail.starts_with(prefix))
+        .then(|| detail.to_owned())
+    }
     pub fn latest_download_status(&self) -> Option<String> {
         let item = self.queue_items.last()?;
         Some(format!(
@@ -82,6 +96,10 @@ impl AppState {
             .filter(|value| !value.is_empty())
         {
             lines.push(("Error".to_owned(), error.to_owned()));
+        }
+
+        if let Some(feedback) = self.item_output_feedback_text(0) {
+            lines.push(("Output".to_owned(), feedback));
         }
 
         lines
@@ -1088,6 +1106,7 @@ impl AppState {
             item.selection.subtitle_selector = default_subtitle.clone();
             item.selection.subtitle_source = default_subtitle_source;
             item.selection.file_name = default_file_name.clone();
+            item.selection.name_origin = Some(crate::domain::OutputNameOrigin::Automatic);
             self.queue_items = vec![item];
         }
 

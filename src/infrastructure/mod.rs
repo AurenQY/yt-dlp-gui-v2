@@ -7,6 +7,8 @@ mod browser_gallery_path;
 mod browser_gallery_timeline;
 mod browser_native_cookies;
 pub(crate) mod browser_native_messaging;
+#[cfg(cache_review_gui)]
+pub(crate) mod cache_review_gui;
 mod component_update;
 mod config;
 pub(crate) mod cookie_site_index;
@@ -15,6 +17,7 @@ pub(crate) mod edition;
 pub(crate) mod extractor_index;
 mod gallery_browser_stream;
 pub(crate) mod gallery_dl;
+pub(crate) mod gallery_runtime_policy;
 pub(crate) mod gallery_xmp;
 pub(crate) mod gallery_xmp_packet;
 mod media_session;
@@ -24,14 +27,30 @@ mod output_actions;
 mod portable_cleanup;
 mod prepare_check;
 mod process_guard;
+#[cfg(test)]
+pub(crate) use process_guard::{exited_tracked_test_pids, tracked_test_pids};
 pub(crate) mod queue_store;
 pub(crate) mod queue_thumbnail_cache;
 pub(crate) mod render_backend;
 pub(crate) mod runtime_paths;
 mod sha256;
+#[cfg(test)]
+pub(crate) fn sha256_hex_file(path: &std::path::Path) -> Result<String, String> {
+    sha256::sha256_hex_file(path)
+}
+#[cfg(test)]
+pub(crate) use config::runtime_config_file_path;
+pub mod output_policy;
+pub(crate) mod output_transaction;
 pub(crate) mod startup_diagnostics;
+pub(crate) mod storage_migration;
+pub(crate) mod storage_paths;
 mod tool_install;
 mod tools;
+#[cfg(any(test, cache_review_gui))]
+pub(crate) use tools::output_config_observation_counts;
+#[cfg(test)]
+pub(crate) use tools::output_config_read_count;
 pub(crate) mod wgpu_api;
 pub(crate) mod xmp;
 pub(crate) mod yaml_store;
@@ -74,6 +93,7 @@ pub use prepare_check::{
     PrepareReport, PrepareRequirement, PrepareStatus, collect_dependency_presence_report,
     collect_prepare_report,
 };
+pub(crate) use process_guard::run_tracked_command_output_cancellable;
 pub use process_guard::{
     force_cleanup_tracked_processes, install_process_cleanup_panic_hook,
     run_tracked_command_output, track_child_process,

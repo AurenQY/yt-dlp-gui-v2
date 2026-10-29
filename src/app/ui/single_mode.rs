@@ -58,7 +58,11 @@ impl SingleModeLayoutMetrics {
             semantic_ui_metrics::single_mode_thumbnail_row_height_for_right_column_width(
                 right_column_width,
             );
-        let right_info_height = semantic_ui_metrics::single_mode_right_info_slot_height();
+        let right_info_height = if state.item_output_feedback_text(0).is_some() {
+            240.0
+        } else {
+            semantic_ui_metrics::single_mode_right_info_slot_height()
+        };
 
         Self {
             title_height,

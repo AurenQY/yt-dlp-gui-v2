@@ -14,12 +14,46 @@ pub(super) fn decode(content: &str) -> Result<AppConfig, String> {
         return Err("Settings must be a YAML mapping.".to_owned());
     }
     let mut snapshot = Value::Mapping(Mapping::new());
+    let mut output_errors = Vec::new();
     for field in schema::FIELDS {
-        if let Some(value) = read_path(&document, field.path)? {
+        let value = match read_path(&document, field.path) {
+            Ok(value) => value,
+            Err(error) if field.source.starts_with("output_") => {
+                output_errors.push(format!(
+                    "Invalid {}: {error} Using its safe default.",
+                    field.path
+                ));
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(value) = value {
+            if field.source.starts_with("output_") {
+                let valid = match field.source {
+                    "output_naming" => value.as_str().is_some_and(|v| {
+                        matches!(v, "title" | "title_id" | "uploader_title_id" | "custom")
+                    }),
+                    "output_existing_file" => value
+                        .as_str()
+                        .is_some_and(|v| matches!(v, "keep_both" | "skip")),
+                    "output_template" => value.as_str().is_some_and(|v| {
+                        super::super::output_policy::render_template(v, &Default::default()).is_ok()
+                    }),
+                    _ => true,
+                };
+                if !valid {
+                    output_errors.push(format!("Invalid {}; using its safe default.", field.path));
+                    continue;
+                }
+            }
             insert_path(&mut snapshot, field.source, value.clone());
         }
     }
-    serde_yaml::from_value(snapshot).map_err(|e| e.to_string())
+    let mut config: AppConfig = serde_yaml::from_value(snapshot).map_err(|e| e.to_string())?;
+    if !output_errors.is_empty() {
+        config.output_settings_error = Some(output_errors.join(" "));
+    }
+    Ok(config)
 }
 
 pub(super) fn encode(config: &AppConfig) -> Result<String, String> {

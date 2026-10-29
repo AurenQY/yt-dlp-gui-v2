@@ -9,7 +9,7 @@ use super::tool_install::{
     DependencyTool, dependency_tool_exists, dependency_tool_is_available, ffprobe_companion_path,
     portable_root_dir, resolve_support_path,
 };
-use super::tools::{CacheLocationMode, ToolPaths, resolve_output_dir};
+use super::tools::{ToolPaths, resolve_output_dir};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrepareStatus {
@@ -71,8 +71,12 @@ impl PrepareReport {
     }
 }
 
-pub fn collect_prepare_report(tool_paths: &ToolPaths, download_dir: &str) -> PrepareReport {
-    let mut requirements = collect_dependency_presence_report(tool_paths).requirements;
+pub fn collect_prepare_report(
+    tool_paths: &ToolPaths,
+    download_dir: &str,
+    gallery: Option<&Result<(), String>>,
+) -> PrepareReport {
+    let mut requirements = collect_dependency_presence_report(tool_paths, gallery).requirements;
 
     let root = portable_root_dir();
     push_writable_requirement(
@@ -90,22 +94,31 @@ pub fn collect_prepare_report(tool_paths: &ToolPaths, download_dir: &str) -> Pre
         &root.join("tools"),
         "prepare.req.tools_folder.description",
     );
-    push_writable_requirement(
-        &mut requirements,
-        "manifest-temp",
-        "prepare.req.deployment_temp.title",
-        &manifest_temp_dir(),
-        "prepare.req.deployment_temp.description",
-    );
-
-    if tool_paths.cache_mode == CacheLocationMode::V2Cache {
+    if super::storage_paths::require_ready().is_ok() {
+        push_writable_requirement(
+            &mut requirements,
+            "manifest-temp",
+            "prepare.req.deployment_temp.title",
+            &manifest_temp_dir(),
+            "prepare.req.deployment_temp.description",
+        );
         push_writable_requirement(
             &mut requirements,
             "yt-dlp-cache",
             "prepare.req.download_cache.title",
-            &resolve_support_path(&tool_paths.cache_dir),
+            &super::storage_paths::paths().cache_root,
             "prepare.req.download_cache.description",
         );
+    } else if let Some(error) = super::storage_paths::error() {
+        requirements.push(PrepareRequirement {
+            id: "app-cache".to_owned(),
+            title: "Cache storage".to_owned(),
+            description: "Application cache initialization failed.".to_owned(),
+            status: PrepareStatus::Failed,
+            detail: error.to_owned(),
+            recommendation: "Choose a valid cache location in Options, then restart.".to_owned(),
+            action: None,
+        });
     }
 
     match resolve_output_dir(download_dir) {
@@ -130,28 +143,35 @@ pub fn collect_prepare_report(tool_paths: &ToolPaths, download_dir: &str) -> Pre
     PrepareReport { requirements }
 }
 
-pub fn collect_dependency_presence_report(tool_paths: &ToolPaths) -> PrepareReport {
+pub fn collect_dependency_presence_report(
+    tool_paths: &ToolPaths,
+    gallery: Option<&Result<(), String>>,
+) -> PrepareReport {
     let mut requirements = Vec::new();
     push_tool_requirement(
         &mut requirements,
+        gallery,
         DependencyTool::YtDlp,
         tool_paths.yt_dlp.as_str(),
         "Video analysis and downloading require yt-dlp; settings and tool management remain available without it.",
     );
     push_tool_requirement(
         &mut requirements,
+        gallery,
         DependencyTool::GalleryDl,
         tool_paths.gallery_dl.as_str(),
         "Downloads image galleries and social-media collections.",
     );
     push_tool_requirement(
         &mut requirements,
+        gallery,
         DependencyTool::Deno,
         tool_paths.deno.as_str(),
         "JavaScript runtime for yt-dlp's YouTube challenges; not needed for every website.",
     );
     push_tool_requirement(
         &mut requirements,
+        gallery,
         DependencyTool::Ffmpeg,
         tool_paths.ffmpeg.as_str(),
         "Merges video/audio, converts formats, probes media info, and handles thumbnails/subtitles.",
@@ -161,17 +181,30 @@ pub fn collect_dependency_presence_report(tool_paths: &ToolPaths) -> PrepareRepo
 
 fn push_tool_requirement(
     requirements: &mut Vec<PrepareRequirement>,
+    gallery: Option<&Result<(), String>>,
     tool: DependencyTool,
     configured_path: &str,
     description: &str,
 ) {
-    let installed = dependency_tool_is_available(tool, configured_path);
+    let installed = if tool == DependencyTool::GalleryDl {
+        matches!(gallery, Some(Ok(())))
+    } else {
+        dependency_tool_is_available(tool, configured_path)
+    };
     let resolved = if configured_path.trim().is_empty() {
         resolve_support_path(tool.default_portable_path())
     } else {
         resolve_support_path(configured_path)
     };
-    let detail = if installed {
+    let gallery_incompatible =
+        tool == DependencyTool::GalleryDl && resolved.is_file() && !installed;
+    let detail = if tool == DependencyTool::GalleryDl {
+        match gallery {
+            None => "Checking gallery-dl compatibility...".to_owned(),
+            Some(Ok(())) => format!("Current path: {}", resolved.display()),
+            Some(Err(error)) => error.clone(),
+        }
+    } else if installed {
         format!("Current path: {}", resolved.display())
     } else if tool == DependencyTool::Ffmpeg && dependency_tool_exists(configured_path) {
         let ffprobe = ffprobe_companion_path(configured_path);
@@ -190,7 +223,11 @@ fn push_tool_requirement(
         id: format!("tool-{}", tool.install_dir_name()),
         title: tool.label().to_owned(),
         description: description.to_owned(),
-        status: if installed {
+        status: if tool == DependencyTool::GalleryDl && gallery.is_none() {
+            PrepareStatus::Warning
+        } else if gallery_incompatible {
+            PrepareStatus::Failed
+        } else if installed {
             PrepareStatus::Ok
         } else {
             PrepareStatus::Missing

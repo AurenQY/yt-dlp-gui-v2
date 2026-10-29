@@ -14,7 +14,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::cookie_site_index::read_cookie_site_index;
-use super::process_guard::run_tracked_command_output;
+#[path = "yt_dlp_config_options.rs"]
+mod config_options;
+#[path = "output_preparation.rs"]
+mod output_preparation;
+use config_options::ConfigOption;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -85,7 +89,6 @@ impl FileTimeMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CacheLocationMode {
-    YtDlpDefault,
     V2Cache,
     WindowsTemp,
 }
@@ -93,15 +96,15 @@ pub enum CacheLocationMode {
 impl CacheLocationMode {
     pub fn label(self) -> &'static str {
         match self {
-            Self::YtDlpDefault => "Default",
-            Self::V2Cache => "yt-dlp-gui",
-            Self::WindowsTemp => "Windows",
+            Self::V2Cache => "Application folder (portable)",
+            Self::WindowsTemp => "System temporary folder",
         }
     }
 }
 
 #[derive(Clone)]
 pub struct DownloadRequest {
+    pub output: super::output_policy::OutputRequest,
     pub target_kind: DownloadTargetKind,
     pub url: String,
     pub playlist_index: Option<usize>,
@@ -136,6 +139,8 @@ pub struct DownloadRequest {
 }
 
 pub struct PreparedDownload {
+    pub output_transaction:
+        Option<std::sync::Arc<std::sync::Mutex<super::output_transaction::OutputTransaction>>>,
     pub command: Command,
     pub output_path: PathBuf,
     pub command_line: String,
@@ -160,7 +165,8 @@ impl AnalyzeError {
     }
 }
 
-struct OutputPlan {
+#[derive(Clone)]
+pub(crate) struct OutputPlan {
     output_argument: String,
     final_output_path: PathBuf,
     remux_extension: Option<String>,
@@ -182,8 +188,52 @@ pub(crate) enum ResolvedCookieSource {
     Browser(String),
 }
 
+/// Parsed once for an output operation; external tools still read `path` themselves.
+#[derive(Clone, Default)]
+pub(crate) struct EffectiveYtDlpConfig {
+    pub(crate) path: Option<PathBuf>,
+    explicit: bool,
+    options: Vec<ConfigOption>,
+    pub(crate) output: (Option<String>, Option<String>),
+}
+impl EffectiveYtDlpConfig {
+    fn owns(&self, names: &[&str]) -> bool {
+        self.options
+            .iter()
+            .any(|option| names.contains(&option.name.as_str()))
+    }
+}
+#[cfg(any(test, cache_review_gui))]
+static CONFIG_READS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, [usize; 3]>>,
+> = std::sync::OnceLock::new();
+#[cfg(test)]
+pub(crate) fn output_config_read_count(path: &Path) -> usize {
+    output_config_observation_counts(path)[0]
+}
+#[cfg(any(test, cache_review_gui))]
+pub(crate) fn output_config_observation_counts(path: &Path) -> [usize; 3] {
+    CONFIG_READS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .get(path)
+        .copied()
+        .unwrap_or_default()
+}
+#[cfg(any(test, cache_review_gui))]
+fn record_config_observation(path: &Path, phase: usize) {
+    CONFIG_READS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .entry(path.to_owned())
+        .or_default()[phase] += 1;
+}
+
 #[derive(Clone)]
 pub struct ToolPaths {
+    pub(crate) output_config: Option<std::sync::Arc<EffectiveYtDlpConfig>>,
     pub yt_dlp: String,
     pub gallery_dl: String,
     pub yt_dlp_config: String,
@@ -212,6 +262,7 @@ pub struct ToolPaths {
 impl Default for ToolPaths {
     fn default() -> Self {
         Self {
+            output_config: None,
             yt_dlp: ".\\tools\\yt-dlp\\yt-dlp.exe".to_owned(),
             gallery_dl: ".\\tools\\gallery-dl\\gallery-dl.exe".to_owned(),
             yt_dlp_config: String::new(),
@@ -268,49 +319,178 @@ fn apply_analysis_selection_args(
 }
 
 impl ToolPaths {
+    pub(crate) fn for_output(
+        &self,
+        output: &super::output_policy::OutputRequest,
+    ) -> Result<Self, String> {
+        if self.output_config.is_some() {
+            return Ok(self.clone());
+        }
+        let retained = if let Some(owner) = &output.transaction {
+            owner
+                .lock()
+                .map_err(|_| "Output owner unavailable")?
+                .output_config
+                .clone()
+        } else {
+            None
+        };
+        let Some(config) = retained else {
+            return self.bind_protected_config();
+        };
+        let mut tools = self.clone();
+        tools.output_config = Some(config);
+        Ok(tools)
+    }
+
+    pub(crate) fn bind_protected_config(&self) -> Result<Self, String> {
+        let mut tools = self.clone();
+        if tools.output_config.is_none() {
+            tools.output_config = Some(std::sync::Arc::new(self.read_effective_config(true)?));
+        }
+        Ok(tools)
+    }
+
+    fn prepare_metadata_command(&self, tool: &Path) -> Result<(Self, Command), String> {
+        let tools = self.bind_protected_config()?;
+        let mut command = Command::new(tool);
+        configure_background_command(&mut command);
+        tools.apply_common_yt_dlp_args(&mut command)?;
+        // Config tokens precede CLI tokens. Metadata intent must override an
+        // explicit --no-simulate rather than rely on JSON dumping's default.
+        command.args(["--simulate", "--skip-download"]);
+        Ok((tools, command))
+    }
+    fn read_effective_config(&self, protected: bool) -> Result<EffectiveYtDlpConfig, String> {
+        let explicit = self.explicit_config_path();
+        let path = explicit.clone().or_else(|| self.portable_config_path());
+        let Some(path) = path else {
+            return Ok(EffectiveYtDlpConfig::default());
+        };
+        #[cfg(any(test, cache_review_gui))]
+        record_config_observation(&path, 0);
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Could not inspect yt-dlp configuration: {e}"))?;
+        #[cfg(any(test, cache_review_gui))]
+        record_config_observation(&path, 1);
+        let arguments = config_arguments(&content)?;
+        let options = config_options::interpret(&arguments)?;
+        let output = if protected {
+            #[cfg(any(test, cache_review_gui))]
+            record_config_observation(&path, 2);
+            validate_external_output_arguments(&options)?;
+            output_preparation::external_output(&options)?
+        } else {
+            (None, None)
+        };
+        Ok(EffectiveYtDlpConfig {
+            path: Some(path),
+            explicit: explicit.is_some(),
+            options,
+            output,
+        })
+    }
+    fn config_owns(&self, names: &[&str]) -> bool {
+        if let Some(config) = &self.output_config {
+            return config.owns(names);
+        }
+        self.read_effective_config(false)
+            .is_ok_and(|c| c.owns(names))
+    }
+
+    pub(crate) fn music_output_extension(
+        &self,
+        url: &str,
+        selector: &str,
+        cookies: bool,
+        cancel: &AtomicBool,
+    ) -> Result<String, String> {
+        let metadata = self.analyze_music_output(url, cookies, selector, cancel)?;
+        let extension = metadata
+            .json
+            .get("ext")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or("Resolved audio has no output extension.")?;
+        // Original mode retains the selected source container (no -x option).
+        Ok(extension.to_owned())
+    }
+    pub(crate) fn analyze_music_output(
+        &self,
+        url: &str,
+        cookies: bool,
+        selector: &str,
+        cancel: &AtomicBool,
+    ) -> Result<AnalyzeOutput, String> {
+        let tools = self.bind_protected_config()?;
+        let tool = tools.validate_yt_dlp_available()?;
+        // Match the music download's external-config format precedence.
+        let selector = (!tools.effective_config_owns_format()).then_some(selector);
+        tools
+            .run_analyze_command_cancellable(&tool, url, cookies, selector, None, None, cancel)
+            .map_err(|e| e.message)
+    }
+    pub(crate) fn music_output_destination(
+        &self,
+        output: &super::output_policy::OutputRequest,
+        url: &str,
+        directory: &Path,
+        literal: &str,
+        use_cookies: bool,
+    ) -> Result<(PathBuf, String), String> {
+        if self.output_config.is_none() {
+            return self.for_output(output)?.music_output_destination(
+                output,
+                url,
+                directory,
+                literal,
+                use_cookies,
+            );
+        }
+        output_preparation::music_destination(self, output, url, directory, literal, use_cookies)
+    }
     pub fn has_explicit_config(&self) -> bool {
-        !self.yt_dlp_config.trim().is_empty() && resolve_support_path(&self.yt_dlp_config).is_file()
+        self.output_config.as_ref().map_or_else(
+            || {
+                !self.yt_dlp_config.trim().is_empty()
+                    && resolve_support_path(&self.yt_dlp_config).is_file()
+            },
+            |c| c.explicit,
+        )
     }
 
     pub fn effective_config_path(&self) -> Option<PathBuf> {
-        self.explicit_config_path()
-            .or_else(|| self.portable_config_path())
+        self.output_config.as_ref().map_or_else(
+            || {
+                self.explicit_config_path()
+                    .or_else(|| self.portable_config_path())
+            },
+            |c| c.path.clone(),
+        )
     }
 
     pub fn effective_config_owns_output(&self) -> bool {
-        self.effective_config_path()
-            .as_deref()
-            .is_some_and(config_contains_output_arg)
+        self.config_owns(&["--output", "--paths"])
     }
 
     pub fn effective_config_owns_format(&self) -> bool {
-        self.effective_config_path()
-            .as_deref()
-            .is_some_and(config_contains_format_arg)
+        self.config_owns(&["--format"])
     }
 
     pub fn effective_config_owns_limit_rate(&self) -> bool {
-        self.effective_config_path()
-            .as_deref()
-            .is_some_and(config_contains_limit_rate_arg)
+        self.config_owns(&["--limit-rate"])
     }
 
     pub fn effective_config_owns_download_sections(&self) -> bool {
-        self.effective_config_path()
-            .as_deref()
-            .is_some_and(config_contains_download_sections_arg)
+        self.config_owns(&["--download-sections"])
     }
 
     pub fn effective_config_owns_live_from_start(&self) -> bool {
-        self.effective_config_path()
-            .as_deref()
-            .is_some_and(config_contains_live_from_start_arg)
+        self.config_owns(&["--live-from-start", "--no-live-from-start"])
     }
 
     pub fn effective_config_owns_mtime(&self) -> bool {
-        self.effective_config_path()
-            .as_deref()
-            .is_some_and(config_contains_mtime_arg)
+        self.config_owns(&["--mtime", "--no-mtime"])
     }
 
     pub fn effective_proxy_url(&self) -> Option<&str> {
@@ -385,10 +565,8 @@ impl ToolPaths {
     ) -> Result<Command, String> {
         let tool_path = self.validate_yt_dlp_available()?;
 
-        let mut command = Command::new(&tool_path);
-        configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
-        self.apply_cookie_args(&mut command, use_cookies, Some(url))?;
+        let (tools, mut command) = self.prepare_metadata_command(&tool_path)?;
+        tools.apply_cookie_args(&mut command, use_cookies, Some(url))?;
         command
             .arg("--flat-playlist")
             .arg("--dump-json")
@@ -418,10 +596,8 @@ impl ToolPaths {
     ) -> Result<Command, String> {
         let tool_path = self.validate_yt_dlp_available()?;
 
-        let mut command = Command::new(&tool_path);
-        configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
-        self.apply_cookie_args(&mut command, use_cookies, Some(url))?;
+        let (tools, mut command) = self.prepare_metadata_command(&tool_path)?;
+        tools.apply_cookie_args(&mut command, use_cookies, Some(url))?;
         command
             .arg("--flat-playlist")
             .arg("--dump-json")
@@ -464,11 +640,9 @@ impl ToolPaths {
         use_cookies: bool,
     ) -> Result<(Command, String), String> {
         let tool_path = self.validate_yt_dlp_available()?;
-        let mut command = Command::new(&tool_path);
-        configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
-        self.apply_cookie_args(&mut command, use_cookies, Some(url))?;
-        self.apply_youtube_extractor_args(&mut command);
+        let (tools, mut command) = self.prepare_metadata_command(&tool_path)?;
+        tools.apply_cookie_args(&mut command, use_cookies, Some(url))?;
+        tools.apply_youtube_extractor_args(&mut command);
         command
             .args([
                 "--flat-playlist",
@@ -476,7 +650,6 @@ impl ToolPaths {
                 "2",
                 "--dump-single-json",
                 "--no-warnings",
-                "--skip-download",
             ])
             .arg(url);
         let command_line = format_command_line(&tool_path, &command);
@@ -501,6 +674,31 @@ impl ToolPaths {
             .validate_yt_dlp_available()
             .map_err(|error| AnalyzeError::new(error, None))?;
         self.run_analyze_command(&tool_path, url, use_cookies, None, None, playlist_index)
+    }
+
+    pub(crate) fn analyze_output_naming(
+        &self,
+        url: &str,
+        cookies: bool,
+        index: Option<usize>,
+        cancel: &AtomicBool,
+    ) -> Result<AnalyzeOutput, AnalyzeError> {
+        if index.is_none() {
+            return super::yt_dlp_source_analysis::analyze_desktop_source_cancellable(
+                self, url, cookies, cancel,
+            )
+            .and_then(|output| match output {
+                super::yt_dlp_source_analysis::DesktopSourceAnalysis::Single(output) => Ok(output),
+                _ => Err(AnalyzeError::new(
+                    "Saved source is a playlist without an entry index.",
+                    None,
+                )),
+            });
+        }
+        let tool = self
+            .validate_yt_dlp_available()
+            .map_err(|e| AnalyzeError::new(e, None))?;
+        self.run_analyze_command_cancellable(&tool, url, cookies, None, None, index, cancel)
     }
 
     pub fn analyze_playlist_url_detailed(
@@ -584,10 +782,13 @@ impl ToolPaths {
         use_cookies: bool,
         format_selector: &str,
     ) -> Result<AnalyzeOutput, AnalyzeError> {
+        let tools = self
+            .bind_protected_config()
+            .map_err(|error| AnalyzeError::new(error, None))?;
         // A saved/audio source can bypass Add. Do not resolve every creator item
         // merely to obtain one stream; retain the explicit audio selector below.
         if matches!(
-            super::yt_dlp_source_analysis::preflight_desktop_source(self, url, use_cookies)?,
+            super::yt_dlp_source_analysis::preflight_desktop_source(&tools, url, use_cookies)?,
             super::yt_dlp_source_analysis::DesktopSourcePreflight::Playlist
         ) {
             return Err(AnalyzeError::new(
@@ -595,10 +796,10 @@ impl ToolPaths {
                 None,
             ));
         }
-        let tool_path = self
+        let tool_path = tools
             .validate_yt_dlp_available()
             .map_err(|error| AnalyzeError::new(error, None))?;
-        self.run_analyze_command(
+        tools.run_analyze_command(
             &tool_path,
             url,
             use_cookies,
@@ -615,6 +816,17 @@ impl ToolPaths {
         format_selector: &str,
         use_cookies: bool,
     ) -> Result<Command, String> {
+        if self.output_config.is_none() {
+            return self
+                .for_output(&super::output_policy::OutputRequest::default())?
+                .prepare_music_stream_cache_command(
+                    url,
+                    output_path,
+                    format_selector,
+                    use_cookies,
+                );
+        }
+        let _storage_use = super::storage_paths::use_cache()?;
         let tool_path = self.validate_yt_dlp_available()?;
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)
@@ -623,7 +835,7 @@ impl ToolPaths {
 
         let mut command = Command::new(&tool_path);
         configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
+        self.apply_common_yt_dlp_args(&mut command)?;
         command
             .arg("--no-playlist")
             .arg("--no-simulate")
@@ -631,9 +843,12 @@ impl ToolPaths {
             .arg("--force-overwrites")
             .arg("--windows-filenames")
             .arg("--newline")
-            .arg("--progress")
-            .arg("--output")
-            .arg(output_path);
+            .arg("--progress");
+        apply_output_path(&mut command, &output_path.display().to_string())?;
+        // Growing-cache playback reads this file before download completion.
+        if let Some(parent) = output_path.parent() {
+            command.arg("-P").arg(format!("temp:{}", parent.display()));
+        }
 
         let selector = format_selector.trim();
         if !self.effective_config_owns_format() {
@@ -669,20 +884,39 @@ impl ToolPaths {
         write_tags: bool,
         chapter_output_dir: Option<&Path>,
         use_cookies: bool,
+        output: &super::output_policy::OutputRequest,
     ) -> Result<PreparedDownload, String> {
         let tool_path = self.validate_yt_dlp_available()?;
+        if self.output_config.is_none() {
+            return self
+                .for_output(output)?
+                .prepare_music_audio_download_command(
+                    url,
+                    output_dir,
+                    audio_format,
+                    format_selector,
+                    embed_cover,
+                    write_tags,
+                    chapter_output_dir,
+                    use_cookies,
+                    output,
+                );
+        }
+        if !output.validate_work(output_dir)? {
+            return Err("Music output requires an owned staging transaction.".into());
+        }
+        if let Some(chapters) = chapter_output_dir {
+            output.validate_work(chapters)?;
+        }
         fs::create_dir_all(output_dir)
             .map_err(|error| format!("Could not create music download folder: {error}"))?;
 
         let target_format = audio_format.and_then(normalized_extension);
-        let output_template = output_dir
-            .join("%(artist)s - %(title)s.%(ext)s")
-            .display()
-            .to_string();
+        let output_template = output_dir.join("output.%(ext)s").display().to_string();
         let expected_output = target_format
             .as_ref()
-            .map(|format| output_dir.join(format!("%(artist)s - %(title)s.{format}")))
-            .unwrap_or_else(|| output_dir.join("%(artist)s - %(title)s.%(ext)s"));
+            .map(|format| output_dir.join(format!("output.{format}")))
+            .unwrap_or_else(|| output_dir.join("output.%(ext)s"));
 
         if let Some(chapter_output_dir) = chapter_output_dir {
             fs::create_dir_all(chapter_output_dir)
@@ -691,7 +925,7 @@ impl ToolPaths {
 
         let mut command = Command::new(&tool_path);
         configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
+        self.apply_common_yt_dlp_args(&mut command)?;
         command
             .arg("--no-playlist")
             .arg("--continue")
@@ -737,9 +971,11 @@ impl ToolPaths {
 
         command
             .arg("--print")
-            .arg(format!("after_move:{FINAL_OUTPUT_PATH_PREFIX}%(filepath)j"))
-            .arg("--output")
-            .arg(output_template);
+            .arg(format!("after_move:{FINAL_OUTPUT_PATH_PREFIX}%(filepath)j"));
+        apply_output_path(&mut command, &output_template)?;
+        command
+            .arg("-P")
+            .arg(format!("temp:{}", output_dir.join(".incoming").display()));
 
         if !self.effective_config_owns_format() {
             let selector = if format_selector.trim().is_empty() {
@@ -768,6 +1004,7 @@ impl ToolPaths {
             command,
             output_path: expected_output,
             command_line,
+            output_transaction: output.transaction.clone(),
         })
     }
 
@@ -778,6 +1015,11 @@ impl ToolPaths {
         language_code: &str,
         use_cookies: bool,
     ) -> Result<Command, String> {
+        if self.output_config.is_none() {
+            return self
+                .for_output(&super::output_policy::OutputRequest::default())?
+                .prepare_music_lyrics_cache_command(url, lyrics_dir, language_code, use_cookies);
+        }
         let tool_path = self.validate_yt_dlp_available()?;
         fs::create_dir_all(lyrics_dir)
             .map_err(|error| format!("Could not create lyrics cache folder: {error}"))?;
@@ -785,7 +1027,7 @@ impl ToolPaths {
         let output_template = lyrics_dir.join("lyrics.%(ext)s").display().to_string();
         let mut command = Command::new(&tool_path);
         configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
+        self.apply_common_yt_dlp_args(&mut command)?;
         command
             .arg("--no-playlist")
             .arg("--skip-download")
@@ -797,9 +1039,8 @@ impl ToolPaths {
             .arg("--sub-format")
             .arg("vtt/srt/ttml/srv3/srv2/srv1/best")
             .arg("--convert-subs")
-            .arg("lrc")
-            .arg("--output")
-            .arg(output_template);
+            .arg("lrc");
+        apply_output_path(&mut command, &output_template)?;
 
         self.apply_cookie_args(&mut command, use_cookies, Some(url))?;
         self.apply_youtube_extractor_args(&mut command);
@@ -820,12 +1061,15 @@ impl ToolPaths {
 
     pub fn prepare_download(&self, request: &DownloadRequest) -> Result<PreparedDownload, String> {
         let tool_path = self.validate_yt_dlp_available()?;
+        if self.output_config.is_none() {
+            return self.for_output(&request.output)?.prepare_download(request);
+        }
 
-        let output_plan = build_output_plan(request)?;
+        let (output_plan, output_transaction) = output_preparation::prepare_plan(self, request)?;
 
         let mut command = Command::new(&tool_path);
         configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
+        self.apply_common_yt_dlp_args(&mut command)?;
         command
             .arg("--no-playlist")
             .arg("--force-overwrites")
@@ -835,6 +1079,9 @@ impl ToolPaths {
             .arg("--progress-template")
             .arg("[yt-dlp],%(info.format_id)s,%(progress._percent_str)s,%(progress._eta_str)s,%(progress.downloaded_bytes)s,%(progress.total_bytes)s,%(progress.speed)s,%(progress.eta)s");
         apply_download_playlist_index_arg(&mut command, request.playlist_index);
+        if request.download_section_args.len() > 1 {
+            command.args(["--autonumber-start", "1"]);
+        }
 
         if request.target_kind != DownloadTargetKind::Subtitle {
             command
@@ -843,8 +1090,27 @@ impl ToolPaths {
                 .arg(format!("after_move:{FINAL_OUTPUT_PATH_PREFIX}%(filepath)j"));
         }
 
-        if !self.effective_config_owns_output() || request.output_path.is_some() {
-            command.arg("--output").arg(&output_plan.output_argument);
+        apply_output_path(&mut command, &output_plan.output_argument)?;
+        let work = output_transaction
+            .lock()
+            .map_err(|_| "Output transaction unavailable")?
+            .work
+            .clone();
+        command
+            .arg("-P")
+            .arg(format!("temp:{}", work.join(".incoming").display()));
+        for kind in [
+            "thumbnail",
+            "subtitle",
+            "chapter",
+            "description",
+            "infojson",
+            "link",
+            "pl_thumbnail",
+            "pl_description",
+            "pl_infojson",
+        ] {
+            command.arg("-P").arg(format!("{kind}:{}", work.display()));
         }
 
         if request.target_kind != DownloadTargetKind::Subtitle
@@ -1008,10 +1274,12 @@ impl ToolPaths {
             command,
             output_path: output_plan.final_output_path,
             command_line,
+            output_transaction: Some(output_transaction),
         })
     }
 
     pub fn validate_yt_dlp_available(&self) -> Result<PathBuf, String> {
+        super::storage_paths::require_ready()?;
         let tool_path = resolve_tool_path(&self.yt_dlp);
         if tool_path.is_file() {
             return Ok(tool_path);
@@ -1147,9 +1415,17 @@ impl ToolPaths {
         }
     }
 
-    fn apply_common_yt_dlp_args(&self, command: &mut Command) {
-        if let Some(config_path) = self.effective_config_path() {
-            command.arg("--config-location").arg(config_path);
+    fn apply_common_yt_dlp_args(&self, command: &mut Command) -> Result<(), String> {
+        let _storage_use = super::storage_paths::use_cache()?;
+        let local;
+        let config = if let Some(config) = &self.output_config {
+            config.as_ref()
+        } else {
+            local = self.read_effective_config(false)?;
+            &local
+        };
+        if let Some(path) = &config.path {
+            command.arg("--config-location").arg(path);
         } else {
             command.arg("--ignore-config");
         }
@@ -1178,25 +1454,18 @@ impl ToolPaths {
                 .arg(format!("deno:{}", deno_path.display()));
         }
 
-        match self.cache_mode {
-            CacheLocationMode::YtDlpDefault => {}
-            CacheLocationMode::V2Cache => {
-                let cache_root = resolve_support_path(&self.cache_dir);
-                let yt_dlp_cache_dir = cache_root.join("yt-dlp");
-                let yt_dlp_temp_dir = cache_root.join("yt-dlp-temp");
-                command.arg("--cache-dir").arg(&yt_dlp_cache_dir);
-                command
-                    .arg("-P")
-                    .arg(format!("temp:{}", yt_dlp_temp_dir.display()));
-            }
-            CacheLocationMode::WindowsTemp => {
-                let temp_dir = std::env::temp_dir();
-                command.arg("--cache-dir").arg(&temp_dir);
-                command
-                    .arg("-P")
-                    .arg(format!("temp:{}", temp_dir.display()));
-            }
+        if config.owns(&["--no-cache-dir"]) {
+            command.arg("--no-cache-dir");
+        } else {
+            command
+                .arg("--cache-dir")
+                .arg(super::storage_paths::cache_directory("yt-dlp")?);
         }
+        command.arg("-P").arg(format!(
+            "temp:{}",
+            super::storage_paths::cache_directory("yt-dlp-temp")?.display()
+        ));
+        Ok(())
     }
 
     fn explicit_config_path(&self) -> Option<PathBuf> {
@@ -1227,29 +1496,55 @@ impl ToolPaths {
         playlist_item_limit: Option<usize>,
         playlist_index: Option<usize>,
     ) -> Result<AnalyzeOutput, AnalyzeError> {
-        let mut command = Command::new(tool_path);
-        configure_background_command(&mut command);
-        self.apply_common_yt_dlp_args(&mut command);
+        self.run_analyze_command_cancellable(
+            tool_path,
+            url,
+            use_cookies,
+            format_selector,
+            playlist_item_limit,
+            playlist_index,
+            &AtomicBool::new(false),
+        )
+    }
+
+    pub(crate) fn run_analyze_command_cancellable(
+        &self,
+        tool_path: &Path,
+        url: &str,
+        use_cookies: bool,
+        format_selector: Option<&str>,
+        playlist_item_limit: Option<usize>,
+        playlist_index: Option<usize>,
+        cancel: &AtomicBool,
+    ) -> Result<AnalyzeOutput, AnalyzeError> {
+        let (tools, mut command) = self
+            .prepare_metadata_command(tool_path)
+            .map_err(|error| AnalyzeError::new(error, None))?;
         command.arg("--dump-single-json").arg("--no-warnings");
 
         apply_analysis_selection_args(&mut command, playlist_item_limit, format_selector);
         apply_download_playlist_index_arg(&mut command, playlist_index);
 
-        self.apply_cookie_args(&mut command, use_cookies, Some(url))
+        tools
+            .apply_cookie_args(&mut command, use_cookies, Some(url))
             .map_err(|error| AnalyzeError::new(error, None))?;
-        self.apply_youtube_extractor_args(&mut command);
+        tools.apply_youtube_extractor_args(&mut command);
         command.arg(url);
 
         let command_line = format_command_line(tool_path, &command);
         eprintln!("[analyze] command: {command_line}");
 
-        let output =
-            run_tracked_command_output(&mut command, "yt-dlp analyze").map_err(|error| {
-                AnalyzeError::new(
-                    format!("Could not start yt-dlp: {error}"),
-                    Some(command_line.clone()),
-                )
-            })?;
+        let output = super::process_guard::run_tracked_command_output_cancellable(
+            &mut command,
+            "yt-dlp analyze",
+            cancel,
+        )
+        .map_err(|error| {
+            AnalyzeError::new(
+                format!("Could not start yt-dlp: {error}"),
+                Some(command_line.clone()),
+            )
+        })?;
 
         // Some extractors return a usable playlist JSON together with a
         // non-zero status when individual entries fail (Instagram carousels
@@ -1327,22 +1622,6 @@ pub fn configure_background_command(command: &mut Command) {
     }
 }
 
-fn config_contains_output_arg(path: &Path) -> bool {
-    config_contains_any_arg(
-        path,
-        &["-o", "--output", "-P", "--paths"],
-        &["--output=", "--paths="],
-    )
-}
-
-fn config_contains_format_arg(path: &Path) -> bool {
-    config_contains_any_arg(path, &["-f", "--format"], &["--format="])
-}
-
-fn config_contains_limit_rate_arg(path: &Path) -> bool {
-    config_contains_any_arg(path, &["-r", "--limit-rate"], &["--limit-rate="])
-}
-
 fn selector_uses_separate_streams(selector: &str) -> bool {
     selector.split('/').any(|part| part.contains('+'))
 }
@@ -1361,14 +1640,6 @@ fn aria2_downloader_args(proxy_url: Option<&str>, no_check_certificates: bool) -
         args.push("--check-certificate=false".to_owned());
     }
     (!args.is_empty()).then(|| format!("aria2c:{}", args.join(" ")))
-}
-
-fn config_contains_download_sections_arg(path: &Path) -> bool {
-    config_contains_any_arg(path, &["--download-sections"], &["--download-sections="])
-}
-
-fn config_contains_live_from_start_arg(path: &Path) -> bool {
-    config_contains_any_arg(path, &["--live-from-start", "--no-live-from-start"], &[])
 }
 
 fn apply_download_section_args(
@@ -1450,26 +1721,6 @@ fn apply_subtitle_download_args(
     } else {
         command.arg("--convert-subs").arg("srt");
     }
-}
-
-fn config_contains_mtime_arg(path: &Path) -> bool {
-    config_contains_any_arg(path, &["--mtime", "--no-mtime"], &["--mtime="])
-}
-
-fn config_contains_any_arg(path: &Path, exact_args: &[&str], prefix_args: &[&str]) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
-        return false;
-    };
-
-    content.lines().any(|line| {
-        let trimmed = line.trim();
-        !trimmed.is_empty()
-            && !trimmed.starts_with('#')
-            && trimmed.split_whitespace().any(|token| {
-                exact_args.contains(&token)
-                    || prefix_args.iter().any(|prefix| token.starts_with(prefix))
-            })
-    })
 }
 
 fn auto_cookie_file_for_url(url: &str) -> Result<Option<PathBuf>, String> {
@@ -1931,13 +2182,17 @@ fn build_output_plan(request: &DownloadRequest) -> Result<OutputPlan, String> {
         .map(str::trim)
         .filter(|path| !path.is_empty())
     {
+        super::storage_paths::validate_output_destination(Path::new(output_path))?;
         return build_explicit_output_plan(request, output_path);
     }
 
     let output_dir = resolve_output_dir(&request.output_dir)?;
+    super::storage_paths::validate_output_destination(&output_dir)?;
+    let plan = build_directory_output_plan(request, &output_dir);
+    super::storage_paths::validate_output_destination(&plan.final_output_path)?;
     fs::create_dir_all(&output_dir)
         .map_err(|error| format!("Could not create download folder: {error}"))?;
-    Ok(build_directory_output_plan(request, &output_dir))
+    Ok(plan)
 }
 
 fn build_directory_output_plan(request: &DownloadRequest, output_dir: &Path) -> OutputPlan {
@@ -2143,27 +2398,283 @@ fn build_explicit_output_plan(
 
 fn output_base_name_with_section_number(base_name: &str, section_count: usize) -> String {
     if section_count > 1 {
-        format!("{base_name} - %(section_number)02d")
+        format!("{base_name} - %(autonumber)02d")
     } else {
         base_name.to_owned()
     }
-}
-
-fn music_chapter_output_argument(output_dir: &Path) -> String {
-    format!(
-        "chapter:{}",
-        output_dir
-            .join("%(section_number)02d - %(section_title)s.%(ext)s")
-            .display()
-    )
 }
 
 fn apply_music_chapter_split_args(command: &mut Command, output_dir: Option<&Path>) {
     if let Some(output_dir) = output_dir {
         command
             .arg("--split-chapters")
+            .arg("-P")
+            .arg(format!("chapter:{}", output_dir.display()))
             .arg("--output")
-            .arg(music_chapter_output_argument(output_dir));
+            .arg("chapter:%(section_number)02d - %(section_title)s.%(ext)s");
+    }
+}
+
+/// Keep final destinations while allowing yt-dlp's temporary path to take effect.
+pub(crate) fn apply_output_path(command: &mut Command, output: &str) -> Result<(), String> {
+    let (kind, output) = ["subtitle:", "chapter:", "thumbnail:"]
+        .iter()
+        .find_map(|prefix| {
+            output
+                .strip_prefix(prefix)
+                .map(|rest| (prefix.trim_end_matches(':'), rest))
+        })
+        .unwrap_or(("home", output));
+    let path = Path::new(output);
+    let name = path.file_name().ok_or("Output template has no filename")?;
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        command
+            .arg("-P")
+            .arg(format!("{kind}:{}", parent.display()));
+    }
+    let mut template = std::ffi::OsString::new();
+    if kind != "home" {
+        template.push(format!("{kind}:"));
+    }
+    template.push(name);
+    command.arg("--output").arg(template);
+    Ok(())
+}
+
+pub(crate) fn validate_external_output_config(path: &Path) -> Result<(), String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("Could not inspect yt-dlp output configuration: {e}"))?;
+    validate_external_output_arguments(&config_options::interpret(&config_arguments(&content)?)?)
+}
+fn validate_external_output_arguments(options: &[ConfigOption]) -> Result<(), String> {
+    output_preparation::validate_protected_options(options)?;
+    for option in options {
+        let paths = (option.name == "--paths").then(|| option.values[0].as_str());
+        if let Some(paths) = paths {
+            let (kind, directory) = paths
+                .split_once(':')
+                .filter(|(kind, _)| {
+                    kind.len() > 1 && kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
+                .unwrap_or(("home", paths));
+            if !matches!(kind, "home" | "temp") {
+                return Err(format!("Unsupported protected output path: {paths}"));
+            }
+            if kind != "temp" {
+                if directory.starts_with('~') || contains_environment_reference(directory) {
+                    return Err("Environment-dependent yt-dlp output directories cannot be checked for cache ownership.".to_owned());
+                }
+                // Pure config inspection is also used before startup in tests;
+                // real command preparation always requires initialized storage.
+                if super::storage_paths::require_ready().is_ok() {
+                    super::storage_paths::validate_output_destination(&resolve_output_dir(
+                        directory,
+                    )?)?;
+                }
+            }
+        }
+        let output = (option.name == "--output").then(|| option.values[0].as_str());
+        if let Some(output) = output {
+            let output = output
+                .split_once(':')
+                .filter(|(kind, _)| {
+                    kind.len() > 1 && kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
+                .map(|(_, rest)| rest)
+                .unwrap_or(output);
+            let drive = output.as_bytes().get(1) == Some(&b':');
+            let variable = contains_environment_reference(output);
+            if Path::new(output).has_root()
+                || output.starts_with('~')
+                || output.starts_with(['/', '\\'])
+                || drive
+                || variable
+                || Path::new(output)
+                    .components()
+                    .any(|part| part == std::path::Component::ParentDir)
+            {
+                return Err("Absolute or environment-dependent yt-dlp output templates bypass cache temporary paths. Use a relative template or the application's output selection.".to_owned());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn contains_environment_reference(value: &str) -> bool {
+    if value.contains('$') {
+        return true;
+    }
+    let mut rest = value;
+    while let Some((_, tail)) = rest.split_once('%') {
+        let Some((name, tail)) = tail.split_once('%') else {
+            break;
+        };
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return true;
+        }
+        rest = tail;
+    }
+    false
+}
+
+/// The supported config subset uses shell-style quoting, escaping and comments.
+fn config_arguments(content: &str) -> Result<Vec<String>, String> {
+    let content = content
+        .strip_prefix('\u{feff}')
+        .unwrap_or(content)
+        .replace("\r\n", "\n");
+    let mut chars = content.chars().peekable();
+    let mut quote = None;
+    let mut token = String::new();
+    let mut started = false;
+    let mut result = Vec::new();
+    while let Some(c) = chars.next() {
+        if c == '\\' && quote != Some('\'') {
+            started = true;
+            if quote == Some('"') && !matches!(chars.peek(), Some('"' | '\\')) {
+                token.push(c);
+                continue;
+            }
+            let next = chars
+                .next()
+                .ok_or("Incomplete escape in yt-dlp configuration")?;
+            if next != '\n' {
+                token.push(next);
+            }
+        } else if quote == Some(c) {
+            quote = None;
+        } else if quote.is_none() && matches!(c, '\'' | '"') {
+            quote = Some(c);
+            started = true;
+        } else if quote.is_none() && c == '#' {
+            for next in chars.by_ref() {
+                if next == '\n' {
+                    break;
+                }
+            }
+            if started {
+                result.push(std::mem::take(&mut token));
+                started = false;
+            }
+        } else if quote.is_none() && c.is_whitespace() {
+            if started {
+                result.push(std::mem::take(&mut token));
+                started = false;
+            }
+        } else {
+            token.push(c);
+            started = true;
+        }
+    }
+    if quote.is_some() {
+        return Err("Unclosed quote in yt-dlp configuration".to_owned());
+    }
+    if started {
+        result.push(token);
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod config_semantics_tests {
+    use super::*;
+
+    #[test]
+    fn consumed_option_values_do_not_own_output_or_trigger_protected_hooks() {
+        let options = config_options::interpret(&config_arguments(
+            "--match-title '-Pfoo' --user-agent '--exec' --format app --output '%(title)s.%(ext)s'",
+        ).unwrap()).unwrap();
+        validate_external_output_arguments(&options).unwrap();
+        assert_eq!(
+            output_preparation::external_output(&options).unwrap(),
+            (Some("%(title)s.%(ext)s".into()), None)
+        );
+        let config = EffectiveYtDlpConfig {
+            options,
+            ..Default::default()
+        };
+        assert!(config.owns(&["--format", "--output"]));
+        assert!(!config.owns(&["--paths", "--exec"]));
+        let forbidden =
+            config_options::interpret(&config_arguments("--exec actual-hook").unwrap()).unwrap();
+        assert!(
+            validate_external_output_arguments(&forbidden)
+                .unwrap_err()
+                .contains("--exec")
+        );
+    }
+
+    #[test]
+    fn quoted_empty_values_attached_options_aliases_and_short_clusters_keep_boundaries() {
+        let options = config_options::interpret(
+            &config_arguments("--match-t '' -qfapp --rate-limit=10K -Pfoo").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(options[0].name, "--match-title");
+        assert_eq!(options[0].values, [""]);
+        assert_eq!(options[1].name, "--quiet");
+        assert_eq!(options[2].name, "--format");
+        assert_eq!(options[2].values, ["app"]);
+        assert_eq!(options[3].name, "--limit-rate");
+        assert_eq!(options[3].values, ["10K"]);
+        assert_eq!(options[4].name, "--paths");
+        assert_eq!(options[4].values, ["foo"]);
+        assert_eq!(options.len(), 5);
+    }
+
+    #[test]
+    fn bom_hooks_and_terminators_cannot_hide_config_options() {
+        for prefix in ["", "\u{feff}"] {
+            let options = config_options::interpret(
+                &config_arguments(&format!("{prefix}--exec harmless-hook")).unwrap(),
+            )
+            .unwrap();
+            assert!(
+                validate_external_output_arguments(&options)
+                    .unwrap_err()
+                    .contains("--exec")
+            );
+        }
+        let options = config_options::interpret(
+            &config_arguments("\u{feff}--user-agent 'a\u{feff}b' --match-title --").unwrap(),
+        )
+        .unwrap();
+        validate_external_output_arguments(&options).unwrap();
+        assert_eq!(options[0].values, ["a\u{feff}b"]);
+        assert_eq!(options[1].values, ["--"]);
+        assert!(
+            config_options::interpret(
+                &config_arguments("--ignore-errors -- --exec hidden").unwrap()
+            )
+            .unwrap_err()
+            .contains("terminator: --")
+        );
+    }
+
+    #[test]
+    fn output_presets_are_rejected_through_supported_spellings() {
+        for spelling in [
+            "-tmp3",
+            "--preset-alias=mp3",
+            "--preset-a mp4",
+            "-t aac",
+            "-t mkv",
+            "-t unknown",
+        ] {
+            let options = config_options::interpret(&config_arguments(spelling).unwrap()).unwrap();
+            assert!(
+                validate_external_output_arguments(&options)
+                    .unwrap_err()
+                    .contains("Unsupported preset"),
+                "{spelling}"
+            );
+        }
+        let options = config_options::interpret(
+            &config_arguments("-t sleep --match-title '-t' -f best").unwrap(),
+        )
+        .unwrap();
+        validate_external_output_arguments(&options).unwrap();
+        assert_eq!(options[1].values, ["-t"]);
     }
 }
 

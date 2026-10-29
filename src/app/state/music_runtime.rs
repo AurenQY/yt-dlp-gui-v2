@@ -425,6 +425,11 @@ pub(super) struct MusicChorusPreviewJob {
 }
 
 pub(super) enum MusicStreamResolveEvent {
+    PreparationFailed {
+        action_id: u64,
+        action: String,
+        error: String,
+    },
     ToolCommandFinished {
         action_id: u64,
         tool: String,
@@ -451,6 +456,11 @@ pub(super) enum MusicStreamResolveEvent {
 }
 
 pub(super) enum MusicDownloadEvent {
+    OutputStatus {
+        item_id: QueueItemId,
+        workflow_id: WorkflowRunId,
+        detail: String,
+    },
     Progress {
         item_id: QueueItemId,
         workflow_id: WorkflowRunId,
@@ -469,6 +479,7 @@ pub(super) enum MusicDownloadEvent {
         item_id: QueueItemId,
         workflow_id: WorkflowRunId,
         source_kind: MusicDownloadSourceKind,
+        disposition: crate::infrastructure::output_policy::OutputDisposition,
         split_chapters_requested: bool,
         chapters_split: bool,
         result: Result<String, String>,
@@ -476,6 +487,8 @@ pub(super) enum MusicDownloadEvent {
 }
 
 pub(super) struct MusicStreamSeed {
+    pub(super) source_media_id: Option<String>,
+    pub(super) naming_metadata: crate::domain::VideoMetadata,
     pub(super) source_url: String,
     pub(super) title: String,
     pub(super) album_title: String,
@@ -570,6 +583,7 @@ pub(super) struct CacheRemovalSummary {
 }
 
 pub(super) struct MusicDownloadJob {
+    pub(super) output: crate::infrastructure::output_policy::OutputRequest,
     pub(super) item_id: QueueItemId,
     pub(super) workflow_id: WorkflowRunId,
     pub(super) source_url: String,

@@ -389,9 +389,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "檔案操作",
         "options.action_button" => "操作按鈕",
         "options.file_action.show_menu" => "顯示選單",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "快取",
         "options.cache_location" => "快取位置",
         "options.cache_location.default" => "預設",
+        "options.cache_location.portable" => "應用程式目錄（可攜式）",
+        "options.cache_location.system_temp" => "系統暫存目錄",
+        "options.cache_current_folder" => "目前快取目錄",
+        "options.cache_after_restart" => "重新啟動後使用",
+        "options.cache_restart_required" => "需要重新啟動",
+        "options.cache_location_help" => {
+            "變更將於重新啟動後生效。舊快取保留原處。用量統計與清理僅適用於目前目錄。狀態與復原資料保存在應用程式目錄中。系統清理可能刪除暫存檔案。"
+        }
+        "options.cache_legacy_notice" => {
+            "舊的「預設」選項現已改為應用程式目錄（可攜式）。所有應用程式快取均使用所選位置。"
+        }
         "options.cache_usage" => "使用量",
         "options.cache_usage_detail" => "總計：{total} · 音訊：{audio} · 過期：{expired}",
         "options.cache_cleanup" => "清理",

@@ -52,8 +52,13 @@ pub(super) fn run_batch_add_worker(
     child_handle: Arc<Mutex<Option<Child>>>,
     cancel_requested: Arc<AtomicBool>,
 ) {
-    let mut command = match tool_paths.prepare_batch_add_command(&source, use_cookies) {
-        Ok(command) => command,
+    let prepared = (|| {
+        let lease = crate::infrastructure::storage_paths::use_cache()?;
+        let command = tool_paths.prepare_batch_add_command(&source, use_cookies)?;
+        Ok::<_, String>((lease, command))
+    })();
+    let (_storage_use, mut command) = match prepared {
+        Ok(prepared) => prepared,
         Err(error) => {
             let _ = tx.send(BatchAddEvent::ToolCommandFinished {
                 action_id: tool_log_action_id,
@@ -140,7 +145,11 @@ pub(super) fn run_batch_add_worker(
                 let _ = tx.send(BatchAddEvent::Failed {
                     error: format!("Could not read yt-dlp playlist output: {error}"),
                 });
-                clear_batch_add_child(&child_handle);
+                request_batch_add_stop(&child_handle);
+                let _ = take_and_wait_batch_add_child(&child_handle, true);
+                if let Some(mut stderr_reader) = stderr.take() {
+                    let _ = std::io::copy(&mut stderr_reader, &mut std::io::sink());
+                }
                 return;
             }
         };

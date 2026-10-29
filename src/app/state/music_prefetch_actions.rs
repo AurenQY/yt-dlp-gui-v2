@@ -40,6 +40,15 @@ impl AppState {
         thread::spawn(move || {
             let worker =
                 resolve_music_stream_seed_with_cookie_fallback(&tool_paths, &source, use_cookies);
+            if worker.attempts.is_empty()
+                && let Err(error) = &worker.result
+            {
+                let _ = tx.send(MusicStreamResolveEvent::PreparationFailed {
+                    action_id: tool_log_action_id,
+                    action: "resolve stream".to_owned(),
+                    error: error.clone(),
+                });
+            }
             for attempt in worker.attempts {
                 let command_line = attempt
                     .command_line
@@ -179,6 +188,15 @@ impl AppState {
         thread::spawn(move || {
             let worker =
                 resolve_music_stream_seed_with_cookie_fallback(&tool_paths, &source, use_cookies);
+            if worker.attempts.is_empty()
+                && let Err(error) = &worker.result
+            {
+                let _ = tx.send(MusicStreamResolveEvent::PreparationFailed {
+                    action_id: tool_log_action_id,
+                    action: "prefetch resolve".to_owned(),
+                    error: error.clone(),
+                });
+            }
             for attempt in worker.attempts {
                 let command_line = attempt
                     .command_line
@@ -209,13 +227,24 @@ impl AppState {
             self.music.music_prefetch_started_at = None;
             return;
         }
+        let tools = match self
+            .tool_paths
+            .for_output(&crate::infrastructure::output_policy::OutputRequest::default())
+        {
+            Ok(tools) => tools,
+            Err(error) => {
+                self.music.music_prefetch_started_at = None;
+                eprintln!("[music-prefetch] configuration preparation failed: {error}");
+                return;
+            }
+        };
         let cache_root = self.music_stream_cache_root();
         let cache_dir = cache_root.join(sanitize_music_cache_key(&item.music_cache_key));
         let cache_media_path = cache_dir.join(format!(
             "audio.{}",
             sanitize_music_cache_ext(&item.music_stream_ext)
         ));
-        let cache_command = match self.tool_paths.prepare_music_stream_cache_command(
+        let cache_command = match tools.prepare_music_stream_cache_command(
             &item.source_url,
             &cache_media_path,
             &item.music_stream_format_id,
@@ -232,7 +261,7 @@ impl AppState {
             }
         };
         let cache_cookie_free_retry_command = if item.selection.use_cookies {
-            match self.tool_paths.prepare_music_stream_cache_command(
+            match tools.prepare_music_stream_cache_command(
                 &item.source_url,
                 &cache_media_path,
                 &item.music_stream_format_id,
@@ -275,6 +304,11 @@ impl AppState {
             cache_cookie_free_retry_command,
             volume: 0.0,
         };
+        #[cfg(test)]
+        if self.review_capture_stream_preparation {
+            self.review_prepared_stream = Some(stream);
+            return;
+        }
         let control =
             music_stream::spawn_music_stream_prefetch(stream, self.music_playback_event_tx.clone());
         self.music.music_prefetch_control = Some(control);

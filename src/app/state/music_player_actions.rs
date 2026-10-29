@@ -645,15 +645,15 @@ impl AppState {
         {
             (None, None)
         } else {
-            match self.tool_paths.prepare_music_stream_cache_command(
-                &item.source_url,
-                &cache_media_path,
-                &item.music_stream_format_id,
-                item.selection.use_cookies,
-            ) {
-                Ok(command) => {
+            let prepared = self.tool_paths
+                .for_output(&crate::infrastructure::output_policy::OutputRequest::default())
+                .and_then(|tools| {
+                    let command = tools.prepare_music_stream_cache_command(
+                        &item.source_url, &cache_media_path, &item.music_stream_format_id,
+                        item.selection.use_cookies,
+                    )?;
                     let retry = item.selection.use_cookies.then(|| {
-                        self.tool_paths.prepare_music_stream_cache_command(
+                        tools.prepare_music_stream_cache_command(
                             &item.source_url,
                             &cache_media_path,
                             &item.music_stream_format_id,
@@ -669,8 +669,10 @@ impl AppState {
                             None
                         }
                     };
-                    (Some(command), retry)
-                }
+                    Ok((Some(command), retry))
+                });
+            match prepared {
+                Ok(commands) => commands,
                 Err(error) => {
                     let message = i18n::format_fixed_english(
                         "Music cache preparation failed: {error}",
@@ -715,6 +717,11 @@ impl AppState {
             cache_cookie_free_retry_command,
             volume: self.music_chorus_initial_volume_for_item(item_id),
         };
+        #[cfg(test)]
+        if self.review_capture_stream_preparation {
+            self.review_prepared_stream = Some(stream);
+            return;
+        }
         let control =
             music_stream::spawn_music_stream_playback(stream, self.music_playback_event_tx.clone());
         self.music.music_playback = Some(control);

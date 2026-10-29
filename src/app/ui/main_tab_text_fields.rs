@@ -19,9 +19,10 @@ pub(super) struct UrlTextBox {
     url_input_locked: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct PathTextBox {
     cell: xaml_taffy_styles::XamlSingleLineRowCell,
+    display: String,
 }
 
 impl UrlTextBox {
@@ -95,15 +96,19 @@ impl UrlTextBox {
 }
 
 impl PathTextBox {
-    pub(super) fn resolve(row: xaml_taffy_styles::XamlSingleLineRowLayout) -> Self {
+    pub(super) fn resolve(
+        row: xaml_taffy_styles::XamlSingleLineRowLayout,
+        display: String,
+    ) -> Self {
         Self {
             cell: row.star_width_text_box_cell(),
+            display,
         }
     }
 
-    pub(super) fn show(self, tui: &mut Tui, state: &mut AppState) {
+    pub(super) fn show(self, tui: &mut Tui, _state: &mut AppState) {
         self.cell.show(tui, |ui| {
-            let mut output_dir_display = state.output_dir_display();
+            let mut output_dir_display = self.display;
             let output_text_box_size = self.cell.measured_size_for_ui(ui);
             AppTextBox::new(&mut output_dir_display)
                 .editable(false)

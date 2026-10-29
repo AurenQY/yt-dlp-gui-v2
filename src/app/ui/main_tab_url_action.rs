@@ -40,7 +40,12 @@ impl StartButton {
         let url_input_locked = state.url_input_locked();
         let spinner_size = semantic_ui_metrics::standard_icon_size_from_current_control_metrics(ui);
         let spinner_gap = semantic_ui_metrics::main_url_action_spinner_to_text_horizontal_spacing();
-        let action_text = state.ui_i18n_text_for_key(state.primary_url_action_label_key());
+        let checking = gallery_checking_blocks_start(state);
+        let action_text = state.ui_i18n_text_for_key(if checking {
+            "about.status.checking"
+        } else {
+            state.primary_url_action_label_key()
+        });
         let spinner_active = analysis_running || show_spinner;
         let spinner_label_width = WidgetText::from(RichText::new(action_text).size(spinner_size))
             .into_galley(
@@ -58,7 +63,7 @@ impl StartButton {
                 spinner_size,
                 spinner_gap,
             )
-        } else if primary_url_action_uses_icon(state) {
+        } else if primary_url_action_uses_icon(state) && !checking {
             semantic_ui_metrics::xaml_icon_text_button_ui_element_for_visible_text(ui, action_text)
         } else {
             semantic_ui_metrics::xaml_button_ui_element_for_visible_text(ui, action_text)
@@ -99,13 +104,19 @@ impl StartButton {
             }
 
             // Standard and Origin may analyze gallery-only URLs without yt-dlp.
-            let gallery_available = matches!(state.app_mode(), AppMode::Standard | AppMode::Origin)
+            let gallery_eligible = matches!(state.app_mode(), AppMode::Standard | AppMode::Origin)
                 && !state.queue_display_mode_is_audio()
-                && !state.config.direct_download_on_add
-                && crate::infrastructure::gallery_dl::GalleryDlBackend::from_tool_paths(
-                    &state.tool_paths,
+                && !state.config.direct_download_on_add;
+            let gallery_available = gallery_eligible && state.gallery_is_ready_for_display();
+            if gallery_checking_blocks_start(state) {
+                ui.add_enabled(
+                    false,
+                    egui::Button::new(state.ui_i18n_text_for_key("about.status.checking"))
+                        .min_size(action_button_vec2),
                 )
-                .is_available();
+                .on_disabled_hover_text(state.gallery_readiness_detail());
+                return;
+            }
             let missing_yt_dlp = !gallery_available && state.required_dependency_notice().is_some();
             let button = primary_url_action_button_for_state(ui, state, missing_yt_dlp)
                 .min_size(action_button_vec2)
@@ -125,6 +136,14 @@ impl StartButton {
             }
         });
     }
+}
+
+fn gallery_checking_blocks_start(state: &AppState) -> bool {
+    matches!(state.app_mode(), AppMode::Standard | AppMode::Origin)
+        && !state.queue_display_mode_is_audio()
+        && !state.config.direct_download_on_add
+        && state.gallery_readiness_pending()
+        && state.required_dependency_notice().is_some()
 }
 
 #[derive(Clone, Copy)]

@@ -255,6 +255,7 @@ impl AppState {
 
         let tool_paths = self.tool_paths.clone();
         let settings = self.config.transcode_intent.clone();
+        let output = self.output_request_for_item(&self.queue_items[item_index], true);
         let tx = self.post_process_result_tx.clone();
         let input_path = input_path.to_owned();
         let temp_root = self.transcode_temp_root_path();
@@ -277,6 +278,7 @@ impl AppState {
                 tx,
                 child_handle,
                 cancel_requested,
+                output,
             );
         });
 

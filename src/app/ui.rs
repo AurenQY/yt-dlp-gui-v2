@@ -71,6 +71,7 @@ mod options_cache;
 mod options_formats;
 mod options_language;
 mod options_layout;
+mod options_output;
 mod options_prompts;
 mod options_tab;
 mod options_tab_template;

@@ -246,6 +246,7 @@ pub(super) fn flat_music_entries_from_url(
     untitled_task: &str,
     imported_template: &str,
 ) -> Result<Vec<PlaylistEntrySeed>, String> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
     let mut command = tool_paths.prepare_batch_add_command(source, use_cookies)?;
     command
         .stdout(Stdio::piped())
@@ -255,20 +256,36 @@ pub(super) fn flat_music_entries_from_url(
     let mut child = command
         .spawn()
         .map_err(|error| format!("Could not start yt-dlp music flat import: {error}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Could not read yt-dlp music flat output.".to_owned())?;
-    let mut stderr = child.stderr.take();
+    let _process_guard = track_child_process(&child, "yt-dlp music flat import");
+    let Some(stdout) = child.stdout.take() else {
+        terminate_child_process(&mut child);
+        let _ = child.wait();
+        return Err("Could not read yt-dlp music flat output.".to_owned());
+    };
+    let stderr_handle = child.stderr.take().map(|mut stderr| {
+        thread::spawn(move || {
+            let mut text = String::new();
+            let _ = stderr.read_to_string(&mut text);
+            text
+        })
+    });
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
     let mut seeds = Vec::new();
 
     loop {
         line.clear();
-        let read = reader
-            .read_line(&mut line)
-            .map_err(|error| format!("Could not read yt-dlp music flat output: {error}"))?;
+        let read = match reader.read_line(&mut line) {
+            Ok(read) => read,
+            Err(error) => {
+                terminate_child_process(&mut child);
+                let _ = child.wait();
+                if let Some(handle) = stderr_handle {
+                    let _ = handle.join();
+                }
+                return Err(format!("Could not read yt-dlp music flat output: {error}"));
+            }
+        };
         if read == 0 {
             break;
         }
@@ -290,13 +307,16 @@ pub(super) fn flat_music_entries_from_url(
         }
     }
 
-    let status = child
-        .wait()
-        .map_err(|error| format!("Could not wait for yt-dlp music flat import: {error}"))?;
-    let mut stderr_text = String::new();
-    if let Some(mut reader) = stderr.take() {
-        let _ = reader.read_to_string(&mut stderr_text);
+    let status = child.wait();
+    if status.is_err() {
+        terminate_child_process(&mut child);
+        let _ = child.wait();
     }
+    let stderr_text = stderr_handle
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default();
+    let status =
+        status.map_err(|error| format!("Could not wait for yt-dlp music flat import: {error}"))?;
     if !status.success() && seeds.is_empty() {
         let detail = stderr_text.trim();
         return Err(if detail.is_empty() {

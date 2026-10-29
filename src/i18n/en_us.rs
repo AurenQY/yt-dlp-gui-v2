@@ -431,9 +431,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "File actions",
         "options.action_button" => "Action button",
         "options.file_action.show_menu" => "Show menu",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "Cache",
         "options.cache_location" => "Cache location",
         "options.cache_location.default" => "Default",
+        "options.cache_location.portable" => "Application folder (portable)",
+        "options.cache_location.system_temp" => "System temporary folder",
+        "options.cache_current_folder" => "Current cache folder",
+        "options.cache_after_restart" => "After restart",
+        "options.cache_restart_required" => "Restart required",
+        "options.cache_location_help" => {
+            "Changes apply after restart. Old cache stays in place. Usage and cleanup cover the current folder. State and recovery data stay in the application folder. System cleanup may remove temporary files."
+        }
+        "options.cache_legacy_notice" => {
+            "The old Default option now uses Application folder (portable). All application caches follow the selected location."
+        }
         "options.cache_usage" => "Usage",
         "options.cache_usage_detail" => "Total: {total} · Audio: {audio} · Expired: {expired}",
         "options.cache_cleanup" => "Cleanup",

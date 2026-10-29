@@ -897,6 +897,7 @@ fn stream_analysis(
     writer: &mut impl Write,
     cancelled: &AtomicBool,
 ) -> Result<Value, String> {
+    let _storage_use = super::storage_paths::use_cache()?;
     match request.get("backend").and_then(Value::as_str) {
         Some("g") => return stream_gallery_analysis(request, writer, cancelled),
         None | Some("y") => {} // Older installed extensions retain the yt-dlp route.
@@ -1198,7 +1199,7 @@ fn yt_dlp_output_literal(value: &str) -> String {
 fn browser_output_template(file_name: &str, section_count: usize) -> String {
     let base_name = yt_dlp_output_literal(file_name);
     if section_count > 1 {
-        format!("{base_name} - %(section_number)02d.%(ext)s")
+        format!("{base_name} - %(autonumber)02d.%(ext)s")
     } else {
         format!("{base_name}.%(ext)s")
     }
@@ -1268,6 +1269,7 @@ fn configured_download_directory(config: &AppConfig) -> Result<PathBuf, String> 
     let path = resolve_output_dir(&config.download_dir)?
         .components()
         .collect::<PathBuf>();
+    super::storage_paths::validate_output_destination(&path)?;
     if !path.is_absolute() || !path.is_dir() {
         return Err(
             "The v2 download folder does not exist. Choose another folder in Options or the extension."
@@ -1275,6 +1277,11 @@ fn configured_download_directory(config: &AppConfig) -> Result<PathBuf, String> 
         );
     }
     Ok(path)
+}
+
+#[cfg(test)]
+pub(crate) fn review_configured_output(config: &AppConfig) -> Result<PathBuf, String> {
+    configured_download_directory(config)
 }
 
 fn validated_subtitle_language(request: &Value) -> Result<Option<String>, String> {
@@ -1677,10 +1684,11 @@ fn stream_gallery_post_download(
 fn stream_download(
     request: &Value,
     writer: &mut impl Write,
-    cancelled: &AtomicBool,
-) -> Result<Value, String> {
+    cancelled: &Arc<AtomicBool>,
+) -> Result<Value, super::output_transaction::OutputFailure> {
+    let _storage_use = super::storage_paths::use_cache()?;
     if request.get("backend").and_then(Value::as_str) == Some("g") {
-        return stream_gallery_post_download(request, writer, cancelled);
+        return stream_gallery_post_download(request, writer, cancelled).map_err(Into::into);
     }
     let url = validated_url(request.get("url").unwrap_or(&Value::Null))?.to_owned();
     let video_id = string_field(request, "videoFormatId");
@@ -1696,6 +1704,7 @@ fn stream_download(
     let format_selector = browser_format_selector(request)?;
     let download_section_args = validated_browser_download_section_args(request)?;
     let (config, mut tools) = AppConfig::load_runtime();
+    tools = tools.for_output(&super::output_policy::OutputRequest::default())?;
     let output_dir = configured_download_directory(&config)?;
     let allow_anonymous_clients =
         super::browser_native_cookies::shared_source_allows_anonymous_youtube_clients(
@@ -1708,7 +1717,7 @@ fn stream_download(
     if !download_section_args.is_empty() && tools.effective_config_owns_download_sections() {
         return Err(
             "The active yt-dlp config already controls download sections. Remove that option before selecting a browser time range."
-                .to_owned(),
+                .into(),
         );
     }
     let target_kind = if content_kind == "audio" {
@@ -1722,9 +1731,7 @@ fn stream_download(
     let thumbnail_mode = browser_thumbnail_mode(request, config.thumbnail_mode)?;
     let (use_aria2, use_aria2_is_explicit) = browser_use_aria2(request, config.use_aria2)?;
     if use_aria2_is_explicit && use_aria2 && !tools.aria2_is_available() {
-        return Err(
-            "Aria2 is enabled for this browser item, but aria2c is not installed.".to_owned(),
-        );
+        return Err("Aria2 is enabled for this browser item, but aria2c is not installed.".into());
     }
     if thumbnail_mode_is_explicit
         && output_format.as_deref() == Some("webm")
@@ -1732,7 +1739,7 @@ fn stream_download(
     {
         return Err(
             "WebM does not support embedded thumbnails. Select MKV or download the thumbnail separately."
-                .to_owned(),
+                .into(),
         );
     }
     let file_name = browser_download_file_name(request, output_format.as_deref());
@@ -1749,6 +1756,20 @@ fn stream_download(
     let chapter_mode_is_explicit = !matches!(request.get("chapterMode"), None | Some(Value::Null));
     let chapter_mode = browser_chapter_mode(request)?;
     let download = DownloadRequest {
+        output: super::output_policy::OutputRequest {
+            preferences: config.output_preferences(),
+            automatic: string_field(request, "fileName").trim().is_empty(),
+            context: super::output_policy::OutputNameContext {
+                resolved: false,
+                title: string_field(request, "title"),
+                id: string_field(request, "videoId"),
+                uploader: string_field(request, "uploader"),
+                upload_date: string_field(request, "uploadDate"),
+                source: url.clone(),
+            },
+            cancel: cancelled.clone(),
+            ..Default::default()
+        },
         target_kind,
         url,
         playlist_index: None,
@@ -1804,13 +1825,70 @@ fn stream_download(
             .arg("--format")
             .arg(&download.format_selector);
     }
-    prepared
-        .command
-        .arg("--output")
-        .arg(output_dir.join(browser_output_template(
-            &download.file_name,
-            download.download_section_args.len(),
-        )));
+    let owner = prepared
+        .output_transaction
+        .as_ref()
+        .ok_or("Output owner is missing")?
+        .clone();
+    #[cfg(test)]
+    if let Some(kind) = request
+        .get("reviewPublicationFailure")
+        .and_then(Value::as_str)
+    {
+        let primary = {
+            let guard = owner.lock().unwrap();
+            guard.destination.join(format!("{}.mp4", guard.stem))
+        };
+        let kind = kind.to_owned();
+        let external = PathBuf::from(request["reviewExternal"].as_str().unwrap());
+        owner.lock().unwrap().after_publish = Some(Box::new(move |first| {
+            fs::write(
+                external.parent().unwrap().join("first-published.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"path":first,"sha256":super::sha256_hex_file(first).unwrap()}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let later = if first == primary {
+                primary.with_extension("en.srt")
+            } else {
+                primary.clone()
+            };
+            if kind == "validation" {
+                let later = later
+                    .parent()
+                    .unwrap()
+                    .canonicalize()
+                    .unwrap()
+                    .join(later.file_name().unwrap());
+                let external = external.canonicalize().unwrap();
+                let result = std::process::Command::new("cmd")
+                    .args(["/c", "mklink", "/J"])
+                    .arg(later.to_string_lossy().trim_start_matches(r"\\?\"))
+                    .arg(external.to_string_lossy().trim_start_matches(r"\\?\"))
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            } else {
+                fs::write(later, b"late external sentinel").unwrap();
+            }
+        }));
+    }
+    if let Some(path) = owner
+        .lock()
+        .map_err(|_| "Output owner unavailable")?
+        .skipped
+        .clone()
+    {
+        return Ok(
+            json!({ "event": "skipped", "outcome": "SkippedExisting", "outputPath": path.display().to_string() }),
+        );
+    }
     if target_kind == DownloadTargetKind::Audio {
         apply_browser_audio_extraction(&mut prepared.command, &download.audio_ext)?;
     }
@@ -1828,7 +1906,7 @@ fn stream_download(
     if use_aria2_is_explicit {
         if use_aria2 {
             if !tools.append_aria2_downloader_args(&mut prepared.command) {
-                return Err("Aria2 became unavailable before the download started.".to_owned());
+                return Err("Aria2 became unavailable before the download started.".into());
             }
         } else {
             prepared.command.arg("--downloader").arg("native");
@@ -1861,7 +1939,7 @@ fn stream_download(
     let stdout_reader = thread::spawn(move || forward_process_lines(stdout, false, stdout_tx));
     let stderr_reader = thread::spawn(move || forward_process_lines(stderr, true, line_tx));
 
-    write_response(
+    let mut response_error = write_response(
         &mut *writer,
         &NativeResponse {
             ok: true,
@@ -1871,7 +1949,8 @@ fn stream_download(
                 "protocol": host_protocol_info()
             })),
         },
-    )?;
+    )
+    .err();
 
     let mut final_path = None;
     let mut last_error = String::new();
@@ -1900,14 +1979,17 @@ fn stream_download(
             continue;
         }
         last_percent = percent;
-        write_response(
-            &mut *writer,
-            &NativeResponse {
-                ok: true,
-                message: "Downloading",
-                data: Some(event),
-            },
-        )?;
+        if response_error.is_none() {
+            response_error = write_response(
+                &mut *writer,
+                &NativeResponse {
+                    ok: true,
+                    message: "Downloading",
+                    data: Some(event),
+                },
+            )
+            .err();
+        }
     }
     let _ = stdout_reader.join();
     let _ = stderr_reader.join();
@@ -1915,8 +1997,11 @@ fn stream_download(
     let status = child
         .wait()
         .map_err(|error| format!("Could not wait for yt-dlp: {error}"))?;
+    if let Some(error) = response_error {
+        return Err(error.into());
+    }
     if cancelled.load(Ordering::Acquire) {
-        return Ok(json!({ "event": "stopped" }));
+        return Ok(json!({ "event": "stopped", "outcome": "Cancelled" }));
     }
     if !status.success() {
         let detail = if last_error.is_empty() {
@@ -1924,14 +2009,102 @@ fn stream_download(
         } else {
             last_error.chars().take(4096).collect()
         };
-        return Err(format!("yt-dlp download failed: {detail}"));
+        return Err(format!("yt-dlp download failed: {detail}").into());
     }
     super::yt_dlp_chapters::write_chapter_sidecars(&chapter_lines)?;
-    Ok(json!({
-        "event": "complete",
-        "outputPath": final_path.unwrap_or(expected)
-    }))
+    let mut guard = owner.lock().map_err(|_| "Output owner unavailable")?;
+    let result = guard.publish(Path::new(&final_path.unwrap_or(expected)), cancelled);
+    if result.is_err() && cancelled.load(Ordering::Acquire) && guard.published.is_empty() {
+        return Ok(json!({"event":"stopped", "outcome":"Cancelled"}));
+    }
+    let result = result?;
+    drop(guard);
+    match result {
+        super::output_transaction::OutputOutcome::Published(paths) => Ok(
+            json!({ "event": "complete", "outcome": "Published", "outputPath": paths.first().map(|p| p.display().to_string()), "outputPaths": paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>() }),
+        ),
+        super::output_transaction::OutputOutcome::SkippedExisting(path) => Ok(
+            json!({ "event": "skipped", "outcome": "SkippedExisting", "outputPath": path.display().to_string() }),
+        ),
+    }
 }
+fn write_native_failure(
+    writer: &mut impl Write,
+    error: &super::output_transaction::OutputFailure,
+) -> Result<(), String> {
+    let message = error.to_string();
+    let paths = error
+        .published_paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>();
+    write_response(
+        writer,
+        &NativeResponse {
+            ok: false,
+            message: &message,
+            data: Some(
+                json!({"event":"error", "outcome":format!("{:?}", error.disposition),
+            "outputPath":paths.first(), "outputPaths":paths}),
+            ),
+        },
+    )
+}
+
+fn write_download_response(
+    writer: &mut impl Write,
+    result: Result<Value, super::output_transaction::OutputFailure>,
+    cancelled: &AtomicBool,
+) -> Result<(), String> {
+    match result {
+        Ok(data) => write_response(
+            writer,
+            &NativeResponse {
+                ok: true,
+                message: "Download complete",
+                data: Some(data),
+            },
+        ),
+        Err(error) if error.published_paths.is_empty() && cancelled.load(Ordering::Acquire) => {
+            write_response(
+                writer,
+                &NativeResponse {
+                    ok: true,
+                    message: "Download stopped",
+                    data: Some(json!({"event":"stopped", "outcome":"Cancelled"})),
+                },
+            )
+        }
+        Err(error) => write_native_failure(writer, &error),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn output_review_native_envelope(
+    request: &Value,
+    cancelled: &Arc<AtomicBool>,
+) -> Vec<Value> {
+    let mut writer = Vec::new();
+    let mut result = stream_download(request, &mut writer, cancelled);
+    if let (Err(error), Some(message)) = (
+        &mut result,
+        request.get("reviewErrorMessage").and_then(Value::as_str),
+    ) {
+        if !error.published_paths.is_empty() {
+            error.message = message.to_owned();
+        }
+    }
+    write_download_response(&mut writer, result, cancelled).unwrap();
+    let mut bytes = writer.as_slice();
+    let mut frames = Vec::new();
+    while !bytes.is_empty() {
+        let len = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+        frames.push(serde_json::from_slice(&bytes[4..4 + len]).unwrap());
+        bytes = &bytes[4 + len..];
+    }
+    frames
+}
+
 fn handle_request(raw: &str) -> Result<(&'static str, Value), String> {
     let request: Value = serde_json::from_str(raw)
         .map_err(|error| format!("The Native Messaging request is not valid JSON: {error}"))?;
@@ -2002,6 +2175,39 @@ fn handle_request(raw: &str) -> Result<(&'static str, Value), String> {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn output_review_native_analysis(
+    request: &Value,
+    streaming: bool,
+) -> Result<Value, String> {
+    if !streaming {
+        return handle_request(&request.to_string()).map(|(_, value)| value);
+    }
+    let mut writer = Vec::new();
+    let summary = stream_analysis(request, &mut writer, &AtomicBool::new(false))?;
+    let mut bytes = writer.as_slice();
+    let mut frames = Vec::<Value>::new();
+    while !bytes.is_empty() {
+        let len = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+        frames.push(serde_json::from_slice(&bytes[4..4 + len]).unwrap());
+        bytes = &bytes[4 + len..];
+    }
+    Ok(json!({"summary":summary,"frames":frames}))
+}
+
+#[cfg(test)]
+pub(crate) fn output_review_native_download(request: &Value) -> Result<Value, String> {
+    stream_download(request, &mut Vec::new(), &Arc::new(AtomicBool::new(false))).map_err(Into::into)
+}
+
+#[cfg(test)]
+pub(crate) fn output_review_native_cancel(
+    request: &Value,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<Value, String> {
+    stream_download(request, &mut Vec::new(), cancelled).map_err(Into::into)
+}
+
 fn read_message(mut reader: impl Read) -> Result<String, String> {
     let mut length = [0u8; 4];
     reader
@@ -2068,6 +2274,7 @@ pub fn run_native_host_if_requested() -> bool {
             return Err("This extension is not allowed to connect.".to_owned());
         }
         super::runtime_paths::set_application_current_dir()?;
+        let _ = AppConfig::load_runtime();
         let raw = read_message(std::io::stdin().lock())?;
         let mut request: Value = serde_json::from_str(&raw)
             .map_err(|error| format!("The Native Messaging request is not valid JSON: {error}"))?;
@@ -2114,15 +2321,8 @@ pub fn run_native_host_if_requested() -> bool {
                     super::force_cleanup_tracked_processes();
                 }
             });
-            let data = stream_download(&request, &mut writer, &cancelled)?;
-            write_response(
-                &mut writer,
-                &NativeResponse {
-                    ok: true,
-                    message: "Download complete",
-                    data: Some(data),
-                },
-            )
+            let result = stream_download(&request, &mut writer, &cancelled);
+            write_download_response(&mut writer, result, &cancelled)
         } else if matches!(
             action,
             Some(
@@ -2198,14 +2398,7 @@ pub fn run_native_host_if_requested() -> bool {
         );
     }
     if let Err(error) = result {
-        let _ = write_response(
-            &mut writer,
-            &NativeResponse {
-                ok: false,
-                message: &error,
-                data: Some(json!({ "event": "error" })),
-            },
-        );
+        let _ = write_native_failure(&mut writer, &error.into());
     }
     true
 }

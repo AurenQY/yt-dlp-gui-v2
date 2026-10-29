@@ -118,6 +118,7 @@ impl AppState {
         let Some(item) = self.queue_items.get_mut(item_index) else {
             return;
         };
+        item.selection.name_origin = Some(crate::domain::OutputNameOrigin::Explicit);
         item.selection.file_name =
             normal_download_base_name(&sanitize_file_name_for_windows(&item.selection.file_name));
     }

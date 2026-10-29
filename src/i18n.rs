@@ -18,6 +18,10 @@ use serde::{Deserialize, Serialize};
 
 mod catalog;
 
+#[cfg(test)]
+#[path = "i18n/cache_location_tests.rs"]
+mod cache_location_tests;
+
 // Locale modules may include draft/future translations.
 // All compiled locales are selectable; missing keys fall back to English.
 mod ar_ma;

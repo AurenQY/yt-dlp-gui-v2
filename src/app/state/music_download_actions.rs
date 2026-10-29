@@ -75,6 +75,13 @@ impl AppState {
 
         let output_dir = resolve_output_dir(&item.selection.output_dir)
             .or_else(|_| resolve_output_dir(&self.item_defaults.output_dir))?;
+        if let Err(error) =
+            crate::infrastructure::storage_paths::validate_output_destination(&output_dir)
+        {
+            self.mark_download_preflight_failed(item_id, &error);
+            self.last_action = error.clone();
+            return Err(error);
+        }
         let cache_media_path = self.complete_music_cache_media_path(&item);
         let cover_path = self
             .music_cache_cover_path(&item)
@@ -120,7 +127,11 @@ impl AppState {
         if let Some(item) = self.queue_items.get_mut(task_index) {
             reset_item_for_new_work(item, DownloadTargetKind::Normal);
             item.completed_selection = None;
-            item.selection.file_name = music_output_stem_template_for_title(&item.title);
+            if item.selection.name_origin == Some(crate::domain::OutputNameOrigin::Automatic)
+                || item.selection.file_name.trim().is_empty()
+            {
+                item.selection.name_origin = Some(crate::domain::OutputNameOrigin::Automatic);
+            }
             item.selection.audio_selector = choice.selection_token().to_owned();
             if let Some(run) = item.workflows.iter_mut().rev().find(|run| {
                 run.kind == WorkflowKind::DownloadMedia
@@ -151,6 +162,7 @@ impl AppState {
         );
 
         let job = MusicDownloadJob {
+            output: self.output_request_for_item(&item, false),
             item_id,
             workflow_id,
             source_url: item.source_url.clone(),

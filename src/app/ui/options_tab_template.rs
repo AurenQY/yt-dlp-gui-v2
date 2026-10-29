@@ -18,6 +18,7 @@ enum OptionsRootNode {
     Playlist,
     FileAction,
     Cache,
+    Output,
     Window,
 }
 
@@ -48,6 +49,7 @@ fn options_root_template() -> OptionsRootTemplate {
         OptionsRootNode::Playlist,
         OptionsRootNode::FileAction,
         OptionsRootNode::Cache,
+        OptionsRootNode::Output,
         OptionsRootNode::Window,
     ])
 }
@@ -93,6 +95,9 @@ fn show_options_root_block(
             super::options_behavior::render_file_action_group(tui, state, form)
         }
         OptionsRootNode::Cache => super::options_cache::render_cache_group(tui, state, label_width),
+        OptionsRootNode::Output => {
+            super::options_output::render_output_group(tui, state, label_width)
+        }
         OptionsRootNode::Window => super::options_window::render_window_group(tui, state, form),
     }
 }

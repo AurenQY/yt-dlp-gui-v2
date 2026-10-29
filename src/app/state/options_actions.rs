@@ -19,7 +19,10 @@ impl AppState {
             .unwrap_or_else(|_| path.to_owned())
     }
     pub fn output_dir_display(&self) -> String {
-        if self.output_dir_locked_by_config() {
+        self.output_dir_display_for_config_lock(self.output_dir_locked_by_config())
+    }
+    pub(crate) fn output_dir_display_for_config_lock(&self, locked: bool) -> String {
+        if locked {
             return "Controlled by config".to_owned();
         }
         let path = self.item_defaults.output_dir.as_str();
@@ -221,6 +224,13 @@ impl AppState {
             return;
         }
         let path = path.into();
+        let validation = crate::infrastructure::resolve_output_dir(&path).and_then(|path| {
+            crate::infrastructure::storage_paths::validate_output_destination(&path)
+        });
+        if let Err(error) = validation {
+            self.last_action = error;
+            return;
+        }
         self.item_defaults.output_dir = path.clone();
         for item in &mut self.queue_items {
             item.selection.output_dir = path.clone();
@@ -253,11 +263,13 @@ impl AppState {
 
         let (output_dir, base_name, extension) =
             normalized_origin_save_target(&path, default_extension)?;
+        crate::infrastructure::storage_paths::validate_output_destination(&path)?;
         let target_display = Path::new(&output_dir).join(format!("{base_name}.{extension}"));
         self.set_output_dir(output_dir);
         self.set_item_download_container_from_save_as(0, &extension)?;
         if let Some(item) = self.queue_items.first_mut() {
             item.selection.file_name = base_name;
+            item.selection.name_origin = Some(crate::domain::OutputNameOrigin::Explicit);
         }
         self.last_action = format!("Download target: {}", target_display.display());
         Ok(())

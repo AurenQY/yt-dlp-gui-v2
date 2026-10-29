@@ -163,6 +163,18 @@ pub(super) fn about_header_status_text(state: &AppState, id: ManagedComponentId)
     // The app header has no status badge; its version uses the same title row
     // as dependency Items. Action/status messages belong to the footer.
     let tool = id.as_dependency_tool()?;
+    if tool == DependencyTool::GalleryDl {
+        return Some(
+            if state.gallery_readiness_pending() {
+                "Checking compatibility..."
+            } else if state.gallery_is_ready_for_display() {
+                "Ready"
+            } else {
+                "Not ready"
+            }
+            .to_owned(),
+        );
+    }
     match about_availability_badge(tool, state.dependency_tool_is_installed(tool))? {
         AboutAvailabilityBadge::Ready => Some(
             state
@@ -189,7 +201,11 @@ pub(super) fn render_about_header_status(ui: &mut Ui, state: &AppState, id: Mana
     };
     // Reuse the app's existing Prepare status palette for both themes.
     // About badges describe availability only; an absent optional tool has none.
-    let color = if id
+    let color = if id == ManagedComponentId::for_dependency_tool(DependencyTool::GalleryDl)
+        && state.gallery_readiness_pending()
+    {
+        subtle_text_color(ui)
+    } else if id
         .as_dependency_tool()
         .is_some_and(|tool| state.dependency_tool_is_installed(tool))
     {
@@ -197,7 +213,7 @@ pub(super) fn render_about_header_status(ui: &mut Ui, state: &AppState, id: Mana
     } else {
         super::prepare_tab::error_color(ui)
     };
-    egui::Frame::NONE
+    let badge = egui::Frame::NONE
         .fill(ui.visuals().faint_bg_color)
         .corner_radius(egui::CornerRadius::same(6))
         .inner_margin(egui::Margin::symmetric(
@@ -207,6 +223,13 @@ pub(super) fn render_about_header_status(ui: &mut Ui, state: &AppState, id: Mana
         .show(ui, |ui| {
             ui.add(egui::Label::new(RichText::new(label).color(color)).truncate());
         });
+    if id == ManagedComponentId::for_dependency_tool(DependencyTool::GalleryDl) {
+        badge.response.on_hover_text(format!(
+            "{}\nConfigured runtime: {}",
+            state.gallery_readiness_detail(),
+            state.tool_paths.gallery_dl
+        ));
+    }
 }
 
 pub(super) fn about_tool_has_action(state: &AppState, tool: DependencyTool) -> bool {
@@ -407,7 +430,9 @@ pub(super) fn render_component_action_cell(
             let running = state.component_update_running();
             if ui
                 .add_enabled(
-                    !running,
+                    !running
+                        && !(tool == DependencyTool::GalleryDl
+                            && state.gallery_readiness_pending()),
                     egui::Button::new(state.ui_i18n_text_for_key("about.install")),
                 )
                 .clicked()
@@ -458,7 +483,14 @@ pub(super) fn render_tool_path_text_box(
 ) {
     let saved = state.dependency_tool_path(tool);
     let missing = !state.dependency_tool_is_installed(tool);
-    let mut value = if missing {
+    let mut value = if tool == DependencyTool::GalleryDl && missing {
+        state
+            .gallery_readiness_detail()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    } else if missing {
         state
             .ui_i18n_text_for_key("about.availability.missing")
             .to_owned()
@@ -495,7 +527,11 @@ pub(super) fn render_tool_path_text_box(
         } else {
             AppTextBoxSyntax::Path
         })
-        .error(missing && !state.dependency_tool_update_is_running(tool))
+        .error(
+            missing
+                && !state.dependency_tool_update_is_running(tool)
+                && !(tool == DependencyTool::GalleryDl && state.gallery_readiness_pending()),
+        )
         .progress_background(progress)
         .desired_width(size.width)
         .desired_height(size.height)

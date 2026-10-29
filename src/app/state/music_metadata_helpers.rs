@@ -127,7 +127,13 @@ pub(super) fn music_stream_seed_from_json(
         .or_else(|| json.get("http_headers").and_then(headers_from_json))
         .unwrap_or_default();
 
+    let mut naming_metadata = VideoMetadata::empty_preview();
+    naming_metadata.title = json_str_field(json, "title").unwrap_or_default();
+    naming_metadata.uploader = json_str_field(json, "uploader").unwrap_or_default();
+    naming_metadata.upload_date_text = json_str_field(json, "upload_date").unwrap_or_default();
     Ok(MusicStreamSeed {
+        source_media_id: json_str_field(json, "id"),
+        naming_metadata,
         source_url: source.to_owned(),
         title,
         album_title,
@@ -164,6 +170,15 @@ pub(super) fn resolve_music_stream_seed_with_cookie_fallback(
     use_cookies: bool,
 ) -> MusicStreamResolveWorkerResult {
     let mut attempts = Vec::with_capacity(2);
+    let tool_paths = match tool_paths.bind_protected_config() {
+        Ok(tools) => tools,
+        Err(error) => {
+            return MusicStreamResolveWorkerResult {
+                result: Err(error),
+                attempts,
+            };
+        }
+    };
     match tool_paths.analyze_music_stream_url_detailed(source, use_cookies) {
         Ok(output) => {
             attempts.push(MusicStreamResolveAttempt {
@@ -389,14 +404,16 @@ pub(super) fn complete_music_cache_media_path_in_root(
     item: &QueueItem,
     cache_root: &Path,
 ) -> Option<PathBuf> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache().ok()?;
     if item.music_cache_key.trim().is_empty() || item.music_stream_ext.trim().is_empty() {
         return None;
     }
     let cache_dir = cache_root.join(sanitize_music_cache_key(&item.music_cache_key));
     let manifest_path = cache_dir.join("manifest.yaml");
+    crate::infrastructure::storage_paths::reject_links(&manifest_path).ok()?;
     let manifest = read_yaml_file::<AudioCacheManifestSnapshot>(&manifest_path)?;
     if !audio_cache_manifest_is_fresh(&manifest) {
-        let _ = fs::remove_dir_all(&cache_dir);
+        // Expired entries are removed by explicit/startup cleanup, not a UI read.
         return None;
     }
     if !manifest.complete {
@@ -409,6 +426,12 @@ pub(super) fn complete_music_cache_media_path_in_root(
         "audio.{}",
         sanitize_music_cache_ext(&item.music_stream_ext)
     ));
+    crate::infrastructure::storage_paths::reject_links(&path).ok()?;
+    if canonical_queue_source_key(&manifest.source_url)
+        != canonical_queue_source_key(&item.source_url)
+    {
+        return None;
+    }
     let media_len = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
     if media_len == 0 {
         return None;
@@ -454,6 +477,7 @@ pub(super) fn cache_music_lyrics_with_yt_dlp(
     cache_root: &Path,
     job: MusicLyricsCacheJob,
 ) -> Result<(), String> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
     let lyrics_dir = cache_root
         .join("lyrics")
         .join(sanitize_music_cache_key(&job.cache_key));

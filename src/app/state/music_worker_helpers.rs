@@ -1,5 +1,9 @@
 use super::*;
 use crate::infrastructure::async_http::{self, ClientOptions};
+use crate::infrastructure::{
+    output_policy::OutputDisposition,
+    output_transaction::{OutputArtifacts, OutputOutcome, OutputTransaction},
+};
 
 pub(super) fn run_music_download_worker(
     tool_paths: ToolPaths,
@@ -8,6 +12,158 @@ pub(super) fn run_music_download_worker(
     child_handle: Arc<Mutex<Option<Child>>>,
     cancel_requested: Arc<AtomicBool>,
 ) {
+    let _storage_use = match crate::infrastructure::storage_paths::use_cache() {
+        Ok(guard) => guard,
+        Err(error) => {
+            let _ = tx.send(MusicDownloadEvent::Finished {
+                item_id: job.item_id,
+                workflow_id: job.workflow_id,
+                source_kind: MusicDownloadSourceKind::YtDlpDownload,
+                split_chapters_requested: job.choice.save_mode.splits_chapters(),
+                chapters_split: false,
+                disposition: OutputDisposition::Failed,
+                result: Err(error),
+            });
+            return;
+        }
+    };
+    let preflight_source = if music_download_requires_online_download(job.choice) {
+        MusicDownloadSourceKind::YtDlpDownload
+    } else {
+        match job.cache_media_path.as_ref() {
+            Some(path)
+                if music_cache_can_be_copied_for_choice(
+                    job.choice,
+                    path,
+                    job.choice.embed_cover && job.cover_path.as_ref().is_some_and(|p| p.is_file()),
+                ) =>
+            {
+                MusicDownloadSourceKind::CacheCopy
+            }
+            Some(_) => MusicDownloadSourceKind::CacheConvert,
+            None => MusicDownloadSourceKind::YtDlpDownload,
+        }
+    };
+    job.output.cancel = cancel_requested.clone();
+    let status_tx = tx.clone();
+    let item_id = job.item_id;
+    let workflow_id = job.workflow_id;
+    job.output.status = Some(Arc::new(move |detail| {
+        let _ = status_tx.send(MusicDownloadEvent::OutputStatus {
+            item_id,
+            workflow_id,
+            detail: detail.into(),
+        });
+    }));
+    let configured_tools = tool_paths.for_output(&job.output);
+    let preparation = (|| {
+        let tool_paths = configured_tools.as_ref().map_err(Clone::clone)?;
+        let literal = normal_download_base_name(if job.output.literal_name.is_empty() {
+            &job.title
+        } else {
+            &job.output.literal_name
+        });
+        let (directory, stem) = tool_paths.music_output_destination(
+            &job.output,
+            &job.source_url,
+            &job.output_dir,
+            &literal,
+            job.use_cookies,
+        )?;
+        // Resolve the existing no-chapters fallback before reserving its file.
+        // Do not count a full-audio neighbor when usable chapters select a
+        // directory-only export.
+        let chapter_metadata = if job.choice.save_mode.splits_chapters() {
+            Some(tool_paths.analyze_music_output(
+                &job.source_url,
+                job.use_cookies,
+                job.choice.format_selector(),
+                &cancel_requested,
+            )?)
+        } else {
+            None
+        };
+        let split_chapters = chapter_metadata
+            .as_ref()
+            .is_some_and(|m| music_has_usable_chapters(&m.json));
+        let owner = Arc::new(Mutex::new(OutputTransaction::new_with_status(
+            &directory,
+            &stem,
+            if split_chapters {
+                OutputArtifacts::directory()
+            } else {
+                let extension = match (job.choice.target_format(), job.cache_media_path.as_ref()) {
+                    (Some(format), _) => format.extension().to_owned(),
+                    // Chapter export always uses the selected online source,
+                    // even when a complete cache has a different container.
+                    (None, _) if chapter_metadata.is_some() => chapter_metadata
+                        .as_ref()
+                        .unwrap()
+                        .json
+                        .get("ext")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .ok_or("Resolved audio has no output extension.")?
+                        .to_owned(),
+                    (None, Some(path)) => music_output_extension_for_choice(job.choice, path),
+                    (None, None) => tool_paths.music_output_extension(
+                        &job.source_url,
+                        job.choice.format_selector(),
+                        job.use_cookies,
+                        &cancel_requested,
+                    )?,
+                };
+                OutputArtifacts::file(&extension)
+            },
+            job.output.preferences.existing,
+            &cancel_requested,
+            job.output.status.clone(),
+        )?));
+        owner
+            .lock()
+            .map_err(|_| "Output owner unavailable")?
+            .output_config = tool_paths.output_config.clone();
+        job.output_dir = owner
+            .lock()
+            .map_err(|_| "Output owner unavailable")?
+            .work
+            .clone();
+        job.output.transaction = Some(owner.clone());
+        Ok::<_, String>((owner, split_chapters))
+    })();
+    let tool_paths = configured_tools.unwrap_or(tool_paths);
+    let (owner, split_chapters) = match preparation {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = tx.send(MusicDownloadEvent::Finished {
+                item_id: job.item_id,
+                workflow_id: job.workflow_id,
+                source_kind: preflight_source,
+                split_chapters_requested: job.choice.save_mode.splits_chapters(),
+                chapters_split: false,
+                disposition: if cancel_requested.load(Ordering::Acquire) {
+                    OutputDisposition::Cancelled
+                } else {
+                    OutputDisposition::Failed
+                },
+                result: Err(error),
+            });
+            return;
+        }
+    };
+    let skipped = owner.lock().ok().and_then(|g| g.skipped.clone());
+    if let Some(path) = skipped {
+        let _ = tx.send(MusicDownloadEvent::Finished {
+            item_id: job.item_id,
+            workflow_id: job.workflow_id,
+            source_kind: preflight_source,
+            split_chapters_requested: job.choice.save_mode.splits_chapters(),
+            chapters_split: false,
+            disposition: OutputDisposition::SkippedExisting,
+            result: Ok(path.display().to_string()),
+        });
+        return;
+    }
     if !job.choice.save_mode.splits_chapters()
         && job.choice.embed_cover
         && !job.cover_path.as_ref().is_some_and(|path| path.is_file())
@@ -16,11 +172,14 @@ pub(super) fn run_music_download_worker(
     }
     let has_cover =
         job.choice.embed_cover && job.cover_path.as_ref().is_some_and(|path| path.is_file());
-    let online_target_available = job.choice.target_format().is_some_and(|format| {
-        job.cache_media_path.as_ref().is_some_and(|path| {
-            !music_cache_source_matches_target(format, path, &job.source_acodec)
-        }) && online_music_target_source_available(&tool_paths, &job, format)
-    });
+    // Restored complete caches are sufficient for local export; do not probe
+    // the unavailable source merely to prefer an online encoding variant.
+    let online_target_available = job.output.context.resolved
+        && job.choice.target_format().is_some_and(|format| {
+            job.cache_media_path.as_ref().is_some_and(|path| {
+                !music_cache_source_matches_target(format, path, &job.source_acodec)
+            }) && online_music_target_source_available(&tool_paths, &job, format, &cancel_requested)
+        });
     let source_kind = if music_download_requires_online_download(job.choice) {
         MusicDownloadSourceKind::YtDlpDownload
     } else {
@@ -53,39 +212,66 @@ pub(super) fn run_music_download_worker(
                 tx.clone(),
                 &child_handle,
                 &cancel_requested,
+                split_chapters,
             )
         }
     };
 
-    let result = result.map(|path_text| {
+    let result = result.and_then(|path_text| {
         if job.choice.save_mode.splits_chapters() {
-            return path_text;
+            return Ok(path_text);
         }
         let output_path = PathBuf::from(&path_text);
-        match ensure_music_download_album_metadata_written(
+        ensure_music_download_album_metadata_written(
             &tool_paths,
             &job,
             output_path,
             source_kind,
             &tx,
-        ) {
-            Ok(path) => path.display().to_string(),
-            Err(error) => {
-                eprintln!("[music-download] album metadata pass skipped: {error}");
-                path_text
-            }
-        }
+        )
+        .map(|path| path.display().to_string())
     });
 
     let chapters_split = result
         .as_ref()
         .is_ok_and(|path| job.choice.save_mode.splits_chapters() && Path::new(path).is_dir());
+    let mut disposition = OutputDisposition::Published;
+    let mut result = result.and_then(|path| {
+        match owner
+            .lock()
+            .map_err(|_| "Output owner unavailable")?
+            .publish(Path::new(&path), &cancel_requested)?
+        {
+            OutputOutcome::Published(paths) => Ok(paths
+                .first()
+                .ok_or("No output published")?
+                .display()
+                .to_string()),
+            OutputOutcome::SkippedExisting(path) => {
+                disposition = OutputDisposition::SkippedExisting;
+                Ok(path.display().to_string())
+            }
+        }
+    });
+    if result.is_err() {
+        disposition = if owner.lock().is_ok_and(|g| !g.published.is_empty()) {
+            OutputDisposition::PartialFailure
+        } else if cancel_requested.load(Ordering::Acquire) {
+            OutputDisposition::Cancelled
+        } else {
+            OutputDisposition::Failed
+        };
+    }
+    if disposition == OutputDisposition::Cancelled {
+        result = Err(DOWNLOAD_CANCELLED_MESSAGE.into());
+    }
     let _ = tx.send(MusicDownloadEvent::Finished {
         item_id: job.item_id,
         workflow_id: job.workflow_id,
         source_kind,
         split_chapters_requested: job.choice.save_mode.splits_chapters(),
         chapters_split,
+        disposition,
         result,
     });
 }
@@ -198,6 +384,7 @@ pub(super) fn ensure_music_download_requested_extension(
     source_kind: MusicDownloadSourceKind,
     tx: &Sender<MusicDownloadEvent>,
 ) -> Result<PathBuf, String> {
+    check_music_output_cancelled(job)?;
     let Some(target_format) = job.choice.target_format() else {
         return Ok(output_path);
     };
@@ -215,14 +402,20 @@ pub(super) fn ensure_music_download_requested_extension(
     if !ffmpeg.is_file() || !output_path.is_file() {
         return Ok(output_path);
     }
-    let target_path =
-        unique_music_output_path(&job.output_dir, &job.title, target_format.extension());
+    let target_path = job
+        .output_dir
+        .join(format!("output.{}", target_format.extension()));
     let mut command = Command::new(&ffmpeg);
     configure_background_command(&mut command);
     command.arg("-y").arg("-i").arg(&output_path).args(
         resolve_music_audio_export_plan(
             target_format,
-            &probe_music_audio_source_profile(tool_paths, &output_path, &job.source_acodec),
+            &probe_music_audio_source_profile(
+                tool_paths,
+                &output_path,
+                &job.source_acodec,
+                &job.output.cancel,
+            )?,
         )
         .ffmpeg_args,
     );
@@ -235,7 +428,11 @@ pub(super) fn ensure_music_download_requested_extension(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    let output = match run_tracked_command_output(&mut command, "ffmpeg music post pass") {
+    let output = match crate::infrastructure::run_tracked_command_output_cancellable(
+        &mut command,
+        "ffmpeg music extension pass",
+        &job.output.cancel,
+    ) {
         Ok(output) => output,
         Err(error) => {
             send_music_tool_command_finished(
@@ -289,6 +486,7 @@ pub(super) fn ensure_music_download_cover_embedded(
     source_kind: MusicDownloadSourceKind,
     tx: &Sender<MusicDownloadEvent>,
 ) -> Result<PathBuf, String> {
+    check_music_output_cancelled(job)?;
     if !job.choice.embed_cover || !music_output_path_supports_embedded_cover(&output_path) {
         return Ok(output_path);
     }
@@ -332,7 +530,11 @@ pub(super) fn ensure_music_download_cover_embedded(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    let output = match run_tracked_command_output(&mut command, "ffmpeg music post pass") {
+    let output = match crate::infrastructure::run_tracked_command_output_cancellable(
+        &mut command,
+        "ffmpeg music cover pass",
+        &job.output.cancel,
+    ) {
         Ok(output) => output,
         Err(error) => {
             send_music_tool_command_finished(
@@ -390,6 +592,7 @@ pub(super) fn ensure_music_download_album_metadata_written(
     source_kind: MusicDownloadSourceKind,
     tx: &Sender<MusicDownloadEvent>,
 ) -> Result<PathBuf, String> {
+    check_music_output_cancelled(job)?;
     if !job.choice.write_tags {
         return Ok(output_path);
     }
@@ -423,7 +626,11 @@ pub(super) fn ensure_music_download_album_metadata_written(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    let output = match run_tracked_command_output(&mut command, "ffmpeg music post pass") {
+    let output = match crate::infrastructure::run_tracked_command_output_cancellable(
+        &mut command,
+        "ffmpeg music metadata pass",
+        &job.output.cancel,
+    ) {
         Ok(output) => output,
         Err(error) => {
             send_music_tool_command_finished(
@@ -475,18 +682,42 @@ pub(super) fn ensure_music_download_album_metadata_written(
     Ok(output_path)
 }
 
+fn check_music_output_cancelled(job: &MusicDownloadJob) -> Result<(), String> {
+    if job.output.cancel.load(Ordering::Acquire) {
+        Err(DOWNLOAD_CANCELLED_MESSAGE.into())
+    } else {
+        Ok(())
+    }
+}
+
+fn music_has_usable_chapters(json: &Value) -> bool {
+    let duration = json.get("duration").and_then(Value::as_f64);
+    json.get("chapters")
+        .and_then(Value::as_array)
+        .is_some_and(|chapters| {
+            chapters.iter().any(|chapter| {
+                let start = chapter.get("start_time").and_then(Value::as_f64);
+                let end = chapter.get("end_time").and_then(Value::as_f64).or(duration);
+                matches!((start, end), (Some(start), Some(end)) if start.is_finite() && end.is_finite() && start >= 0.0 && end > start)
+            })
+        })
+}
+
 pub(super) fn copy_music_cache_output(
     job: &MusicDownloadJob,
     tx: Sender<MusicDownloadEvent>,
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<String, String> {
+    if !job.output.validate_work(&job.output_dir)? {
+        return Err("Music output requires an owned staging transaction.".into());
+    }
     let Some(source) = job.cache_media_path.as_ref() else {
         return Err("Music cache file is missing.".to_owned());
     };
     fs::create_dir_all(&job.output_dir)
         .map_err(|error| format!("Could not create music download folder: {error}"))?;
     let output_extension = music_output_extension_for_choice(job.choice, source);
-    let output_path = unique_music_output_path(&job.output_dir, &job.title, &output_extension);
+    let output_path = job.output_dir.join(format!("output.{output_extension}"));
     let _ = tx.send(MusicDownloadEvent::Progress {
         item_id: job.item_id,
         workflow_id: job.workflow_id,
@@ -512,13 +743,17 @@ pub(super) fn convert_music_cache_output(
     child_handle: &Arc<Mutex<Option<Child>>>,
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<String, String> {
+    check_music_output_cancelled(job)?;
+    if !job.output.validate_work(&job.output_dir)? {
+        return Err("Music output requires an owned staging transaction.".into());
+    }
     let Some(source) = job.cache_media_path.as_ref() else {
         return Err("Music cache file is missing.".to_owned());
     };
     fs::create_dir_all(&job.output_dir)
         .map_err(|error| format!("Could not create music download folder: {error}"))?;
     let output_extension = music_output_extension_for_choice(job.choice, source);
-    let output_path = unique_music_output_path(&job.output_dir, &job.title, &output_extension);
+    let output_path = job.output_dir.join(format!("output.{output_extension}"));
     let ffmpeg = resolve_tool_path(&tool_paths.ffmpeg);
     if !ffmpeg.is_file() {
         return Err(format!(
@@ -547,7 +782,12 @@ pub(super) fn convert_music_cache_output(
     if has_cover {
         command.args(["-map", "1:v:0"]);
     }
-    let source_profile = probe_music_audio_source_profile(tool_paths, source, &job.source_acodec);
+    let source_profile = probe_music_audio_source_profile(
+        tool_paths,
+        source,
+        &job.source_acodec,
+        &job.output.cancel,
+    )?;
     let audio_args = if let Some(target_format) = job.choice.target_format() {
         resolve_music_audio_export_plan(target_format, &source_profile).ffmpeg_args
     } else {
@@ -581,6 +821,7 @@ pub(super) fn convert_music_cache_output(
         workflow_id: job.workflow_id,
         percent: 10.0,
     });
+    check_music_output_cancelled(job)?;
     let mut child = command
         .spawn()
         .map_err(|error| format!("Could not start FFmpeg music conversion: {error}"))?;
@@ -683,12 +924,10 @@ pub(super) fn download_music_output_with_yt_dlp(
     tx: Sender<MusicDownloadEvent>,
     child_handle: &Arc<Mutex<Option<Child>>>,
     cancel_requested: &Arc<AtomicBool>,
+    split_chapters: bool,
 ) -> Result<String, String> {
-    let chapter_output_dir = job
-        .choice
-        .save_mode
-        .splits_chapters()
-        .then(|| unique_music_chapter_output_dir(&job.output_dir, &job.title));
+    check_music_output_cancelled(job)?;
+    let chapter_output_dir = split_chapters.then(|| job.output_dir.join("output"));
     let prepared = tool_paths.prepare_music_audio_download_command(
         &job.source_url,
         &job.output_dir,
@@ -700,6 +939,7 @@ pub(super) fn download_music_output_with_yt_dlp(
         job.choice.write_tags,
         chapter_output_dir.as_deref(),
         job.use_cookies,
+        &job.output,
     )?;
     println!(
         "[music-download] output: {}",
@@ -710,6 +950,7 @@ pub(super) fn download_music_output_with_yt_dlp(
         mut command,
         output_path,
         command_line,
+        output_transaction: _output_owner,
     } = prepared;
 
     let mut child = command
@@ -779,7 +1020,9 @@ pub(super) fn download_music_output_with_yt_dlp(
                     });
                     return Ok(chapter_output_dir.display().to_string());
                 }
-                let _ = fs::remove_dir(chapter_output_dir);
+                // The frozen metadata selected chapters. A later extractor/tool
+                // mismatch must not silently publish an unreserved fallback.
+                return Err("Chapter export produced no usable chapter files after metadata selected a chapter directory.".into());
             }
             let output_path = reported_music_final_output_path(&lines)
                 .or_else(|| {
@@ -795,32 +1038,21 @@ pub(super) fn download_music_output_with_yt_dlp(
                 command_line: command_line.clone(),
                 success: true,
             });
-            let output_path = match ensure_music_download_requested_extension(
-                &tool_paths,
+            job.output.validate_work(&output_path)?;
+            let output_path = ensure_music_download_requested_extension(
+                tool_paths,
                 job,
-                output_path.clone(),
+                output_path,
                 source_kind,
                 &tx,
-            ) {
-                Ok(path) => path,
-                Err(error) => {
-                    eprintln!("[music-download] requested extension pass skipped: {error}");
-                    output_path
-                }
-            };
-            let output_path = match ensure_music_download_cover_embedded(
-                &tool_paths,
+            )?;
+            let output_path = ensure_music_download_cover_embedded(
+                tool_paths,
                 job,
-                output_path.clone(),
+                output_path,
                 source_kind,
                 &tx,
-            ) {
-                Ok(path) => path,
-                Err(error) => {
-                    eprintln!("[music-download] cover embed pass skipped: {error}");
-                    output_path
-                }
-            };
+            )?;
             let _ = tx.send(MusicDownloadEvent::Progress {
                 item_id: job.item_id,
                 workflow_id: job.workflow_id,
@@ -983,7 +1215,7 @@ pub(super) fn wait_music_child(
         if cancel_requested.load(Ordering::Relaxed) {
             if let Ok(mut guard) = child_handle.lock() {
                 if let Some(child) = guard.as_mut() {
-                    let _ = child.kill();
+                    crate::app::download_worker::terminate_child_process_tree(child);
                 }
             }
         }
@@ -998,6 +1230,8 @@ pub(super) fn wait_music_child(
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    crate::app::download_worker::terminate_child_process_tree(child);
+                    let _ = child.wait();
                     *guard = None;
                     return Some(Err(error));
                 }
@@ -1318,15 +1552,24 @@ pub(super) fn probe_music_audio_source_profile(
     tool_paths: &ToolPaths,
     input_path: &Path,
     fallback_acodec: &str,
-) -> MusicAudioSourceProfile {
+    cancel: &AtomicBool,
+) -> Result<MusicAudioSourceProfile, String> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(DOWNLOAD_CANCELLED_MESSAGE.into());
+    }
     let ffmpeg = resolve_tool_path(&tool_paths.ffmpeg);
     let ffprobe = ffprobe_companion_path_for_ffmpeg(&ffmpeg);
     let mut profile = MusicAudioSourceProfile::from_codec(fallback_acodec);
-    let Ok(info) = probe_media_with_ffprobe(&ffprobe, input_path) else {
-        return profile;
+    let probe = probe_media_with_ffprobe(&ffprobe, input_path, cancel);
+    // Cancellation is a terminal result, never an unavailable-probe fallback.
+    if cancel.load(Ordering::Acquire) {
+        return Err(DOWNLOAD_CANCELLED_MESSAGE.into());
+    }
+    let Ok(info) = probe else {
+        return Ok(profile);
     };
     let Some(audio) = info.audio else {
-        return profile;
+        return Ok(profile);
     };
     if let Some(codec) = audio.codec.filter(|value| !value.trim().is_empty()) {
         profile.acodec = codec;
@@ -1336,7 +1579,7 @@ pub(super) fn probe_music_audio_source_profile(
         .map(|value| ((value as f64) / 1000.0).round().max(1.0) as u32);
     profile.sample_rate = audio.sample_rate;
     profile.channels = audio.channels;
-    profile
+    Ok(profile)
 }
 
 pub(super) fn music_cache_source_matches_target(
@@ -1352,13 +1595,12 @@ pub(super) fn online_music_target_source_available(
     tool_paths: &ToolPaths,
     job: &MusicDownloadJob,
     format: MusicDownloadFormat,
+    cancel: &AtomicBool,
 ) -> bool {
     let selector = music_online_target_format_selector(format);
-    let Ok(output) = tool_paths.analyze_music_stream_url_with_selector(
-        &job.source_url,
-        job.use_cookies,
-        selector,
-    ) else {
+    let Ok(output) =
+        tool_paths.analyze_music_output(&job.source_url, job.use_cookies, selector, cancel)
+    else {
         return false;
     };
     let Ok(seed) = music_stream_seed_from_json(&output.json, &job.source_url) else {
@@ -1473,7 +1715,7 @@ pub(super) fn sanitize_music_cache_ext(value: &str) -> String {
 }
 
 pub(super) fn calculate_cache_management_summary(root: &Path) -> CacheManagementSummary {
-    let total_bytes = dir_size_bytes(root);
+    let total_bytes = crate::infrastructure::storage_paths::disposable_size(root);
     let music_root = root.join("audio");
     let music_bytes = dir_size_bytes(&music_root);
     let expired_music_bytes = expired_music_cache_size_bytes(&music_root);
@@ -1485,23 +1727,7 @@ pub(super) fn calculate_cache_management_summary(root: &Path) -> CacheManagement
 }
 
 pub(super) fn dir_size_bytes(path: &Path) -> u64 {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return 0;
-    };
-    if metadata.is_file() {
-        return metadata.len();
-    }
-    if !metadata.is_dir() {
-        return 0;
-    }
-
-    let Ok(entries) = fs::read_dir(path) else {
-        return 0;
-    };
-    entries
-        .filter_map(Result::ok)
-        .map(|entry| dir_size_bytes(&entry.path()))
-        .sum()
+    crate::infrastructure::storage_paths::tree_size(path)
 }
 
 pub(super) fn expired_music_cache_size_bytes(root: &Path) -> u64 {
@@ -1517,6 +1743,13 @@ pub(super) fn expired_music_cache_size_bytes(root: &Path) -> u64 {
 }
 
 pub(super) fn remove_expired_music_cache_dirs(root: &Path) -> std::io::Result<CacheRemovalSummary> {
+    let checked = crate::infrastructure::storage_paths::cache_directory("audio")
+        .map_err(std::io::Error::other)?;
+    if root != checked {
+        return Err(std::io::Error::other(
+            "Expiry cleanup must use the active audio cache.",
+        ));
+    }
     let mut summary = CacheRemovalSummary::default();
     let Ok(entries) = fs::read_dir(root) else {
         return Ok(summary);
@@ -1536,7 +1769,7 @@ pub(super) fn remove_expired_music_cache_dirs(root: &Path) -> std::io::Result<Ca
 }
 
 pub(super) fn music_cache_dir_is_expired(path: &Path) -> bool {
-    if !path.is_dir() {
+    if crate::infrastructure::storage_paths::reject_links(path).is_err() || !path.is_dir() {
         return false;
     }
     if path.file_name().and_then(|value| value.to_str()) == Some("covers") {
@@ -1544,11 +1777,27 @@ pub(super) fn music_cache_dir_is_expired(path: &Path) -> bool {
     }
 
     let manifest_path = path.join("manifest.yaml");
-    if let Some(manifest) = read_yaml_file::<AudioCacheManifestSnapshot>(&manifest_path) {
-        return !audio_cache_manifest_is_fresh(&manifest);
+    if crate::infrastructure::storage_paths::reject_links(&manifest_path).is_err() {
+        return false;
     }
-
-    path_modified_age_seconds(path).is_some_and(|age| age > MUSIC_STREAM_CACHE_TTL_SECONDS)
+    if let Some(manifest) = read_yaml_file::<AudioCacheManifestSnapshot>(&manifest_path) {
+        // Default/incomplete mappings do not establish an owned entry.
+        return !manifest.source_url.trim().is_empty()
+            && !manifest.ext.trim().is_empty()
+            && manifest.updated_unix_seconds > 0
+            && path.file_name().and_then(|s| s.to_str())
+                == Some(
+                    music_cache_key(
+                        &manifest.source_url,
+                        &manifest.format_id,
+                        &manifest.ext,
+                        &manifest.acodec,
+                    )
+                    .as_str(),
+                )
+            && !audio_cache_manifest_is_fresh(&manifest);
+    }
+    false
 }
 
 pub(super) fn path_modified_age_seconds(path: &Path) -> Option<u64> {
@@ -1572,7 +1821,16 @@ pub(super) fn remove_path_contents_or_dir(path: &Path) -> std::io::Result<CacheR
 
 pub(super) fn remove_safe_app_cache_contents(path: &Path) -> std::io::Result<CacheRemovalSummary> {
     ensure_safe_app_cache_root(path)?;
-    remove_dir_contents_collecting_summary(path)
+    let pending = crate::infrastructure::storage_paths::protected_update_paths();
+    let active = crate::infrastructure::storage_paths::paths();
+    if path != active.cache_root {
+        return Err(std::io::Error::other(
+            "Cleanup must use the active cache folder",
+        ));
+    }
+    let (entries, bytes) = crate::infrastructure::storage_paths::clear_disposable(active, &pending)
+        .map_err(std::io::Error::other)?;
+    Ok(CacheRemovalSummary { entries, bytes })
 }
 
 pub(super) fn ensure_safe_app_cache_root(path: &Path) -> std::io::Result<()> {
@@ -1656,12 +1914,7 @@ pub(super) fn remove_dir_contents_collecting_summary(
 }
 
 pub(super) fn remove_path(path: &Path) -> std::io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    }
+    crate::infrastructure::storage_paths::remove_owned_tree(path).map_err(std::io::Error::other)
 }
 
 pub(super) fn format_byte_size(bytes: u64) -> String {

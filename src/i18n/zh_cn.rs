@@ -386,9 +386,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "文件操作",
         "options.action_button" => "操作按钮",
         "options.file_action.show_menu" => "显示菜单",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "缓存",
         "options.cache_location" => "缓存位置",
         "options.cache_location.default" => "默认",
+        "options.cache_location.portable" => "应用目录（便携）",
+        "options.cache_location.system_temp" => "系统临时目录",
+        "options.cache_current_folder" => "当前缓存目录",
+        "options.cache_after_restart" => "重启后使用",
+        "options.cache_restart_required" => "需要重启",
+        "options.cache_location_help" => {
+            "更改将在重启后生效。旧缓存保留原位。用量统计和清理仅针对当前目录。状态与恢复数据保存在应用目录中。系统清理可能删除临时文件。"
+        }
+        "options.cache_legacy_notice" => {
+            "旧的“默认”选项现已改为应用目录（便携）。所有应用缓存均使用所选位置。"
+        }
         "options.cache_usage" => "使用量",
         "options.cache_usage_detail" => "总计：{total} · 音频：{audio} · 过期：{expired}",
         "options.cache_cleanup" => "清理",

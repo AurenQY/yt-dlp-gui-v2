@@ -19,6 +19,8 @@ pub struct AppState {
     pub(super) app_mode: AppMode,
     pub item_defaults: DownloadOptions,
     pub config: AppConfig,
+    pub output_draft: crate::infrastructure::output_policy::OutputPreferences,
+    pub output_settings_feedback: String,
     pub runtime_renderer: Option<crate::infrastructure::wgpu_api::RuntimeRendererInfo>,
     pub(super) pending_ui_scale_percent: u16,
     pub options_detail_page: Option<OptionsDetailPage>,
@@ -26,7 +28,14 @@ pub struct AppState {
     pub advance_detail_page: Option<AdvanceDetailPage>,
     pub about_detail_target: AboutDetailTarget,
     pub tool_paths: ToolPaths,
+    #[cfg(test)]
+    pub(super) last_dispatched_download: Option<DownloadRequest>,
+    #[cfg(test)]
+    pub(super) review_capture_stream_preparation: bool,
+    #[cfg(test)]
+    pub(super) review_prepared_stream: Option<ResolvedMusicStream>,
     pub prepare_report: PrepareReport,
+    pub(super) gallery_readiness: super::gallery_readiness_actions::GalleryReadinessState,
     pub(super) prepare_tab_snoozed: bool,
     pub last_action: String,
     pub(super) logs: LogState,
@@ -109,6 +118,12 @@ impl AppState {
         config.app_mode = app_mode.config_value().to_owned();
         config.queue_display_mode = queue_display_mode.config_value().to_owned();
         let mut state = Self {
+            #[cfg(test)]
+            last_dispatched_download: None,
+            #[cfg(test)]
+            review_capture_stream_preparation: false,
+            #[cfg(test)]
+            review_prepared_stream: None,
             runtime_renderer: None,
             active_tab: AppTab::Main,
             url_input: String::new(),
@@ -139,6 +154,8 @@ impl AppState {
                 defaults.embed_chapters = config.chapter_mode.embeds();
                 defaults
             },
+            output_draft: config.output_preferences(),
+            output_settings_feedback: config.output_settings_error.clone().unwrap_or_default(),
             config,
             pending_ui_scale_percent,
             options_detail_page: None,
@@ -147,6 +164,7 @@ impl AppState {
             about_detail_target: AboutDetailTarget::App,
             tool_paths,
             prepare_report: PrepareReport::default(),
+            gallery_readiness: Default::default(),
             prepare_tab_snoozed: false,
             last_action: String::new(),
             logs: LogState::default(),
@@ -197,9 +215,14 @@ impl AppState {
             next_workflow_run_id: 1,
         };
 
+        if let Some(error) = state.cache_storage_error() {
+            state.last_action =
+                format!("Cache storage: {error}. Choose a valid location in Options and restart.");
+        }
         cleanup_applied_update();
         state.restore_saved_queues();
-        state.prepare_report = collect_dependency_presence_report(&state.tool_paths);
+        state.request_gallery_readiness(false);
+        state.prepare_report = collect_dependency_presence_report(&state.tool_paths, None);
         state.sanitize_startup_prepare_component_update_snapshot();
         schedule_startup_transient_cleanup();
         if state.should_open_component_pool_on_startup() {

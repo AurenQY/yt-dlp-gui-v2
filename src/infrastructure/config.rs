@@ -13,6 +13,10 @@ mod document;
 #[path = "config_update_cache.rs"]
 mod update_cache;
 
+#[cfg(test)]
+#[path = "config_cache_tests.rs"]
+mod cache_tests;
+
 pub(crate) use update_cache::{
     read_runtime_component_update_cache, write_runtime_component_update_cache,
 };
@@ -31,6 +35,11 @@ pub struct AppConfig {
     #[serde(alias = "PathTEMP")]
     pub cache_dir: String,
     pub cache_location_mode: SerializableCacheLocationMode,
+    pub output_naming: super::output_policy::OutputNamingMode,
+    pub output_existing_file: super::output_policy::ExistingFilePolicy,
+    pub output_template: String,
+    #[serde(skip)]
+    pub output_settings_error: Option<String>,
     #[serde(alias = "PathYTDLP")]
     pub yt_dlp_path: String,
     pub gallery_dl_path: String,
@@ -128,6 +137,10 @@ pub struct AppConfig {
     pub component_update_cache: Option<serde_yaml::Value>,
     #[serde(skip)]
     config_path: Option<PathBuf>,
+    #[serde(skip)]
+    pub(crate) legacy_cache_notice: bool,
+    #[serde(skip)]
+    pub(crate) cache_settings_error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -890,6 +903,10 @@ impl Default for AppConfig {
             download_dir: String::new(),
             cache_dir: String::new(),
             cache_location_mode: SerializableCacheLocationMode::V2Cache,
+            output_naming: Default::default(),
+            output_existing_file: Default::default(),
+            output_template: "{title}".into(),
+            output_settings_error: None,
             yt_dlp_path: String::new(),
             gallery_dl_path: String::new(),
             yt_dlp_config_path: String::new(),
@@ -958,6 +975,8 @@ impl Default for AppConfig {
             prepare_skipped: false,
             component_update_cache: None,
             config_path: None,
+            legacy_cache_notice: false,
+            cache_settings_error: None,
         }
     }
 }
@@ -980,6 +999,53 @@ fn queue_display_mode_from_app_mode_value(value: &str) -> String {
 }
 
 impl AppConfig {
+    pub fn output_preferences(&self) -> super::output_policy::OutputPreferences {
+        super::output_policy::OutputPreferences {
+            naming: self.output_naming,
+            existing: self.output_existing_file,
+            template: self.output_template.clone(),
+        }
+    }
+    pub fn with_saved_output(
+        &self,
+        preferences: &super::output_policy::OutputPreferences,
+    ) -> Result<Self, String> {
+        preferences.validate()?;
+        let _write_guard = update_cache::lock_config_file();
+        let mut candidate = if let Some(path) = &self.config_path {
+            match fs::read_to_string(path) {
+                Ok(text) => {
+                    let mut latest = document::decode(&text)?;
+                    latest.config_path = Some(path.clone());
+                    latest
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => self.clone(),
+                Err(error) => {
+                    return Err(format!("Could not read current output settings: {error}"));
+                }
+            }
+        } else {
+            self.clone()
+        };
+        candidate.output_naming = preferences.naming;
+        candidate.cache_settings_error = self.cache_settings_error.clone();
+        candidate.legacy_cache_notice = self.legacy_cache_notice;
+        candidate.output_existing_file = preferences.existing;
+        candidate.output_template = preferences.template.clone();
+        if let Some(path) = &candidate.config_path {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            super::yaml_store::atomic_write(path, document::encode(&candidate)?.as_bytes())?;
+        }
+        candidate.output_settings_error = None;
+        Ok(candidate)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_fixture_file(mut self, path: PathBuf) -> Self {
+        self.config_path = Some(path);
+        self
+    }
     pub fn load_runtime() -> (Self, ToolPaths) {
         Self::load_from_path(config_file_path())
     }
@@ -994,10 +1060,18 @@ impl AppConfig {
             .and_then(|content| document::decode(content).ok())
             .unwrap_or_default();
         config.config_path = Some(config_path);
+        config.normalize_cache_mode();
         config.normalize();
         config.queue_display_mode = queue_display_mode_from_app_mode_value(&config.app_mode);
         let tool_paths = config.tool_paths();
-        let _ = config.save();
+        super::storage_paths::initialize(
+            tool_paths.cache_mode,
+            &config.cache_dir,
+            &config.download_dir,
+        );
+        if let Err(error) = config.save() {
+            config.cache_settings_error = Some(error);
+        }
         (config, tool_paths)
     }
 
@@ -1020,7 +1094,47 @@ impl AppConfig {
 
         let content = document::encode(&latest_config)
             .map_err(|error| format!("Could not serialize config file: {error}"))?;
-        fs::write(path, content).map_err(|error| format!("Could not write config file: {error}"))
+        super::yaml_store::atomic_write(path, content.as_bytes())
+    }
+
+    pub(crate) fn with_saved_cache_location(
+        &self,
+        mode: CacheLocationMode,
+    ) -> Result<Self, String> {
+        let mut candidate = self.clone();
+        candidate.cache_location_mode = match mode {
+            CacheLocationMode::V2Cache => SerializableCacheLocationMode::V2Cache,
+            CacheLocationMode::WindowsTemp => SerializableCacheLocationMode::WindowsTemp,
+        };
+        candidate.save()?;
+        candidate.cache_settings_error = None;
+        Ok(candidate)
+    }
+
+    fn normalize_cache_mode(&mut self) {
+        self.legacy_cache_notice =
+            self.cache_location_mode == SerializableCacheLocationMode::YtDlpDefault;
+        if self.legacy_cache_notice {
+            self.cache_location_mode = SerializableCacheLocationMode::V2Cache;
+        }
+    }
+
+    /// Read runner storage preferences without saving settings or initializing GUI storage.
+    pub(crate) fn portable_cache_for_target(target: &Path) -> Result<String, String> {
+        let root = target
+            .parent()
+            .ok_or("Update target has no parent folder")?;
+        let name = target.file_stem().ok_or("Update target has no filename")?;
+        let mut file_name = name.to_os_string();
+        file_name.push(".yaml");
+        let path = root.join(file_name);
+        match fs::read_to_string(&path) {
+            Ok(text) => document::decode(&text)
+                .map(|config| config.cache_dir)
+                .map_err(|e| format!("Could not read target storage preferences: {e}")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+            Err(e) => Err(format!("Could not read target storage preferences: {e}")),
+        }
     }
 
     pub fn set_download_dir(&mut self, path: impl Into<String>) {
@@ -1074,6 +1188,7 @@ impl AppConfig {
 
     fn tool_paths(&self) -> ToolPaths {
         ToolPaths {
+            output_config: None,
             yt_dlp: self.yt_dlp_path.clone(),
             gallery_dl: self.gallery_dl_path.clone(),
             yt_dlp_config: self.yt_dlp_config_path.clone(),
@@ -1109,7 +1224,7 @@ impl AppConfig {
             self.download_dir = normalize_stored_path(&self.download_dir);
         }
 
-        if self.cache_dir.trim().is_empty() || !resolved_path_exists(&self.cache_dir) {
+        if self.cache_dir.trim().is_empty() {
             self.cache_dir = portable_path_string(&app_dir.join("cache"));
         } else {
             self.cache_dir = normalize_stored_path(&self.cache_dir);
@@ -1257,7 +1372,7 @@ impl Default for SerializableCacheLocationMode {
 impl SerializableCacheLocationMode {
     fn into_runtime(self) -> CacheLocationMode {
         match self {
-            Self::YtDlpDefault => CacheLocationMode::YtDlpDefault,
+            Self::YtDlpDefault => CacheLocationMode::V2Cache,
             Self::V2Cache => CacheLocationMode::V2Cache,
             Self::WindowsTemp => CacheLocationMode::WindowsTemp,
         }

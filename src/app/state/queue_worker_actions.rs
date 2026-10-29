@@ -1,6 +1,90 @@
 use super::*;
 
 impl AppState {
+    #[cfg(cache_review_gui)]
+    pub(crate) fn review_output_sample(&mut self, url: &str) {
+        let mut item = self.build_queue_item_from_url(url);
+        let mut metadata = VideoMetadata::empty_preview();
+        metadata.title = "Long English download title - 空间 100%".into();
+        metadata.uploader = "Example uploader 上传者".into();
+        metadata.upload_date_text = "2026-10-27".into();
+        let mut format = FormatOption::new("best", "Fixture MP4", MediaKind::Muxed);
+        format.ext = "mp4".into();
+        format.codec = "mpeg4+aac".into();
+        metadata.formats.push(format);
+        item.title = metadata.title.clone();
+        item.source_media_id = Some("fixture-id".into());
+        item.metadata_state = MetadataState::Ready(metadata);
+        item.selection.video_selector = "best".into();
+        item.selection.file_name = "Long English download title - 空间 100%".into();
+        self.queue_items = vec![item];
+    }
+    #[cfg(cache_review_gui)]
+    pub(crate) fn review_output_download(&mut self) {
+        if let Some(item) = self.queue_items.first() {
+            let id = item.id;
+            if let Err(error) = self.start_download_task_at(id, false) {
+                self.last_action = error;
+            }
+        }
+    }
+    pub fn output_preview_context(
+        &self,
+    ) -> Option<(
+        crate::infrastructure::output_policy::OutputNameContext,
+        String,
+        bool,
+    )> {
+        let index = self
+            .format_picker
+            .target_item_id
+            .filter(|i| *i < self.queue_items.len())
+            .or_else(|| {
+                self.queue_items
+                    .iter()
+                    .position(|item| matches!(&item.backend, QueueBackend::YtDlp))
+            })?;
+        let item = &self.queue_items[index];
+        let request = self.output_request_for_item(item, false);
+        let ext = self
+            .resolved_item_download_container_extension(index)
+            .unwrap_or_else(|| "mp4".into());
+        Some((request.context, ext, !request.automatic))
+    }
+    pub(super) fn output_request_for_item(
+        &self,
+        item: &QueueItem,
+        explicit: bool,
+    ) -> crate::infrastructure::output_policy::OutputRequest {
+        use crate::infrastructure::output_policy::*;
+        let metadata = item.metadata().or(item.music_naming_metadata.as_ref());
+        // Only a validated matching complete-cache manifest supplies a restored
+        // title. Display placeholders remain excluded from naming metadata.
+        let cached = metadata.is_none().then(|| self.complete_music_cache_hit_for_item(item)).flatten();
+        OutputRequest {
+            preferences: self.config.output_preferences(),
+            literal_name: item.selection.file_name.clone(),
+            automatic: !explicit
+                && (item.selection.name_origin == Some(crate::domain::OutputNameOrigin::Automatic)
+                    || (item.selection.name_origin.is_none()
+                        && item.selection.file_name.trim().is_empty())),
+            context: OutputNameContext {
+                resolved: metadata.is_some(),
+                title: metadata.map(|m| m.title.clone()).or_else(|| cached.as_ref().map(|hit| hit.title.clone())).unwrap_or_default(),
+                id: item.source_media_id.clone().unwrap_or_default(),
+                uploader: metadata.map(|m| m.uploader.clone()).unwrap_or_default(),
+                upload_date: metadata
+                    .map(|m| m.upload_date_text.replace('-', ""))
+                    .unwrap_or_default(),
+                source: canonical_queue_source_key(&item.source_url),
+            },
+            transcode: (!explicit
+                && self.config.post_download_conversion_enabled
+                && resolve_transcode_plan(&self.config.transcode_intent).is_executable())
+            .then(|| self.config.transcode_intent.clone()),
+            ..Default::default()
+        }
+    }
     pub(super) fn enqueue_item_analysis(&mut self, item_id: QueueItemId, source: String) {
         let workflow_id = self.alloc_workflow_run_id();
         self.register_active_workflow(
@@ -229,6 +313,7 @@ impl AppState {
 
         let mut request = DownloadRequest {
             target_kind: DownloadTargetKind::Normal,
+            output: self.output_request_for_item(item, false),
             url: source_url.clone(),
             playlist_index: item.playlist_index,
             format_selector,
@@ -268,11 +353,7 @@ impl AppState {
             emit_json,
             output_path: None,
             output_dir: item.selection.output_dir.clone(),
-            file_name: if item.metadata_loaded() {
-                normal_download_base_name(&item.selection.file_name)
-            } else {
-                String::new()
-            },
+            file_name: normal_download_base_name(&item.selection.file_name),
             download_section_args: self.item_download_section_arguments(task_index),
         };
 
@@ -326,6 +407,10 @@ impl AppState {
 
         let tool_paths = self.tool_paths.clone();
         let tx = self.download_result_tx.clone();
+        #[cfg(test)]
+        {
+            self.last_dispatched_download = Some(request.clone());
+        }
         let child_handle = Arc::new(Mutex::new(None));
         let cancel_requested = Arc::new(AtomicBool::new(false));
         self.attach_active_download_process(
@@ -510,6 +595,7 @@ impl AppState {
         let resolved_audio_ext = self.format_extension_by_id(&audio_selector, Some(metadata));
         let mut request = DownloadRequest {
             target_kind: kind,
+            output: self.output_request_for_item(item, true),
             url: source_url.clone(),
             playlist_index: item.playlist_index,
             format_selector: match kind {

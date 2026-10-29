@@ -475,6 +475,7 @@ fn analyze_music_file_if_needed_with_progress(
     duration_hint_seconds: Option<f64>,
     mut progress: Option<&mut dyn FnMut(f32, &'static str)>,
 ) -> Result<(), String> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
     if analysis_is_current(media_path, analysis_path) {
         emit_analysis_progress(&mut progress, 1.0, "current");
         return Ok(());

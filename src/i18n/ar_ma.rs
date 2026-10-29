@@ -423,9 +423,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "إجراءات الملف",
         "options.action_button" => "زر الإجراء",
         "options.file_action.show_menu" => "إظهار القائمة",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "ذاكرة التخزين المؤقت",
         "options.cache_location" => "موقع الذاكرة المؤقتة",
         "options.cache_location.default" => "افتراضي",
+        "options.cache_location.portable" => "مجلد التطبيق (محمول)",
+        "options.cache_location.system_temp" => "مجلد النظام المؤقت",
+        "options.cache_current_folder" => "مجلد التخزين المؤقت الحالي",
+        "options.cache_after_restart" => "بعد إعادة التشغيل",
+        "options.cache_restart_required" => "تلزم إعادة التشغيل",
+        "options.cache_location_help" => {
+            "تسري التغييرات بعد إعادة التشغيل. تبقى الملفات القديمة في مكانها. يشمل الاستخدام والتنظيف المجلد الحالي فقط. تبقى بيانات الحالة والاستعادة في مجلد التطبيق. قد يحذف النظام الملفات المؤقتة."
+        }
+        "options.cache_legacy_notice" => {
+            "يستخدم الخيار الافتراضي القديم الآن مجلد التطبيق (محمول). تتبع جميع ملفات التخزين المؤقت للتطبيق الموقع المحدد."
+        }
         "options.cache_usage" => "الاستخدام",
         "options.cache_usage_detail" => "الإجمالي: {total} · الصوت: {audio} · المنتهي: {expired}",
         "options.cache_cleanup" => "تنظيف",

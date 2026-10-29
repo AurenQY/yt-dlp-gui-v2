@@ -459,9 +459,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "Acciones de archivo",
         "options.action_button" => "Botón de acción",
         "options.file_action.show_menu" => "Mostrar menú",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "Caché",
         "options.cache_location" => "Ubicación de caché",
         "options.cache_location.default" => "Predeterminado",
+        "options.cache_location.portable" => "Carpeta de la aplicación (portátil)",
+        "options.cache_location.system_temp" => "Carpeta temporal del sistema",
+        "options.cache_current_folder" => "Carpeta de caché actual",
+        "options.cache_after_restart" => "Después de reiniciar",
+        "options.cache_restart_required" => "Reinicio necesario",
+        "options.cache_location_help" => {
+            "Los cambios se aplican tras reiniciar. La caché anterior permanece en su ubicación. El uso y la limpieza corresponden a la carpeta actual. Los datos de estado y recuperación permanecen en la carpeta de la aplicación. El sistema puede eliminar archivos temporales."
+        }
+        "options.cache_legacy_notice" => {
+            "La antigua opción Predeterminado ahora usa la carpeta de la aplicación (portátil). Todas las cachés de la aplicación siguen la ubicación seleccionada."
+        }
         "options.cache_usage" => "Uso",
         "options.cache_usage_detail" => "Total: {total} · Audio: {audio} · Caducado: {expired}",
         "options.cache_cleanup" => "Limpieza",

@@ -4,6 +4,7 @@ use std::time::{SystemTime as StdSystemTime, UNIX_EPOCH};
 mod aura_shader;
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(cache_review_gui)");
     aura_shader::compile();
     let build_date = build_date_string();
     emit_build_date(&build_date);

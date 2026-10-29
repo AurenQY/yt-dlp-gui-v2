@@ -2,6 +2,7 @@ use super::*;
 
 impl AppState {
     pub fn poll_background_work(&mut self) {
+        self.poll_gallery_readiness();
         self.poll_media_session_commands();
         self.poll_youtube_login_rescue();
         self.poll_standard_backend_probe();
@@ -262,6 +263,7 @@ impl AppState {
                 Ok(ComponentUpdateEvent::Finished(snapshot)) => {
                     self.component_update_snapshot = snapshot;
                     self.last_action = self.component_update_snapshot.message.clone();
+                    self.request_gallery_readiness(true);
                     self.sync_available_managed_tool_paths_from_update_snapshot();
                     self.refresh_prepare_report();
                     if !self.should_show_prepare_tab() && self.active_tab == AppTab::Prepare {
@@ -274,6 +276,19 @@ impl AppState {
 
         for _ in 0..BACKGROUND_DOWNLOAD_EVENT_BUDGET_PER_POLL {
             match self.download_result_rx.try_recv() {
+                Ok(DownloadEvent::OutputStatus {
+                    item_id,
+                    workflow_id,
+                    detail,
+                }) => {
+                    if let Some(item) = self.queue_item_mut_by_id(item_id) {
+                        if let Some(run) =
+                            item.workflows.iter_mut().find(|run| run.id == workflow_id)
+                        {
+                            run.detail = detail;
+                        }
+                    }
+                }
                 Ok(DownloadEvent::Metadata { item_id, json }) => {
                     self.apply_analysis_json(json, None, Some(item_id), None);
                 }
@@ -491,6 +506,7 @@ impl AppState {
                     // Honor a stop/remove click racing with the worker's final
                     // message, before starting any follow-up post-processing.
                     if self.active_workflow_cancel_requested(message.workflow_id)
+                        && !message.processed_before_publication
                         && message.result.is_ok()
                     {
                         message.result = Err(DOWNLOAD_CANCELLED_MESSAGE.to_owned());
@@ -543,9 +559,7 @@ impl AppState {
                                         DownloadTargetKind::Normal => {
                                             item.progress.video = 100.0;
                                             item.progress.audio = 100.0;
-                                            item.completed_selection = Some(
-                                                CompletedSelection::from_selection(&item.selection),
-                                            );
+                                            if message.disposition == crate::infrastructure::output_policy::OutputDisposition::Published { item.completed_selection = Some(CompletedSelection::from_selection(&item.selection)); }
                                         }
                                         DownloadTargetKind::Video => item.progress.video = 100.0,
                                         DownloadTargetKind::Audio => item.progress.audio = 100.0,
@@ -553,13 +567,16 @@ impl AppState {
                                             item.progress.subtitle = 100.0
                                         }
                                     }
+                                    if message.disposition == crate::infrastructure::output_policy::OutputDisposition::SkippedExisting { run.detail = format!("Skipped existing destination: {output_path}"); } else if message.processed_before_publication { run.detail = format!("Saved as {output_path}"); }
                                     item.last_output_path = Some(output_path.clone());
                                     item.last_error = None;
                                     if matches!(&item.backend, QueueBackend::YtDlp)
                                         && message.workflow_kind == WorkflowKind::DownloadMedia
                                         && message.target_kind == DownloadTargetKind::Normal
                                     {
-                                        pending_post_process_input = Some(output_path.clone());
+                                        if !message.processed_before_publication {
+                                            pending_post_process_input = Some(output_path.clone());
+                                        }
                                     }
                                 }
                                 Err(error) if error == DOWNLOAD_CANCELLED_MESSAGE => {
@@ -588,8 +605,8 @@ impl AppState {
 
                     match message.result {
                         Ok(output_path) => {
-                            self.push_runtime_log(format!("Download finished: {output_path}"));
-                            if !post_process_started {
+                            if message.disposition == crate::infrastructure::output_policy::OutputDisposition::SkippedExisting { self.push_runtime_log(format!("Skipped existing destination: {output_path}")); self.last_action = format!("Skipped existing destination: {output_path}"); } else { self.push_runtime_log(format!("Download finished: {output_path}")); }
+                            if !post_process_started && message.disposition != crate::infrastructure::output_policy::OutputDisposition::SkippedExisting {
                                 self.last_action.clear();
                             }
                         }
@@ -607,10 +624,12 @@ impl AppState {
 
                     self.finish_pending_queue_removal(finished_item_id);
                     if should_send_windows_toast && !post_process_started {
+                        if message.disposition != crate::infrastructure::output_policy::OutputDisposition::SkippedExisting {
                         self.send_download_result_windows_toast(
                             notification_title,
                             notification_result,
                         );
+                        }
                         self.start_next_queued_download_after(finished_item_id);
                     }
                 }
@@ -697,8 +716,8 @@ impl AppState {
                                     run.output_path = Some(output_path.clone());
                                     item.progress.post_process = 100.0;
                                     item.last_output_path = Some(output_path.clone());
-                                    item.completed_selection =
-                                        Some(CompletedSelection::from_selection(&item.selection));
+                                    if message.disposition == crate::infrastructure::output_policy::OutputDisposition::Published { item.completed_selection = Some(CompletedSelection::from_selection(&item.selection)); }
+                                    run.detail = if message.disposition == crate::infrastructure::output_policy::OutputDisposition::SkippedExisting { format!("Skipped existing destination: {output_path}") } else { format!("Saved as {output_path}") };
                                     item.last_error = None;
                                 }
                                 Err(error) if error == POST_PROCESS_CANCELLED_MESSAGE => {
@@ -733,10 +752,14 @@ impl AppState {
                         }
                     }
 
-                    self.send_download_result_windows_toast(
-                        notification_title,
-                        notification_result,
-                    );
+                    if message.disposition
+                        != crate::infrastructure::output_policy::OutputDisposition::SkippedExisting
+                    {
+                        self.send_download_result_windows_toast(
+                            notification_title,
+                            notification_result,
+                        );
+                    }
                     self.finish_pending_queue_removal(finished_item_id);
                     self.start_next_queued_download_after(finished_item_id);
                 }

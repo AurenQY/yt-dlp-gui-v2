@@ -455,9 +455,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "Ενέργειες αρχείου",
         "options.action_button" => "Κουμπί ενέργειας",
         "options.file_action.show_menu" => "Εμφάνιση μενού",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "Κρυφή μνήμη",
         "options.cache_location" => "Θέση cache",
         "options.cache_location.default" => "Προεπιλογή",
+        "options.cache_location.portable" => "Φάκελος εφαρμογής (φορητός)",
+        "options.cache_location.system_temp" => "Προσωρινός φάκελος συστήματος",
+        "options.cache_current_folder" => "Τρέχων φάκελος προσωρινής μνήμης",
+        "options.cache_after_restart" => "Μετά την επανεκκίνηση",
+        "options.cache_restart_required" => "Απαιτείται επανεκκίνηση",
+        "options.cache_location_help" => {
+            "Οι αλλαγές ισχύουν μετά την επανεκκίνηση. Η παλιά προσωρινή μνήμη παραμένει στη θέση της. Η χρήση και ο καθαρισμός αφορούν τον τρέχοντα φάκελο. Τα δεδομένα κατάστασης και ανάκτησης παραμένουν στον φάκελο της εφαρμογής. Το σύστημα μπορεί να διαγράψει προσωρινά αρχεία."
+        }
+        "options.cache_legacy_notice" => {
+            "Η παλιά επιλογή Προεπιλογή χρησιμοποιεί πλέον τον φάκελο εφαρμογής (φορητό). Όλες οι προσωρινές μνήμες της εφαρμογής ακολουθούν την επιλεγμένη τοποθεσία."
+        }
         "options.cache_usage" => "Χρήση",
         "options.cache_usage_detail" => "Σύνολο: {total} · Ήχος: {audio} · Ληγμένα: {expired}",
         "options.cache_cleanup" => "Εκκαθάριση",

@@ -38,6 +38,7 @@ impl AppState {
         let title = infer_title(url, "Untitled task", "Imported {tail}");
         let mut item = QueueItem::new(self.alloc_queue_item_id(), url, title);
         self.apply_queue_item_defaults(&mut item);
+        item.selection.name_origin = Some(crate::domain::OutputNameOrigin::Automatic);
         item
     }
 

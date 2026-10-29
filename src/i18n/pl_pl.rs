@@ -441,9 +441,45 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "options.file_actions" => "Akcje pliku",
         "options.action_button" => "Przycisk akcji",
         "options.file_action.show_menu" => "Pokaż menu",
+        "options.output" => "Download output",
+        "options.output.naming" => "File naming",
+        "options.output.existing" => "Existing files",
+        "options.output.title" => "Title",
+        "options.output.title_id" => "Title + video ID",
+        "options.output.uploader_title_id" => "Uploader + title + video ID",
+        "options.output.custom" => "Custom template",
+        "options.output.keep_both" => "Keep both files",
+        "options.output.skip" => "Skip existing files",
+        "options.output.template" => "Filename template",
+        "options.output.template_help" => {
+            "Fields: {title}, {id}, {uploader}, {upload_date}. Use {{ and }} for literal braces. Folder paths are not allowed."
+        }
+        "options.output.preview" => "Filename preview",
+        "options.output.preview_help" => {
+            "Sample metadata only; no network request. The actual extension and collision suffix are added at download time."
+        }
+        "options.output.unsaved" => {
+            "Unsaved changes. New jobs still use the saved output settings."
+        }
+        "options.output.save" => "Save output settings",
+        "options.output.saved" => "Output settings saved. Applies to new downloads.",
+        "options.output.help" => {
+            "Applies to new automatic downloads. Existing explicit filenames are kept. Gallery downloads keep their own naming rules. Legacy queued names are kept. Keep both adds (2), (3), etc."
+        }
         "options.cache" => "Pamięć podręczna",
         "options.cache_location" => "Lokalizacja pamięci podręcznej",
         "options.cache_location.default" => "Domyślne",
+        "options.cache_location.portable" => "Folder aplikacji (przenośny)",
+        "options.cache_location.system_temp" => "Systemowy folder tymczasowy",
+        "options.cache_current_folder" => "Bieżący folder pamięci podręcznej",
+        "options.cache_after_restart" => "Po ponownym uruchomieniu",
+        "options.cache_restart_required" => "Wymagane ponowne uruchomienie",
+        "options.cache_location_help" => {
+            "Zmiany obowiązują po ponownym uruchomieniu. Stara pamięć podręczna pozostaje na miejscu. Użycie i czyszczenie dotyczą bieżącego folderu. Dane stanu i odzyskiwania pozostają w folderze aplikacji. System może usunąć pliki tymczasowe."
+        }
+        "options.cache_legacy_notice" => {
+            "Dawna opcja Domyślne używa teraz folderu aplikacji (przenośnego). Wszystkie pamięci podręczne aplikacji korzystają z wybranej lokalizacji."
+        }
         "options.cache_usage" => "Użycie",
         "options.cache_usage_detail" => "Razem: {total} · Audio: {audio} · Wygasłe: {expired}",
         "options.cache_cleanup" => "Czyszczenie",

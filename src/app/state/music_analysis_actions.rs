@@ -4880,12 +4880,13 @@ impl AppState {
     }
 
     fn music_stage_cue_memory_path(&self) -> PathBuf {
-        self.app_cache_root_path()
-            .join("state")
-            .join("music-cue-memory.yaml")
+        crate::infrastructure::storage_paths::state_path("music-cue-memory.yaml")
     }
 
     fn ensure_music_stage_cue_memory_loaded(&mut self) {
+        if crate::infrastructure::storage_paths::require_ready().is_err() {
+            return;
+        }
         if self.music.music_stage_cue_memory_loaded {
             return;
         }
@@ -4897,8 +4898,14 @@ impl AppState {
     }
 
     fn save_music_stage_cue_memory(&self) {
+        if crate::infrastructure::storage_paths::require_ready().is_err() {
+            return;
+        }
         let path = self.music_stage_cue_memory_path();
-        if let Err(error) = write_yaml_file(&path, &self.music.music_stage_cue_memory) {
+        if let Err(error) = crate::infrastructure::yaml_store::write_persistent_yaml(
+            &path,
+            &self.music.music_stage_cue_memory,
+        ) {
             eprintln!("[music-stage] cue memory save skipped: {error}");
         }
     }

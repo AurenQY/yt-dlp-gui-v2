@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::Value;
 
 use crate::infrastructure::{
-    configure_background_command, resolve_tool_path, run_tracked_command_output,
+    configure_background_command, resolve_tool_path, run_tracked_command_output_cancellable,
 };
 
 #[allow(dead_code)]
@@ -52,7 +53,11 @@ pub(super) fn ffprobe_companion_path_for_ffmpeg(ffmpeg_path: &Path) -> PathBuf {
 pub(super) fn probe_media_with_ffprobe(
     ffprobe_path: &Path,
     input_path: &Path,
+    cancel: &AtomicBool,
 ) -> Result<MediaProbeInfo, String> {
+    if cancel.load(Ordering::Acquire) {
+        return Err("Media probe cancelled.".into());
+    }
     if !ffprobe_path.is_file() {
         return Err(format!(
             "ffprobe.exe was not found: {}",
@@ -72,7 +77,7 @@ pub(super) fn probe_media_with_ffprobe(
             .arg("-show_streams")
             .arg(input_path)
             .stdin(Stdio::null());
-        run_tracked_command_output(&mut command, "ffprobe media probe")
+        run_tracked_command_output_cancellable(&mut command, "ffprobe media probe", cancel)
             .map_err(|error| format!("Could not start ffprobe: {error}"))?
     };
 

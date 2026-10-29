@@ -87,6 +87,7 @@ impl TargetSelectButton {
         row: xaml_taffy_styles::XamlSingleLineRowLayout,
         ui: &Ui,
         state: &AppState,
+        output_locked: bool,
     ) -> Self {
         let target_text = state.ui_i18n_text_for_key(UiText::TARGET_DIR);
         let element =
@@ -113,11 +114,7 @@ impl TargetSelectButton {
             cell: row.fixed_width_element_cell(element, button_size.width),
             button_size,
             mode,
-            enabled: target_select_enabled(
-                state.app_mode(),
-                item_busy,
-                state.output_dir_locked_by_config(),
-            ),
+            enabled: target_select_enabled(state.app_mode(), item_busy, output_locked),
         }
     }
 

@@ -29,15 +29,29 @@ impl AppState {
     }
 
     pub fn cache_location_display(&self) -> String {
-        match self.tool_paths.cache_mode {
-            CacheLocationMode::YtDlpDefault => "yt-dlp default".to_owned(),
-            CacheLocationMode::V2Cache => {
-                crate::infrastructure::resolve_output_dir(&self.tool_paths.cache_dir)
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|_| self.tool_paths.cache_dir.clone())
+        self.app_cache_root_path().display().to_string()
+    }
+
+    pub fn pending_cache_location_display(&self) -> Option<String> {
+        match crate::infrastructure::storage_paths::pending_root(
+            self.saved_cache_location_mode(),
+            &self.config.cache_dir,
+        ) {
+            Ok(root) if root == self.app_cache_root_path() => None,
+            Ok(root) => Some(root.display().to_string()),
+            Err(_)
+                if self.saved_cache_location_mode()
+                    == crate::infrastructure::storage_paths::paths().active_mode =>
+            {
+                None
             }
-            CacheLocationMode::WindowsTemp => std::env::temp_dir().display().to_string(),
+            Err(error) => Some(error),
         }
+    }
+
+    pub fn cache_storage_error(&self) -> Option<&str> {
+        crate::infrastructure::storage_paths::error()
+            .or(self.config.cache_settings_error.as_deref())
     }
 
     pub fn refresh_cache_management_summary_if_stale(&mut self) {
@@ -72,6 +86,13 @@ impl AppState {
     }
 
     pub fn clear_expired_music_cache(&mut self) {
+        let _guard = match crate::infrastructure::storage_paths::exclusive_cleanup() {
+            Ok(guard) => guard,
+            Err(error) => {
+                self.last_action = error;
+                return;
+            }
+        };
         let root = self.music_stream_cache_root();
         match remove_expired_music_cache_dirs(&root) {
             Ok(summary) => {
@@ -94,7 +115,13 @@ impl AppState {
     }
 
     pub fn clear_music_stream_cache(&mut self) {
-        self.stop_music_playback();
+        let _guard = match crate::infrastructure::storage_paths::exclusive_cleanup() {
+            Ok(guard) => guard,
+            Err(error) => {
+                self.last_action = error;
+                return;
+            }
+        };
         let root = self.music_stream_cache_root();
         match remove_path_contents_or_dir(&root) {
             Ok(summary) => {
@@ -117,7 +144,13 @@ impl AppState {
     }
 
     pub fn clear_app_cache(&mut self) {
-        self.stop_music_playback();
+        let _guard = match crate::infrastructure::storage_paths::exclusive_cleanup() {
+            Ok(guard) => guard,
+            Err(error) => {
+                self.last_action = error;
+                return;
+            }
+        };
         let root = self.app_cache_root_path();
         match remove_safe_app_cache_contents(&root) {
             Ok(summary) => {
@@ -128,6 +161,10 @@ impl AppState {
                     "Cleared app cache: {count} entries ({size}).",
                     &[("{count}", count.as_str()), ("{size}", size.as_str())],
                 );
+                if !crate::infrastructure::storage_paths::protected_update_paths().is_empty() {
+                    self.last_action
+                        .push_str(" Pending update files were kept.");
+                }
             }
             Err(error) => {
                 let error = error.to_string();
@@ -140,7 +177,8 @@ impl AppState {
     }
 
     pub(super) fn app_cache_root_path(&self) -> PathBuf {
-        crate::infrastructure::resolve_output_dir(&self.tool_paths.cache_dir)
-            .unwrap_or_else(|_| PathBuf::from(&self.tool_paths.cache_dir))
+        crate::infrastructure::storage_paths::paths()
+            .cache_root
+            .clone()
     }
 }

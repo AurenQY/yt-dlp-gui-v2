@@ -16,20 +16,24 @@ impl AppState {
     ) -> Option<CompleteMusicCacheHit> {
         let source_key = canonical_queue_source_key(&item.source_url);
         let mut best: Option<(u64, CompleteMusicCacheHit)> = None;
-        let root = self.music_stream_cache_root();
+        let _use = crate::infrastructure::storage_paths::use_cache().ok()?;
+        let root = crate::infrastructure::storage_paths::cache_directory("audio").ok()?;
         let entries = fs::read_dir(&root).ok()?;
         for entry in entries.filter_map(Result::ok) {
             let dir = entry.path();
-            if !dir.is_dir() {
+            if crate::infrastructure::storage_paths::reject_links(&dir).is_err() || !dir.is_dir() {
                 continue;
             }
             let manifest_path = dir.join("manifest.yaml");
+            if crate::infrastructure::storage_paths::reject_links(&manifest_path).is_err() {
+                continue;
+            }
             let Some(manifest) = read_yaml_file::<AudioCacheManifestSnapshot>(&manifest_path)
             else {
                 continue;
             };
             if !audio_cache_manifest_is_fresh(&manifest) {
-                let _ = fs::remove_dir_all(&dir);
+                // Lookup only observes. Expiry is an exclusive cleanup action.
                 continue;
             }
             if !manifest.complete {
@@ -50,6 +54,9 @@ impl AppState {
                 continue;
             }
             let media_path = dir.join(format!("audio.{}", sanitize_music_cache_ext(&ext)));
+            if crate::infrastructure::storage_paths::reject_links(&media_path).is_err() {
+                continue;
+            }
             let media_len = fs::metadata(&media_path)
                 .map(|meta| meta.len())
                 .unwrap_or(0);
@@ -178,6 +185,7 @@ impl AppState {
             infer_title(&source, "Untitled task", "Imported {tail}"),
         );
         self.apply_queue_item_defaults(&mut item);
+        item.selection.name_origin = Some(crate::domain::OutputNameOrigin::Automatic);
         item.view_kind = QueueItemViewKind::MusicCompact;
         item.compact_music_state = Some(CompactMusicState::Ready);
         item.metadata_state = MetadataState::Idle;

@@ -101,6 +101,31 @@ pub(super) fn render_right_info_at(
     }
 
     let mut lines: Vec<SingleInfoLine> = Vec::new();
+    if view.status_lines.iter().any(|(label, _)| label == "Output") {
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+            |ui| {
+                ui.set_clip_rect(rect);
+                ui.set_min_size(rect.size());
+                egui::ScrollArea::vertical()
+                    .id_salt("single-output-feedback")
+                    .max_height(rect.height())
+                    .show(ui, |ui| {
+                        ui.set_max_width(rect.width());
+                        for (label, value) in &view.status_lines {
+                            ui.add(
+                                egui::Label::new(format!("{label}: {value}"))
+                                    .wrap()
+                                    .selectable(true),
+                            );
+                        }
+                    });
+            },
+        );
+        return;
+    }
     if !view.status_lines.is_empty() {
         lines.extend(
             view.status_lines

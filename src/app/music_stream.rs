@@ -33,6 +33,9 @@ use crate::infrastructure::async_http::{self, ClientOptions};
 use crate::infrastructure::yaml_store::{read_yaml_file, write_yaml_file};
 
 const INITIAL_CACHE_BUFFER_BYTES: u64 = 384 * 1024;
+#[cfg(test)]
+#[path = "music_stream_storage_tests.rs"]
+mod storage_tests;
 const INITIAL_CACHE_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 const CACHE_WAIT_STEP: Duration = Duration::from_millis(40);
 const NO_SEEK_MILLIS: u64 = u64::MAX;
@@ -1369,6 +1372,7 @@ fn run_music_stream_prefetch(
     event_tx: Sender<MusicPlaybackEvent>,
     cancel_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
     let paths = music_cache_paths(stream)?;
     fs::create_dir_all(&paths.dir)
         .map_err(|error| format!("Could not create music stream cache: {error}"))?;
@@ -1438,6 +1442,7 @@ fn run_stream_playback(
     cache_state: Arc<CacheTransferState>,
     event_tx: Sender<MusicPlaybackEvent>,
 ) -> Result<(), String> {
+    let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
     let paths = music_cache_paths(&stream)?;
     fs::create_dir_all(&paths.dir)
         .map_err(|error| format!("Could not create music stream cache: {error}"))?;
@@ -1474,7 +1479,9 @@ fn run_stream_playback(
         let log_tx = event_tx.clone();
         let log_item_id = stream.item_id;
         let log_session_id = stream.session_id;
+        let downloader_storage = crate::infrastructure::storage_paths::use_cache()?;
         thread::spawn(move || {
+            let _storage_use = downloader_storage;
             let outcome = run_yt_dlp_cache_downloader_with_cookie_fallback(
                 command,
                 cookie_free_retry_command,
@@ -1503,7 +1510,9 @@ fn run_stream_playback(
         let downloader_paths = paths.clone();
         let downloader_state = cache_state.clone();
         let fallback_stream = MusicHttpCacheDownloadInfo::from_stream(&stream);
+        let downloader_storage = crate::infrastructure::storage_paths::use_cache()?;
         thread::spawn(move || {
+            let _storage_use = downloader_storage;
             if let Err(error) = run_http_cache_downloader(
                 fallback_stream,
                 downloader_paths,
@@ -1778,6 +1787,7 @@ fn music_cache_paths(stream: &ResolvedMusicStream) -> Result<MusicCachePaths, St
     let key = sanitize_cache_key(&stream.cache_key);
     let ext = sanitize_cache_ext(&stream.ext);
     let dir = stream.cache_root.join(key);
+    crate::infrastructure::storage_paths::reject_links(&dir)?;
     Ok(MusicCachePaths {
         media: dir.join(format!("audio.{ext}")),
         cover: dir.join("cover.img"),
@@ -2453,6 +2463,7 @@ fn cache_cover_image_if_needed(stream: &ResolvedMusicStream, paths: &MusicCacheP
     let url = url.to_owned();
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
+            let _storage_use = crate::infrastructure::storage_paths::use_cache()?;
             let client = async_http::build_client(ClientOptions::new("yt-dlp-gui-v2 music cover"))?;
             let data = async_http::block_on(async_http::get_bytes(&client, &url, [], None))
                 .map_err(|error| format!("Could not download cover image: {error}"))?;

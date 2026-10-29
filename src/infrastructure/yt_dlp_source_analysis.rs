@@ -1,8 +1,9 @@
 //! Shared desktop/Native Host routing before full playlist format extraction.
 //! Static evidence is optional; unknown sources use a two-entry flat probe.
 use super::extractor_index::{YtSourceScope, matching_yt_source_scope};
-use super::{AnalyzeError, AnalyzeOutput, ToolPaths, run_tracked_command_output};
+use super::{AnalyzeError, AnalyzeOutput, ToolPaths};
 use serde_json::Value;
+use std::sync::atomic::AtomicBool;
 
 pub(crate) enum DesktopSourceAnalysis {
     Playlist,
@@ -43,25 +44,49 @@ pub(crate) fn analyze_desktop_source(
     url: &str,
     use_cookies: bool,
 ) -> Result<DesktopSourceAnalysis, AnalyzeError> {
+    analyze_desktop_source_cancellable(paths, url, use_cookies, &AtomicBool::new(false))
+}
+
+pub(crate) fn analyze_desktop_source_cancellable(
+    paths: &ToolPaths,
+    url: &str,
+    use_cookies: bool,
+    cancel: &AtomicBool,
+) -> Result<DesktopSourceAnalysis, AnalyzeError> {
     match matching_yt_source_scope(url).map_err(|message| AnalyzeError {
         message,
         command_line: None,
     })? {
         YtSourceScope::Playlist => return Ok(DesktopSourceAnalysis::Playlist),
         YtSourceScope::Single => {
+            let tool = paths
+                .validate_yt_dlp_available()
+                .map_err(|message| AnalyzeError {
+                    message,
+                    command_line: None,
+                })?;
             return paths
-                .analyze_url_detailed(url, use_cookies)
+                .run_analyze_command_cancellable(&tool, url, use_cookies, None, None, None, cancel)
                 .map(DesktopSourceAnalysis::Single);
         }
         YtSourceScope::Any | YtSourceScope::Unknown => {}
     }
-    probe_unknown_source(paths, url, use_cookies)
+    probe_unknown_source_cancellable(paths, url, use_cookies, cancel)
 }
 
 fn probe_unknown_source(
     paths: &ToolPaths,
     url: &str,
     use_cookies: bool,
+) -> Result<DesktopSourceAnalysis, AnalyzeError> {
+    probe_unknown_source_cancellable(paths, url, use_cookies, &AtomicBool::new(false))
+}
+
+fn probe_unknown_source_cancellable(
+    paths: &ToolPaths,
+    url: &str,
+    use_cookies: bool,
+    cancel: &AtomicBool,
 ) -> Result<DesktopSourceAnalysis, AnalyzeError> {
     let (mut command, command_line) = paths
         .prepare_source_probe_command(url, use_cookies)
@@ -73,8 +98,12 @@ fn probe_unknown_source(
         message,
         command_line: Some(command_line.clone()),
     };
-    let output = run_tracked_command_output(&mut command, "yt-dlp source probe")
-        .map_err(|error| failure(format!("Could not start source probe: {error}")))?;
+    let output = super::process_guard::run_tracked_command_output_cancellable(
+        &mut command,
+        "yt-dlp source probe",
+        cancel,
+    )
+    .map_err(|error| failure(format!("Could not start source probe: {error}")))?;
     if !output.status.success() {
         return Err(failure(format!(
             "yt-dlp source probe failed: {}",

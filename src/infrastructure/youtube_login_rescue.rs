@@ -60,6 +60,7 @@ pub struct YoutubeLoginRescueSession {
     pub cdp_websocket_url: Option<String>,
     child: Option<Child>,
     process_guard: Option<TrackedChildProcess>,
+    storage_guard: super::storage_paths::StorageUseGuard,
 }
 
 impl YoutubeLoginRescueSession {
@@ -194,6 +195,7 @@ pub fn launch_youtube_login_rescue_session(
     profile_root_path: PathBuf,
     target_url: &str,
 ) -> Result<YoutubeLoginRescueSession, String> {
+    let storage_guard = super::storage_paths::use_cache()?;
     if !browser.exe_path.is_file() {
         return Err(format!(
             "{} was detected, but the executable was not found: {}",
@@ -239,6 +241,7 @@ pub fn launch_youtube_login_rescue_session(
             cdp_websocket_url,
             child: Some(child),
             process_guard: Some(process_guard),
+            storage_guard,
         }),
         Err(error) => {
             let mut session = YoutubeLoginRescueSession {
@@ -250,6 +253,7 @@ pub fn launch_youtube_login_rescue_session(
                 cdp_websocket_url: None,
                 child: Some(child),
                 process_guard: Some(process_guard),
+                storage_guard,
             };
             let _ = session.close();
             Err(error)

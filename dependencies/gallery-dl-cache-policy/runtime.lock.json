@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "upstream_version": "1.32.18",
+  "upstream_commit": "175d21fd8f7e52963911c02916d0634461cddb24",
+  "archive_sha256": "81dc95e70de160fd9a0f37697f6abdcd838728559efa98765b01d924eb29db98",
+  "patch_revision": 1,
+  "yt_dlp_version": "2026.10.21",
+  "python_version": "3.12.14",
+  "platform": "windows-x86_64",
+  "source_files": {
+    "gallery_dl/downloader/ytdl.py": {
+      "before_sha256": "0d5d83f2e0ca35b31ff8ccfa086a861bbb61ca18a52168d9353ce85534e55104",
+      "after_sha256": "daaa1f03d83eef8e80b546d267edffc19ef5d674ad805ff11fb36996e418d169",
+      "patch": "patches/ytdl.patch",
+      "patch_sha256": "b390e9d9dc6353db7ef8b0975fd6926b1e0a8a932ab3034e481a49fedc2bc3b8"
+    },
+    "gallery_dl/job.py": {
+      "before_sha256": "db74f828ea030945a80300cd7266ca3ce2acbbc444786fed88c40c71dd7e9e7e",
+      "after_sha256": "c7c46ba24bc6bdf4e0b9ba751279182b058baaebfae7a746cef3dac3c45e31c6",
+      "patch": "patches/job.patch",
+      "patch_sha256": "8afa5607b94e0ac6ad95b38922f8dedb1b59915bfe0b68ec8caab02aa9188e17"
+    }
+  },
+  "input_hashes": {
+    "runtime_policy.py": "bf5309a349d789cc1c3a319f5837fce556705daf455d14ad6975cc59e14f0ff1",
+    "entrypoint.py": "b4e0b67f08c1a3a5bdcf4d2040d3f07e124874c06ac9cd209936af0351927d47",
+    "requirements-build.lock": "b70d5b1699b27092b5a960a7f5f1fcc59267c337d41a2940946da0b1bedb1f57",
+    "build.py": "24ba1d068ec5d2e27d9e5e1b8231becc40fe56c965842d225e44e850138861f0",
+    "validate_publication.py": "2a7c8e45fe0721cc9f00e65c65fb702a439d43cd6da844c94d24d4af9e619110",
+    "LICENSE.gallery-dl": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+  },
+  "bundles": [
+    {
+      "bundle_id": "gallery-dl-1.32.18-cache1-b8633ef19b682484",
+      "inventory_sha256": "b8633ef19b6824843111ba1f38170f5bd080a9c10770ae132d05e9ce68159e2b",
+      "platform": "windows-x86_64"
+    }
+  ],
+  "interpreter_data": {
+    "Lib/codex-rejected-cas.pem": "c916ce1b14ed8ca69e9b5c9fab22799a900dd610d6d4ec9b1347f4fd48e53718"
+  }
+}

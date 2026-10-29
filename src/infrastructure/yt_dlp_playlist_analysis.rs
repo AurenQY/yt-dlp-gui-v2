@@ -22,6 +22,12 @@ pub(crate) fn analyze_playlist_formats(
     cancelled: &AtomicBool,
     mut on_item: impl FnMut(Value) -> Result<(), String>,
 ) -> Result<PlaylistAnalysisSummary, AnalyzeError> {
+    let tools = tools
+        .bind_protected_config()
+        .map_err(|message| AnalyzeError {
+            message,
+            command_line: None,
+        })?;
     let limit = item_limit.max(1);
     let mut command = tools
         .prepare_playlist_discovery_command(url, use_cookies, Some(limit.saturating_add(1)))
