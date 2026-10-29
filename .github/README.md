@@ -6,6 +6,14 @@
 
 A graphical frontend for media downloaders.
 
+### About this fork
+
+This is [AurenQY's fork](https://github.com/AurenQY/yt-dlp-gui-v2) of [kannagi0303/yt-dlp-gui-v2](https://github.com/kannagi0303/yt-dlp-gui-v2). Its `master` branch includes changes for cache location handling and output naming and publication (upstream issues #32 and #33). These changes also cover gallery runtime readiness and protected yt-dlp configuration handling.
+
+The combined changes passed review for the source and supplied controlled Windows evidence; installed-package, real-user, and release acceptance were not included. See the [cache review](../docs/reviews/REVIEW_CACHE_LOCATION_ISSUES.md) and [output review](../docs/reviews/REVIEW_ISSUE_33_OUTPUT_ISSUES.md) for details.
+
+The release badges and installation link below point to the upstream project's releases. Those binaries do not necessarily include this fork's changes.
+
 <img src="./screenshot01.png" width="633" alt="yt-dlp-gui screenshot">
 
 ### Overview
