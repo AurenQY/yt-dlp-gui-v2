@@ -93,6 +93,26 @@ pub(super) const FIELDS: &[Field] = &[
         comment: "Download speed limit, for example 5M. Empty means unlimited.",
     },
     Field {
+        source: "limit_rate_schedule.enabled",
+        path: "network.limit_rate_schedule.enabled",
+        comment: "Use a different speed limit during a daily local-time window.",
+    },
+    Field {
+        source: "limit_rate_schedule.start",
+        path: "network.limit_rate_schedule.start",
+        comment: "Window start, local time HH:MM.",
+    },
+    Field {
+        source: "limit_rate_schedule.end",
+        path: "network.limit_rate_schedule.end",
+        comment: "Window end, local time HH:MM. An end before the start spans midnight.",
+    },
+    Field {
+        source: "limit_rate_schedule.rate",
+        path: "network.limit_rate_schedule.rate",
+        comment: "Speed limit inside the window, for example 1M. Empty means unlimited.",
+    },
+    Field {
         source: "use_browser_cookies",
         path: "network.cookies.enabled",
         comment: "Enable cookies for website requests.",
@@ -136,6 +156,21 @@ pub(super) const FIELDS: &[Field] = &[
         source: "concurrent_fragments",
         path: "download.concurrent_fragments",
         comment: "Concurrent fragments per download: 1 | 2 | 4 | 8.",
+    },
+    Field {
+        source: "max_concurrent_downloads",
+        path: "download.max_concurrent",
+        comment: "Parallel yt-dlp downloads in the Standard queue, from 1 to 5. 1 downloads one item at a time.",
+    },
+    Field {
+        source: "auto_retry_count",
+        path: "download.auto_retry",
+        comment: "Automatic retries after transient network errors or HTTP 429, from 0 to 10. 0 disables retries.",
+    },
+    Field {
+        source: "site_rules",
+        path: "download.site_rules",
+        comment: "Per-site download folders: a list of {domain, output_dir}. A domain also matches its subdomains.",
     },
     Field {
         source: "live_from_start",
@@ -186,6 +221,21 @@ pub(super) const FIELDS: &[Field] = &[
         source: "chapter_mode",
         path: "post_process.chapter",
         comment: "Chapter handling: off | download | embed.",
+    },
+    Field {
+        source: "sponsorblock_mode",
+        path: "post_process.sponsorblock.mode",
+        comment: "SponsorBlock: off | mark | remove. mark adds chapters; remove cuts segments with FFmpeg.",
+    },
+    Field {
+        source: "sponsorblock_categories",
+        path: "post_process.sponsorblock.categories",
+        comment: "Comma-separated SponsorBlock categories, for example sponsor,selfpromo,interaction.",
+    },
+    Field {
+        source: "embed_metadata",
+        path: "post_process.embed_metadata",
+        comment: "Embed title, uploader and date metadata into downloaded media.",
     },
     Field {
         source: "post_download_conversion_enabled",
@@ -266,6 +316,26 @@ pub(super) const FIELDS: &[Field] = &[
         source: "batch_limit_count",
         path: "workflow.batch.limit.count",
         comment: "Maximum batch item count when the limit is enabled.",
+    },
+    Field {
+        source: "playlist_match_filter",
+        path: "workflow.batch.match_filter",
+        comment: "yt-dlp --match-filters expression used when expanding playlists, for example duration > 60. Empty disables it.",
+    },
+    Field {
+        source: "history_enabled",
+        path: "workflow.history.enabled",
+        comment: "Record completed downloads in data/history.yaml and mark repeated sources.",
+    },
+    Field {
+        source: "subscriptions_auto_check",
+        path: "workflow.subscriptions.auto_check",
+        comment: "Check subscribed channels and playlists for new items while the app runs.",
+    },
+    Field {
+        source: "subscriptions_interval_hours",
+        path: "workflow.subscriptions.interval_hours",
+        comment: "Hours between automatic subscription checks, from 1 to 168.",
     },
     Field {
         source: "music_volume",

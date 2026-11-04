@@ -3,7 +3,8 @@ use egui_taffy::Tui;
 
 use crate::app::state::{AdvanceDetailPage, AppState};
 use crate::app::widgets::icon::AppIcon;
-use crate::infrastructure::PostProcessMode;
+use crate::app::widgets::url_input::{AppTextBox, AppTextBoxSyntax};
+use crate::infrastructure::{PostProcessMode, SponsorBlockMode};
 
 use super::common::{settings_taffy_form_row, settings_taffy_section, text_trailing_icon_button};
 
@@ -58,6 +59,29 @@ pub(super) fn render_post_processing_section(
             settings_taffy_form_row(
                 tui,
                 label_width,
+                state.ui_i18n_text_for_key("advance.sponsorblock"),
+                |ui| render_sponsorblock_controls(ui, state),
+            );
+            settings_taffy_form_row(
+                tui,
+                label_width,
+                state.ui_i18n_text_for_key("advance.metadata"),
+                |ui| {
+                    let mut enabled = state.config.embed_metadata;
+                    if ui
+                        .checkbox(
+                            &mut enabled,
+                            state.ui_i18n_text_for_key("advance.embed_metadata"),
+                        )
+                        .changed()
+                    {
+                        state.set_embed_metadata(enabled);
+                    }
+                },
+            );
+            settings_taffy_form_row(
+                tui,
+                label_width,
                 state.ui_i18n_text_for_key("advance.download_conversion"),
                 |ui| {
                     ui.horizontal_wrapped(|ui| {
@@ -101,6 +125,41 @@ fn post_process_mode_selector(
             if response.clicked() && current != mode {
                 set_mode(state, mode);
             }
+        }
+    });
+}
+
+fn render_sponsorblock_controls(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.vertical(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            let current = state.config.sponsorblock_mode;
+            for mode in SponsorBlockMode::variants() {
+                let response = ui.selectable_label(
+                    current == mode,
+                    state.ui_i18n_text_for_key(mode.label_key()),
+                );
+                if response.clicked() && current != mode {
+                    state.set_sponsorblock_mode(mode);
+                }
+            }
+        });
+        if state.config.sponsorblock_mode != SponsorBlockMode::Off {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(state.ui_i18n_text_for_key("advance.sponsorblock_categories"));
+                let mut categories = state.config.sponsorblock_categories.clone();
+                if AppTextBox::new(&mut categories)
+                    .hint_text(crate::infrastructure::DEFAULT_SPONSORBLOCK_CATEGORIES)
+                    .language(state.language())
+                    .syntax(AppTextBoxSyntax::Plain)
+                    .desired_width(
+                        super::semantic_ui_metrics::advance_form_standard_text_field_width(),
+                    )
+                    .ui(ui)
+                    .changed()
+                {
+                    state.set_sponsorblock_categories(&categories);
+                }
+            });
         }
     });
 }

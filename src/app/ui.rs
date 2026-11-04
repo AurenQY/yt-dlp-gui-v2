@@ -34,6 +34,7 @@ mod item_card_template;
 mod item_card_thumbnail;
 mod prepare_tab;
 mod prepare_tab_template;
+mod queue_tools;
 mod single_mode;
 mod single_mode_format_rows;
 mod single_mode_gallery;
@@ -71,6 +72,7 @@ mod options_cache;
 mod options_formats;
 mod options_language;
 mod options_layout;
+mod options_library;
 mod options_output;
 mod options_prompts;
 mod options_tab;
@@ -167,6 +169,8 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
         || state.gallery_backend_prompt_open()
         || state.music_download_prompt_open()
         || state.youtube_login_rescue_dialog_visible();
+    queue_tools::handle_dropped_files(root_ui.ctx(), state, prompt_open);
+    queue_tools::handle_main_shortcuts(root_ui.ctx(), state, prompt_open);
     if state.active_tab == AppTab::Prepare && !state.should_show_prepare_tab() {
         state.active_tab = AppTab::Main;
     }
@@ -259,6 +263,7 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
             });
         });
 
+    queue_tools::paint_drop_overlay(root_ui.ctx(), state);
     options_prompts::render_youtube_playlist_prompt(root_ui.ctx(), state);
     options_prompts::render_gallery_downloader_choice_prompt(root_ui.ctx(), state);
     options_prompts::render_gallery_backend_prompt(root_ui.ctx(), state);

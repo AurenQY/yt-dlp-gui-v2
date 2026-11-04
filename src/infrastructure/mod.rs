@@ -13,6 +13,7 @@ mod component_update;
 mod config;
 pub(crate) mod cookie_site_index;
 mod cookie_site_scope;
+pub(crate) mod download_history;
 pub(crate) mod edition;
 pub(crate) mod extractor_index;
 mod gallery_browser_stream;
@@ -20,6 +21,7 @@ pub(crate) mod gallery_dl;
 pub(crate) mod gallery_runtime_policy;
 pub(crate) mod gallery_xmp;
 pub(crate) mod gallery_xmp_packet;
+pub(crate) mod local_time;
 mod media_session;
 mod notification;
 pub(crate) mod operation_diagnostics;
@@ -45,12 +47,15 @@ pub(crate) mod output_transaction;
 pub(crate) mod startup_diagnostics;
 pub(crate) mod storage_migration;
 pub(crate) mod storage_paths;
+pub(crate) mod subscriptions;
+pub(crate) mod system_power;
 mod tool_install;
 mod tools;
 #[cfg(any(test, cache_review_gui))]
 pub(crate) use tools::output_config_observation_counts;
 #[cfg(test)]
 pub(crate) use tools::output_config_read_count;
+pub(crate) mod url_import;
 pub(crate) mod wgpu_api;
 pub(crate) mod xmp;
 pub(crate) mod yaml_store;
@@ -73,6 +78,11 @@ pub use config::{
     TranscodeIntentMode, TranscodeIntentSettings, TranscodeSettingKey, UnknownFilesizeFormatPolicy,
     VideoCodecPolicy, WindowPosition, WindowSize, YoutubeVideoPlaylistMode,
     available_yt_dlp_config_files, normalize_ui_scale_percent, yt_dlp_configs_dir_display,
+};
+pub use config::{
+    DEFAULT_SPONSORBLOCK_CATEGORIES, MAX_AUTO_RETRY_COUNT, MAX_CONCURRENT_DOWNLOADS,
+    MAX_SUBSCRIPTION_INTERVAL_HOURS, RateLimitSchedule, SiteRule, SponsorBlockMode,
+    normalize_max_concurrent_downloads, url_host,
 };
 pub use edition::{
     load_current_runtime_edition, parse_edition_command, run_edition_command, runtime_window_title,

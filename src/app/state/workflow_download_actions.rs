@@ -174,12 +174,82 @@ impl AppState {
     }
 
     pub(super) fn has_running_download_workflow(&self) -> bool {
-        self.active_workflows.values().any(|workflow| {
-            matches!(
-                workflow.kind,
-                WorkflowKind::DownloadMedia | WorkflowKind::ExportMedia | WorkflowKind::PostProcess
+        self.active_workflows
+            .values()
+            .any(|workflow| is_download_slot_workflow(workflow.kind))
+    }
+
+    pub(super) fn running_download_workflow_count(&self) -> usize {
+        self.active_workflows
+            .values()
+            .filter(|workflow| is_download_slot_workflow(workflow.kind))
+            .count()
+    }
+
+    /// Effective parallel download limit. Origin and Audio queues keep their
+    /// single-item pipelines; only Standard yt-dlp queues run in parallel.
+    pub fn max_parallel_downloads(&self) -> usize {
+        if self.app_mode == AppMode::Origin || self.queue_mode_downloads_as_audio() {
+            1
+        } else {
+            crate::infrastructure::normalize_max_concurrent_downloads(
+                self.config.max_concurrent_downloads,
             )
-        })
+        }
+    }
+
+    /// Whether another download may start now. gallery-dl jobs share a work
+    /// area and stay exclusive: they start only when nothing else runs, and
+    /// nothing else starts while one runs.
+    pub(super) fn can_start_download_for_backend(&self, gallery: bool) -> bool {
+        let running_gallery_flags = self
+            .active_workflows
+            .values()
+            .filter(|workflow| is_download_slot_workflow(workflow.kind))
+            .map(|workflow| matches!(workflow.tool, ToolKind::Other(_)))
+            .collect::<Vec<_>>();
+        download_slot_available(
+            &running_gallery_flags,
+            gallery,
+            self.max_parallel_downloads(),
+        )
+    }
+
+    /// Start queued items until every parallel download slot is in use.
+    /// Each candidate is attempted once, so preflight failures cannot loop.
+    pub(super) fn fill_download_slots(&mut self, finished_item_id: Option<QueueItemId>) {
+        if self.app_mode == AppMode::Origin {
+            return;
+        }
+        let candidates = self
+            .queue_items
+            .iter()
+            .filter(|item| Some(item.id) != finished_item_id)
+            .filter(|item| item_latest_download_state(item).is_some_and(is_pending_download_state))
+            .map(|item| (item.id, matches!(&item.backend, QueueBackend::GalleryDl(_))))
+            .collect::<Vec<_>>();
+        for (item_id, gallery) in candidates {
+            if !self.can_start_download_for_backend(gallery) {
+                if gallery {
+                    // Keep queue order: a gallery job waits for the running jobs.
+                    break;
+                }
+                if !self.can_start_download_for_backend(false) {
+                    break;
+                }
+                continue;
+            }
+            if self.queue_mode_downloads_as_audio() {
+                if let Some(choice) = self.music.active_music_download_choice {
+                    let _ = self.start_music_download_task_at(item_id, choice);
+                    continue;
+                }
+            }
+            let emit_json = self
+                .queue_item_by_id(item_id)
+                .is_some_and(|item| !item.metadata_loaded());
+            let _ = self.start_download_task_at(item_id, emit_json);
+        }
     }
 
     pub(super) fn queue_structure_mutation_blocked(&mut self, action: &str) -> bool {
@@ -289,33 +359,7 @@ impl AppState {
         if self.app_mode == AppMode::Origin {
             return;
         }
-        if self.has_running_download_workflow() {
-            return;
-        }
-
-        let Some(next_item_id) = self
-            .queue_items
-            .iter()
-            .find(|item| {
-                item.id != finished_item_id
-                    && item_latest_download_state(item).is_some_and(is_pending_download_state)
-            })
-            .map(|item| item.id)
-        else {
-            return;
-        };
-
-        if self.queue_mode_downloads_as_audio() {
-            if let Some(choice) = self.music.active_music_download_choice {
-                let _ = self.start_music_download_task_at(next_item_id, choice);
-                return;
-            }
-        }
-
-        let emit_json = self
-            .queue_item_by_id(next_item_id)
-            .is_some_and(|item| !item.metadata_loaded());
-        let _ = self.start_download_task_at(next_item_id, emit_json);
+        self.fill_download_slots(Some(finished_item_id));
     }
 
     pub fn active_workflow_count(&self) -> usize {
@@ -484,5 +528,50 @@ impl AppState {
                 .is_some(),
             DownloadTargetKind::Normal => false,
         }
+    }
+}
+
+fn is_download_slot_workflow(kind: WorkflowKind) -> bool {
+    matches!(
+        kind,
+        WorkflowKind::DownloadMedia | WorkflowKind::ExportMedia | WorkflowKind::PostProcess
+    )
+}
+
+/// Slot rule: `running` lists whether each running download is a gallery-dl
+/// job. Gallery jobs never share; other jobs share up to `max_parallel`.
+fn download_slot_available(running: &[bool], starting_gallery: bool, max_parallel: usize) -> bool {
+    if running.is_empty() {
+        return true;
+    }
+    if starting_gallery || running.iter().any(|gallery| *gallery) {
+        return false;
+    }
+    running.len() < max_parallel.max(1)
+}
+
+#[cfg(test)]
+mod parallel_slot_tests {
+    use super::download_slot_available;
+
+    #[test]
+    fn serial_limit_matches_previous_behavior() {
+        assert!(download_slot_available(&[], false, 1));
+        assert!(!download_slot_available(&[false], false, 1));
+        assert!(!download_slot_available(&[false], false, 0));
+    }
+
+    #[test]
+    fn yt_dlp_jobs_share_up_to_limit() {
+        assert!(download_slot_available(&[false, false], false, 3));
+        assert!(!download_slot_available(&[false, false, false], false, 3));
+    }
+
+    #[test]
+    fn gallery_jobs_stay_exclusive() {
+        assert!(download_slot_available(&[], true, 3));
+        assert!(!download_slot_available(&[false], true, 3));
+        assert!(!download_slot_available(&[true], false, 3));
+        assert!(!download_slot_available(&[true], true, 3));
     }
 }

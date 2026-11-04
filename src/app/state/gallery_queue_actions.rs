@@ -1106,7 +1106,7 @@ impl AppState {
         ) {
             return Ok(());
         }
-        if self.has_running_download_workflow() {
+        if !self.can_start_download_for_backend(true) {
             return Err("A download is already running.".to_owned());
         }
         let Some(item) = self.queue_item_by_id(item_id) else {

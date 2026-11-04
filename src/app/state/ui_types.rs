@@ -92,6 +92,9 @@ pub struct MusicPlayerAuraDisplay {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OptionsDetailPage {
     Language,
+    History,
+    Subscriptions,
+    SiteRules,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

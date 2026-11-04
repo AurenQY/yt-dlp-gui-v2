@@ -20,9 +20,11 @@ pub(super) struct QueueCardActions {
 
 enum QueueNode {
     Toolbar,
+    Tools,
     Pool(Box<TemplateNode<QueueNode>>),
     Item { index: usize, id: u64 },
     Empty,
+    NoMatch,
 }
 
 pub(super) fn show_batch_list(
@@ -37,13 +39,21 @@ pub(super) fn show_batch_list(
         items.push(auto(block(QueueNode::Empty)));
     } else {
         for (index, item) in state.queue_items.iter().enumerate() {
+            if !state.queue_item_matches_filter(index) {
+                continue;
+            }
             items.push(auto(block(QueueNode::Item { index, id: item.id })));
             items.push(gap(spacing));
+        }
+        if items.is_empty() {
+            items.push(auto(block(QueueNode::NoMatch)));
         }
     }
     items.push(gap(bottom_safe_area.max(0.0)));
     let template = rows(vec![
         auto(block(QueueNode::Toolbar)),
+        gap(spacing),
+        auto(block(QueueNode::Tools)),
         gap(spacing),
         fill(block(QueueNode::Pool(Box::new(rows(items))))),
     ]);
@@ -84,6 +94,14 @@ fn show_queue_node(
 ) {
     match node {
         QueueNode::Toolbar => show_template_tui_block(slot, tui, |tui| show_toolbar(tui, state)),
+        QueueNode::Tools => show_template_tui_block(slot, tui, |tui| {
+            tui.style(xaml_taffy_styles::xaml_auto_height_block_style())
+                .ui(|ui| super::queue_tools::render_queue_tools_row(ui, state));
+        }),
+        QueueNode::NoMatch => show_template_tui_block(slot, tui, |tui| {
+            tui.style(xaml_taffy_styles::xaml_auto_height_block_style())
+                .ui(|ui| super::queue_tools::render_no_match_notice(ui, state));
+        }),
         QueueNode::Pool(tree) => {
             show_vertical_scroll_template(slot, tui, *tree, &mut |slot, node, tui| {
                 show_queue_node(slot, node, tui, state, music_progress, actions);
@@ -176,6 +194,17 @@ fn show_toolbar(tui: &mut Tui, state: &mut AppState) {
         state.ui_i18n_text_for_key("item.clear_all"),
     );
     let size = row.measure_auto_width_element(button).size;
+    let retry_button = semantic_ui_metrics::xaml_icon_text_button_ui_element_for_visible_text(
+        ui,
+        state.ui_i18n_text_for_key("queue.retry_failed"),
+    );
+    let retry_size = row.measure_auto_width_element(retry_button).size;
+    let import_button = semantic_ui_metrics::xaml_icon_text_button_ui_element_for_visible_text(
+        ui,
+        state.ui_i18n_text_for_key("queue.import"),
+    );
+    let import_size = row.measure_auto_width_element(import_button).size;
+    let show_retry = !state.queue_display_mode_is_audio();
     row.show(tui, |tui| {
         row.star_width_element_cell(
             super::xaml_layout_contracts::UiElement::stretch_width_stretch_height(
@@ -189,6 +218,16 @@ fn show_toolbar(tui: &mut Tui, state: &mut AppState) {
             1.0,
         )
         .show(tui, |ui| item_card::render_queue_summary(ui, state));
+        if show_retry {
+            row.fixed_width_element_cell(retry_button, retry_size.width)
+                .show(tui, |ui| {
+                    super::queue_tools::render_retry_failed_button(ui, state)
+                });
+        }
+        row.fixed_width_element_cell(import_button, import_size.width)
+            .show(tui, |ui| {
+                super::queue_tools::render_import_button(ui, state)
+            });
         row.fixed_width_element_cell(button, size.width)
             .show(tui, |ui| item_card::render_clear_queue_button(ui, state));
     });

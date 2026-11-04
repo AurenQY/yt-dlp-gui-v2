@@ -603,6 +603,16 @@ impl AppState {
                                 )
                             });
 
+                    if let Ok(output_path) = &message.result {
+                        if !post_process_started
+                            && message.workflow_kind == WorkflowKind::DownloadMedia
+                            && message.disposition
+                                == crate::infrastructure::output_policy::OutputDisposition::Published
+                        {
+                            self.record_download_history(message.item_id, output_path);
+                        }
+                    }
+
                     match message.result {
                         Ok(output_path) => {
                             if message.disposition == crate::infrastructure::output_policy::OutputDisposition::SkippedExisting { self.push_runtime_log(format!("Skipped existing destination: {output_path}")); self.last_action = format!("Skipped existing destination: {output_path}"); } else { self.push_runtime_log(format!("Download finished: {output_path}")); }
@@ -732,6 +742,14 @@ impl AppState {
                                     item.completed_selection = None;
                                 }
                             }
+                        }
+                    }
+
+                    if let Ok(output_path) = &message.result {
+                        if message.disposition
+                            == crate::infrastructure::output_policy::OutputDisposition::Published
+                        {
+                            self.record_download_history(message.item_id, output_path);
                         }
                     }
 
@@ -895,19 +913,15 @@ impl AppState {
 
         self.enqueue_download_ready_items();
 
-        let Some(item_id) = self
+        if !self
             .queue_items
             .iter()
-            .find(|item| item_latest_download_state(item).is_some_and(is_pending_download_state))
-            .map(|item| item.id)
-        else {
+            .any(|item| item_latest_download_state(item).is_some_and(is_pending_download_state))
+        {
             self.last_action = "There are no runnable batch items.".to_owned();
             return;
-        };
+        }
 
-        let emit_json = self
-            .queue_item_by_id(item_id)
-            .is_some_and(|item| !item.metadata_loaded());
-        let _ = self.start_download_task_at(item_id, emit_json);
+        self.fill_download_slots(None);
     }
 }

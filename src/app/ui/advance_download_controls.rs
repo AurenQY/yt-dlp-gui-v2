@@ -56,6 +56,56 @@ pub(super) fn render_download_processing_section(
             ) {
                 state.set_concurrent_fragments(value);
             }
+            let parallel = state.config.max_concurrent_downloads;
+            let parallel_options = (1..=crate::infrastructure::MAX_CONCURRENT_DOWNLOADS)
+                .map(|value| SettingsSelectOption::new(value, value.to_string()))
+                .collect::<Vec<_>>();
+            if let Some(value) = settings_select_row(
+                tui,
+                form,
+                state.ui_i18n_text_for_key("advance.parallel_downloads"),
+                "parallel-downloads",
+                parallel,
+                &parallel.to_string(),
+                &parallel_options,
+            ) {
+                state.set_max_concurrent_downloads(value);
+            }
+            let retry = state.config.auto_retry_count;
+            let retry_label = |state: &AppState, value: usize| {
+                if value == 0 {
+                    state
+                        .ui_i18n_text_for_key("advance.auto_retry_off")
+                        .to_owned()
+                } else {
+                    state.ui_i18n_text_with_replacements(
+                        "advance.auto_retry_times",
+                        &[("{count}", &value.to_string())],
+                    )
+                }
+            };
+            let retry_options = [
+                0usize,
+                1,
+                2,
+                3,
+                5,
+                crate::infrastructure::MAX_AUTO_RETRY_COUNT,
+            ]
+            .into_iter()
+            .map(|value| SettingsSelectOption::new(value, retry_label(state, value)))
+            .collect::<Vec<_>>();
+            if let Some(value) = settings_select_row(
+                tui,
+                form,
+                state.ui_i18n_text_for_key("advance.auto_retry"),
+                "auto-retry-count",
+                retry,
+                &retry_label(state, retry),
+                &retry_options,
+            ) {
+                state.set_auto_retry_count(value);
+            }
             if let Some(enabled) = settings_toggle_row(
                 tui,
                 form,
@@ -82,6 +132,12 @@ pub(super) fn render_download_processing_section(
                 state.set_limit_rate(limit_rate);
             }
                 },
+            );
+            settings_flexible_form_row(
+                tui,
+                form,
+                state.ui_i18n_text_for_key("advance.scheduled_rate"),
+                |ui| render_scheduled_rate_controls(ui, state),
             );
             if let Some(enabled) = settings_toggle_row(
                 tui,
@@ -125,3 +181,48 @@ pub(super) fn render_download_processing_section(
         },
     );
 }
+
+fn render_scheduled_rate_controls(ui: &mut eframe::egui::Ui, state: &mut AppState) {
+    let mut schedule = state.config.limit_rate_schedule.clone();
+    let mut changed = false;
+    let language = state.language();
+    ui.horizontal_wrapped(|ui| {
+        changed |= ui
+            .checkbox(
+                &mut schedule.enabled,
+                state.ui_i18n_text_for_key("options.enable"),
+            )
+            .changed();
+        for (value, hint) in [(&mut schedule.start, "09:00"), (&mut schedule.end, "18:00")] {
+            let response = AppTextBox::new(value)
+                .hint_text(hint)
+                .language(language)
+                .syntax(AppTextBoxSyntax::Plain)
+                .desired_width(SCHEDULE_TIME_FIELD_WIDTH)
+                .enabled(schedule.enabled)
+                .ui(ui);
+            // Commit clock times when editing ends; partial input stays local.
+            changed |= response.lost_focus();
+        }
+        ui.label(state.ui_i18n_text_for_key("advance.rate_limit"));
+        changed |= AppTextBox::new(&mut schedule.rate)
+            .hint_text(state.ui_i18n_text_for_key("advance.e_g_2m_800k_leave_empty_for_unlimited"))
+            .language(language)
+            .syntax(AppTextBoxSyntax::Plain)
+            .desired_width(semantic_ui_metrics::advance_form_standard_text_field_width())
+            .enabled(schedule.enabled)
+            .ui(ui)
+            .changed();
+        if schedule.enabled && state.active_scheduled_rate_limit().is_some() {
+            ui.label(state.ui_i18n_text_for_key("advance.scheduled_rate_active"));
+        }
+    });
+    if changed {
+        state.set_limit_rate_schedule(schedule.normalized());
+    } else if schedule != state.config.limit_rate_schedule {
+        // Keep in-progress time edits until focus leaves the field.
+        state.config.limit_rate_schedule = schedule;
+    }
+}
+
+const SCHEDULE_TIME_FIELD_WIDTH: f32 = 52.0;

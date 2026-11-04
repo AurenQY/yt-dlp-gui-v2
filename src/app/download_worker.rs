@@ -135,7 +135,7 @@ pub(super) fn run_download_worker(
     cancel_requested: Arc<AtomicBool>,
 ) {
     let policy = DownloadResiliencePolicy::default();
-    let mut context = DownloadAttemptContext::new();
+    let mut context = DownloadAttemptContext::with_network_retries(tool_paths.auto_retry_count);
     let mut current_request = request.clone();
     current_request.output.cancel = cancel_requested.clone();
     let status_tx = tx.clone();
@@ -257,6 +257,41 @@ pub(super) fn run_download_worker(
                     true,
                 );
                 break Ok(output_path);
+            }
+            RecoveryDecision::RetryAfterBackoff {
+                action,
+                attempt,
+                max_attempts,
+                delay,
+            } => {
+                let detail = format!(
+                    "{}; waiting {}s before retry {attempt}/{max_attempts}",
+                    failure.message.lines().last().unwrap_or_default().trim(),
+                    delay.as_secs()
+                );
+                eprintln!("[download] {action}: {detail}");
+                emit_recovery_step(
+                    &tx,
+                    item_id,
+                    workflow_id,
+                    current_request.target_kind,
+                    action,
+                    &detail,
+                    true,
+                    false,
+                );
+                context.mark_network_retry();
+                if !wait_before_retry(
+                    &tx,
+                    item_id,
+                    workflow_id,
+                    delay,
+                    attempt,
+                    max_attempts,
+                    &cancel_requested,
+                ) {
+                    break Err(DOWNLOAD_CANCELLED_MESSAGE.to_owned());
+                }
             }
             RecoveryDecision::LogOnly { action, detail } => {
                 emit_recovery_step(
@@ -485,6 +520,40 @@ fn process_one_staged_output(
             e
         }
     })
+}
+
+/// Sleep for `delay` in short steps; returns false when the user cancels.
+/// The item shows the countdown through its workflow detail line.
+fn wait_before_retry(
+    tx: &mpsc::Sender<DownloadEvent>,
+    item_id: QueueItemId,
+    workflow_id: WorkflowRunId,
+    delay: Duration,
+    attempt: usize,
+    max_attempts: usize,
+    cancel_requested: &AtomicBool,
+) -> bool {
+    let deadline = std::time::Instant::now() + delay;
+    let mut last_reported = u64::MAX;
+    loop {
+        if cancel_requested.load(Ordering::Relaxed) {
+            return false;
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return true;
+        }
+        let remaining = deadline.duration_since(now).as_secs() + 1;
+        if remaining != last_reported {
+            last_reported = remaining;
+            let _ = tx.send(DownloadEvent::OutputStatus {
+                item_id,
+                workflow_id,
+                detail: format!("Retrying in {remaining}s ({attempt}/{max_attempts})"),
+            });
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
 }
 
 fn emit_recovery_step(

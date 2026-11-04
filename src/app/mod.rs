@@ -24,6 +24,7 @@ mod post_process_worker;
 mod queue_status;
 pub(crate) mod site_icon;
 pub mod state;
+mod taskbar_progress;
 mod thumbnail_pixels;
 mod thumbnail_worker;
 mod transcode_graph;
@@ -72,6 +73,7 @@ pub struct NgDlpApp {
     observed_font_content_revision: u64,
     startup_focus_requested: bool,
     startup_diagnostics_first_frame_logged: bool,
+    taskbar: taskbar_progress::TaskbarProgressIndicator,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,6 +197,7 @@ impl NgDlpApp {
             observed_font_content_revision: 0,
             startup_focus_requested: false,
             startup_diagnostics_first_frame_logged: false,
+            taskbar: taskbar_progress::TaskbarProgressIndicator::new(cc),
         }
     }
 }
@@ -439,6 +442,8 @@ impl eframe::App for NgDlpApp {
         self.request_startup_focus(ctx);
         self.state.sync_window_state(ctx);
         self.state.poll_background_work();
+        self.state.poll_productivity();
+        self.taskbar.update(self.state.taskbar_progress());
         self.refresh_dynamic_font_scripts();
         self.apply_fonts(ctx);
         self.state.poll_thumbnail_work(ctx);
@@ -449,6 +454,9 @@ impl eframe::App for NgDlpApp {
             ctx.request_repaint_after(Duration::from_millis(250));
         } else if self.state.clipboard_monitor_enabled() {
             ctx.request_repaint_after(Duration::from_millis(800));
+        }
+        if let Some(interval) = self.state.productivity_repaint_interval() {
+            ctx.request_repaint_after(interval);
         }
     }
 

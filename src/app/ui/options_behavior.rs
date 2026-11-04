@@ -121,6 +121,7 @@ pub(super) fn render_playlist_group(tui: &mut Tui, state: &mut AppState, form: S
                     }
                 },
             );
+            super::options_library::render_playlist_filter_row(tui, state, form);
         },
     );
 }

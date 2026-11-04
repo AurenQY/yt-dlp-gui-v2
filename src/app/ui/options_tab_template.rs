@@ -16,6 +16,7 @@ enum OptionsRootNode {
     FormatList,
     Tabs,
     Playlist,
+    Library,
     FileAction,
     Cache,
     Output,
@@ -47,6 +48,7 @@ fn options_root_template() -> OptionsRootTemplate {
         OptionsRootNode::FormatList,
         OptionsRootNode::Tabs,
         OptionsRootNode::Playlist,
+        OptionsRootNode::Library,
         OptionsRootNode::FileAction,
         OptionsRootNode::Cache,
         OptionsRootNode::Output,
@@ -91,6 +93,7 @@ fn show_options_root_block(
         OptionsRootNode::Playlist => {
             super::options_behavior::render_playlist_group(tui, state, form)
         }
+        OptionsRootNode::Library => super::options_library::render_library_group(tui, state, form),
         OptionsRootNode::FileAction => {
             super::options_behavior::render_file_action_group(tui, state, form)
         }
