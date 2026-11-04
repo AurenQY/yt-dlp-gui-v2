@@ -178,7 +178,7 @@ impl AppState {
             use_cookies: self.should_use_cookies_for_item(item_id),
         };
 
-        let tool_paths = self.tool_paths.clone();
+        let tool_paths = self.download_dispatch_tool_paths();
         let tx = self.music_download_event_tx.clone();
         let child_handle = Arc::new(Mutex::new(None));
         let cancel_requested = Arc::new(AtomicBool::new(false));

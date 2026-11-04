@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DownloadErrorKind {
     TransientNetwork,
@@ -71,20 +73,51 @@ pub(super) enum RecoveryDecision {
         action: &'static str,
         detail: &'static str,
     },
+    /// Wait, then repeat the same request (transient network errors and 429).
+    RetryAfterBackoff {
+        action: &'static str,
+        attempt: usize,
+        max_attempts: usize,
+        delay: Duration,
+    },
+}
+
+/// First backoff for transient network failures; doubles per attempt.
+const NETWORK_RETRY_BASE_DELAY: Duration = Duration::from_secs(10);
+/// Rate limits wait longer so retries stay website-friendly.
+const RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(30);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(300);
+
+pub(super) fn backoff_delay(kind: DownloadErrorKind, attempt: usize) -> Duration {
+    let base = if kind == DownloadErrorKind::RateLimited {
+        RATE_LIMIT_RETRY_BASE_DELAY
+    } else {
+        NETWORK_RETRY_BASE_DELAY
+    };
+    let exponent = attempt.saturating_sub(1).min(16) as u32;
+    base.saturating_mul(1u32 << exponent).min(MAX_RETRY_DELAY)
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct DownloadAttemptContext {
     thumbnail_retry_used: bool,
     format_fallback_used: bool,
+    network_retries_used: usize,
+    max_network_retries: usize,
 }
 
 impl DownloadAttemptContext {
-    pub fn new() -> Self {
+    pub fn with_network_retries(max_network_retries: usize) -> Self {
         Self {
             thumbnail_retry_used: false,
             format_fallback_used: false,
+            network_retries_used: 0,
+            max_network_retries,
         }
+    }
+
+    pub fn mark_network_retry(&mut self) {
+        self.network_retries_used += 1;
     }
 
     pub fn mark_thumbnail_retry(&mut self) {
@@ -131,6 +164,23 @@ impl DownloadResiliencePolicy {
                 action: "cookie expired",
                 detail: "cookie data may be invalid or expired; update cookies before retrying",
             },
+            DownloadErrorKind::RateLimited
+            | DownloadErrorKind::TransientNetwork
+            | DownloadErrorKind::FragmentFailure
+                if context.network_retries_used < context.max_network_retries =>
+            {
+                let attempt = context.network_retries_used + 1;
+                RecoveryDecision::RetryAfterBackoff {
+                    action: if kind == DownloadErrorKind::RateLimited {
+                        "retry after rate limit"
+                    } else {
+                        "retry after network error"
+                    },
+                    attempt,
+                    max_attempts: context.max_network_retries,
+                    delay: backoff_delay(kind, attempt),
+                }
+            }
             DownloadErrorKind::RateLimited => RecoveryDecision::LogOnly {
                 action: "rate limited",
                 detail: "server rate limit detected; v2 avoids immediate retry to stay website-friendly",
@@ -355,4 +405,78 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 
 fn contains_all(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().all(|needle| haystack.contains(needle))
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use super::*;
+
+    fn decide(kind: DownloadErrorKind, context: &DownloadAttemptContext) -> RecoveryDecision {
+        DownloadResiliencePolicy.decide(kind, context, false, false, false)
+    }
+
+    #[test]
+    fn transient_errors_retry_until_the_limit() {
+        let mut context = DownloadAttemptContext::with_network_retries(2);
+        for expected_attempt in 1..=2 {
+            match decide(DownloadErrorKind::TransientNetwork, &context) {
+                RecoveryDecision::RetryAfterBackoff {
+                    attempt,
+                    max_attempts,
+                    ..
+                } => {
+                    assert_eq!(attempt, expected_attempt);
+                    assert_eq!(max_attempts, 2);
+                }
+                other => panic!("expected retry, got {other:?}"),
+            }
+            context.mark_network_retry();
+        }
+        assert!(matches!(
+            decide(DownloadErrorKind::TransientNetwork, &context),
+            RecoveryDecision::LogOnly { .. }
+        ));
+    }
+
+    #[test]
+    fn disabled_retries_keep_previous_policy() {
+        let context = DownloadAttemptContext::with_network_retries(0);
+        for kind in [
+            DownloadErrorKind::RateLimited,
+            DownloadErrorKind::TransientNetwork,
+            DownloadErrorKind::FragmentFailure,
+        ] {
+            assert!(matches!(
+                decide(kind, &context),
+                RecoveryDecision::LogOnly { .. }
+            ));
+        }
+        assert!(matches!(
+            decide(
+                DownloadErrorKind::AuthRequired,
+                &DownloadAttemptContext::with_network_retries(3)
+            ),
+            RecoveryDecision::LogOnly { .. }
+        ));
+    }
+
+    #[test]
+    fn backoff_doubles_and_is_capped() {
+        assert_eq!(
+            backoff_delay(DownloadErrorKind::TransientNetwork, 1),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            backoff_delay(DownloadErrorKind::TransientNetwork, 3),
+            Duration::from_secs(40)
+        );
+        assert_eq!(
+            backoff_delay(DownloadErrorKind::RateLimited, 1),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            backoff_delay(DownloadErrorKind::RateLimited, 10),
+            MAX_RETRY_DELAY
+        );
+    }
 }

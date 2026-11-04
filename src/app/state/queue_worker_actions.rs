@@ -220,7 +220,7 @@ impl AppState {
             self.last_action = error.clone();
             return Err(error);
         };
-        if self.has_running_download_workflow() {
+        if !self.can_start_download_for_backend(false) {
             let error = "A download is already running. Please wait for it to finish.".to_owned();
             self.last_action = error.clone();
             return Err(error);
@@ -352,7 +352,7 @@ impl AppState {
             use_aria2: item.selection.use_aria2,
             emit_json,
             output_path: None,
-            output_dir: item.selection.output_dir.clone(),
+            output_dir: self.effective_item_output_dir(item),
             file_name: normal_download_base_name(&item.selection.file_name),
             download_section_args: self.item_download_section_arguments(task_index),
         };
@@ -405,7 +405,7 @@ impl AppState {
             i18n::format_fixed_english("Downloading: {title}", &[("{title}", title.as_str())])
         };
 
-        let tool_paths = self.tool_paths.clone();
+        let tool_paths = self.download_dispatch_tool_paths();
         let tx = self.download_result_tx.clone();
         #[cfg(test)]
         {
@@ -712,7 +712,7 @@ impl AppState {
             action_text
         };
 
-        let tool_paths = self.tool_paths.clone();
+        let tool_paths = self.download_dispatch_tool_paths();
         let tx = self.download_result_tx.clone();
         let child_handle = Arc::new(Mutex::new(None));
         let cancel_requested = Arc::new(AtomicBool::new(false));

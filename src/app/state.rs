@@ -131,6 +131,8 @@ mod origin_download_actions;
 mod output_review_tests;
 mod gallery_readiness_actions;
 mod prepare_actions;
+mod productivity_actions;
+pub use self::productivity_actions::{AfterQueueAction, QueueStatusFilter, TaskbarProgress};
 mod prepare_visibility_helpers;
 mod queue_batch_helpers;
 mod queue_input_actions;

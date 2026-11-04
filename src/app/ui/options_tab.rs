@@ -7,6 +7,15 @@ pub(super) fn render_options_tab(ui: &mut Ui, state: &mut AppState) {
         Some(OptionsDetailPage::Language) => {
             super::options_language::render_language_detail_page(ui, state)
         }
+        Some(OptionsDetailPage::History) => {
+            super::options_library::render_history_detail_page(ui, state)
+        }
+        Some(OptionsDetailPage::Subscriptions) => {
+            super::options_library::render_subscriptions_detail_page(ui, state)
+        }
+        Some(OptionsDetailPage::SiteRules) => {
+            super::options_library::render_site_rules_detail_page(ui, state)
+        }
         None => super::options_tab_template::render_options_root_page(ui, state),
     }
 }

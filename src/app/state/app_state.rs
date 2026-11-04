@@ -90,6 +90,7 @@ pub struct AppState {
     pub(super) active_workflows: HashMap<WorkflowRunId, ActiveWorkflow>,
     pub(super) next_queue_item_id: QueueItemId,
     pub(super) next_workflow_run_id: WorkflowRunId,
+    pub(super) productivity: super::productivity_actions::ProductivityState,
 }
 
 impl AppState {
@@ -213,6 +214,7 @@ impl AppState {
             active_workflows: HashMap::new(),
             next_queue_item_id: 1,
             next_workflow_run_id: 1,
+            productivity: super::productivity_actions::ProductivityState::load(),
         };
 
         if let Some(error) = state.cache_storage_error() {

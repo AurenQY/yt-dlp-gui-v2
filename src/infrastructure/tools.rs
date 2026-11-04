@@ -254,6 +254,11 @@ pub struct ToolPaths {
     pub no_check_certificates: bool,
     pub impersonate: String,
     pub limit_rate: String,
+    pub sponsorblock_mode: super::config::SponsorBlockMode,
+    pub sponsorblock_categories: String,
+    pub embed_metadata: bool,
+    pub playlist_match_filter: String,
+    pub auto_retry_count: usize,
     pub download_sections: String,
     pub chapter_compatibility_mode: bool,
     pub file_time_mode: FileTimeMode,
@@ -283,6 +288,11 @@ impl Default for ToolPaths {
             no_check_certificates: false,
             impersonate: String::new(),
             limit_rate: String::new(),
+            sponsorblock_mode: super::config::SponsorBlockMode::Off,
+            sponsorblock_categories: super::config::DEFAULT_SPONSORBLOCK_CATEGORIES.to_owned(),
+            embed_metadata: false,
+            playlist_match_filter: String::new(),
+            auto_retry_count: 0,
             download_sections: String::new(),
             chapter_compatibility_mode: true,
             file_time_mode: FileTimeMode::None,
@@ -493,6 +503,55 @@ impl ToolPaths {
         self.config_owns(&["--mtime", "--no-mtime"])
     }
 
+    pub fn effective_config_owns_sponsorblock(&self) -> bool {
+        self.config_owns(&[
+            "--sponsorblock-mark",
+            "--sponsorblock-remove",
+            "--no-sponsorblock",
+        ])
+    }
+
+    pub fn effective_config_owns_embed_metadata(&self) -> bool {
+        self.config_owns(&[
+            "--embed-metadata",
+            "--add-metadata",
+            "--no-embed-metadata",
+            "--no-add-metadata",
+        ])
+    }
+
+    /// App-level SponsorBlock and metadata options for a media download.
+    /// A user yt-dlp config that sets the same options keeps ownership.
+    fn apply_media_enrichment_args(&self, command: &mut Command, target_kind: DownloadTargetKind) {
+        if target_kind == DownloadTargetKind::Subtitle {
+            return;
+        }
+        let sponsorblock_flag = match self.sponsorblock_mode {
+            super::config::SponsorBlockMode::Off => None,
+            super::config::SponsorBlockMode::Mark => Some("--sponsorblock-mark"),
+            super::config::SponsorBlockMode::Remove => Some("--sponsorblock-remove"),
+        };
+        if let Some(flag) = sponsorblock_flag {
+            if !self.effective_config_owns_sponsorblock() {
+                command
+                    .arg(flag)
+                    .arg(super::config::normalize_sponsorblock_categories(
+                        &self.sponsorblock_categories,
+                    ));
+            }
+        }
+        if self.embed_metadata && !self.effective_config_owns_embed_metadata() {
+            command.arg("--embed-metadata");
+        }
+    }
+
+    fn apply_playlist_match_filter(&self, command: &mut Command) {
+        let filter = self.playlist_match_filter.trim();
+        if !filter.is_empty() && !self.config_owns(&["--match-filters", "--match-filter"]) {
+            command.arg("--match-filters").arg(filter);
+        }
+    }
+
     pub fn effective_proxy_url(&self) -> Option<&str> {
         let proxy_url = self.proxy_url.trim();
         (self.proxy_enabled && !proxy_url.is_empty()).then_some(proxy_url)
@@ -573,6 +632,7 @@ impl ToolPaths {
             .arg("--lazy-playlist")
             .arg("--no-warnings")
             .arg("--ignore-errors");
+        tools.apply_playlist_match_filter(&mut command);
         if let Some(limit) = item_limit {
             command
                 .arg("--yes-playlist")
@@ -1136,6 +1196,8 @@ impl ToolPaths {
         {
             command.arg("--limit-rate").arg(self.limit_rate.trim());
         }
+
+        self.apply_media_enrichment_args(&mut command, request.target_kind);
 
         let has_item_download_section = apply_download_section_args(
             &mut command,

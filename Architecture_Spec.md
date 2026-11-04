@@ -2,9 +2,9 @@
 
 ## 1. Scope and approval
 
-This document specifies the Issue [#32](https://github.com/kannagi0303/yt-dlp-gui-v2/issues/32) cache-location change and Issue [#33](https://github.com/kannagi0303/yt-dlp-gui-v2/issues/33) output protection/naming change for yt-dlp-gui v2. Its filename follows this workspace's `AGENTS.md`; it does not describe the EROffice product.
+This document specifies the Issue [#32](https://github.com/kannagi0303/yt-dlp-gui-v2/issues/32) cache-location change and Issue [#33](https://github.com/kannagi0303/yt-dlp-gui-v2/issues/33) output protection/naming change for yt-dlp-gui v2.
 
-Issue #32 passed Reviewer Round 3 for source and supplied controlled validation, with R-CACHE-001 through R-CACHE-005 and V-CACHE-001 closed in the [review report](docs/reviews/REVIEW_CACHE_LOCATION_ISSUES.md). Its implementation remains uncommitted against baseline `047113c` (`2026.10.10`). The historical unmodified gallery-dl failure and evidence qualifications remain in the [Builder handoff](docs/implementation/CACHE_LOCATION_BUILDER_STATUS.md). Package/release acceptance is separate.
+Issue #32 passed Reviewer Round 3 for source and supplied controlled validation, with R-CACHE-001 through R-CACHE-005 and V-CACHE-001 closed in the [review report](docs/reviews/REVIEW_CACHE_LOCATION_ISSUES.md). Its implementation remains uncommitted against baseline `047113c` (`2026.10.10`). The historical unmodified gallery-dl failure and evidence qualifications remain in the Builder handoff (`CACHE_LOCATION_BUILDER_STATUS.md`, not published in this repository). Package/release acceptance is separate.
 
 The user confirmed the Issue #33 proposal and detailed architecture: default keep-both collision handling, an optional skip policy, naming presets and a controlled custom template with preview, shared final-output protection, and combined submission with #32 after validation/review. Sections 6/7 are implemented with Builder validation documented in the [Issue #33 handoff](docs/implementation/ISSUE_33_BUILDER_HANDOFF.md). Independent review of the combined change remains pending. The prior #32 pass does not cover #33.
 
@@ -59,13 +59,13 @@ Here `A` is the application root, `C` is the active cache root, and `S` is the p
 
 ## 5. Implementation and acceptance references
 
-- [Frontend architecture](EROffice_Frontend_Architecture.md): UI states and canonical copy.
+- [Frontend architecture](Frontend_Architecture.md): UI states and canonical copy.
 - [Backend reference](docs/backend-reference.md): paths, initialization, persistence, migration, consumers, cleanup, and acceptance cases.
 - [ADR-0001](docs/architecture-decisions/ADR-0001-unified-cache-location.md): decision, alternatives, and tradeoffs.
 - [ADR-0002](docs/architecture-decisions/ADR-0002-gallery-dl-playlist-runtime.md): playlist correction, compatible standalone runtime, and dependency delivery/update policy.
 - [ADR-0003](docs/architecture-decisions/ADR-0003-output-naming-and-no-clobber-publication.md): output naming, collision policies, staging and publication.
 
-Acceptance cases `AC-01` through `AC-25` in the backend reference are the verification contract for `CACHE-01` through `CACHE-14`. They are not a pass ledger. The [Builder handoff](docs/implementation/CACHE_LOCATION_BUILDER_STATUS.md) maps implementation and executed evidence, including AC-19/AC-21 through AC-25, and retains unverified boundaries. The original unmodified-tool failure has not been reclassified as a pass.
+Acceptance cases `AC-01` through `AC-25` in the backend reference are the verification contract for `CACHE-01` through `CACHE-14`. They are not a pass ledger. The Builder handoff (`CACHE_LOCATION_BUILDER_STATUS.md`, not published in this repository) maps implementation and executed evidence, including AC-19/AC-21 through AC-25, and retains unverified boundaries. The original unmodified-tool failure has not been reclassified as a pass.
 
 ## 6. Issue #33 product requirements
 
@@ -99,4 +99,4 @@ Analyze, source discovery and automatic naming preflight remain metadata-only ev
 
 The template is a filename feature; output-folder selection and the #32 cache/output separation remain authoritative. No overwrite mode, new arbitrary scripting language, general downloader framework, download archive migration, or retrospective renaming of completed files is added. Metadata/tag writes associated with this new download operate on its staged artifacts; separate intentional edits to an already owned file are not a new same-name download.
 
-The backend section 12 and acceptance cases `OUT-AC-01` through `OUT-AC-14`, frontend section 8 and ADR-0003 define implementation boundaries. New Rust runtime dependencies and a gallery bundle rebuild are not planned. The combined commit requested by the user is deferred until the combined change has completed its required review gates. Push, PR, merge, version/package and release operations retain their separate authorization boundaries. The existing ignored `/docs/` policy is unchanged.
+The backend section 12 and acceptance cases `OUT-AC-01` through `OUT-AC-14`, frontend section 8 and ADR-0003 define implementation boundaries. New Rust runtime dependencies and a gallery bundle rebuild are not planned. The combined commit requested by the user is deferred until the combined change has completed its required review gates. Push, PR, merge, version/package and release operations retain their separate authorization boundaries. The `docs/` folder is tracked with the source so that README and specification links resolve.

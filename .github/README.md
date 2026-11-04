@@ -12,7 +12,44 @@ This is [AurenQY's fork](https://github.com/AurenQY/yt-dlp-gui-v2) of [kannagi03
 
 The combined changes passed review for the source and supplied controlled Windows evidence; installed-package, real-user, and release acceptance were not included. See the [cache review](../docs/reviews/REVIEW_CACHE_LOCATION_ISSUES.md) and [output review](../docs/reviews/REVIEW_ISSUE_33_OUTPUT_ISSUES.md) for details.
 
-The release badges and installation link below point to the upstream project's releases. Those binaries do not necessarily include this fork's changes.
+The release badges and installation link below point to the upstream project's releases. Those binaries do not necessarily include this fork's changes. Builds of this fork are produced by the [CI workflow](workflows/ci.yml): every push to `master` uploads a Windows build artifact, and a tag creates a draft release.
+
+#### Additional features in this fork
+
+- **Parallel downloads**: Advanced › Download control › Parallel downloads (1–5). gallery-dl jobs, Origin Mode and Audio Mode keep downloading one item at a time.
+- **Automatic retry**: transient network errors and HTTP 429 are retried with exponential backoff (10 s, or 30 s for rate limits, doubling up to 5 min). Configure the count in Advanced › Download control. **Retry failed** re-queues every failed item.
+- **Import URLs**: drop `.txt`, `.url` or `.webloc` files on the main window, use **Import**, or press Ctrl+V outside a text field. Several URLs are added one after another through the normal add flow.
+- **Queue tools**: search and status filter for the queue; a one-time **When done** action (open folder, sleep, shut down with a 30-second cancellable countdown); **Start at** a local time. Windows shows overall progress on the taskbar button.
+- **Download history**: completed downloads are stored in `data/history.yaml`. Options › Library › History can search them, open the file or folder, or add the source again. Queue items from a source you downloaded before are marked as such.
+- **Subscriptions**: Options › Library › Subscriptions checks channels and playlists for new items (every 6 hours by default) and adds them to the queue. The first check only records the existing items. Data is stored in `data/subscriptions.yaml`.
+- **Site folders**: Options › Library › Site folders saves items from a site, for example `bilibili.com`, to its own folder when they use the main download folder.
+- **Scheduled speed limit**: Advanced › Download control › Scheduled limit uses a different `--limit-rate` during a daily time window.
+- **SponsorBlock and metadata**: Advanced › Post-processing can mark or remove SponsorBlock segments and embed title, artist and date metadata.
+- **Playlist filter**: Options › Playlist › Playlist filter passes a yt-dlp `--match-filters` expression (for example `duration > 60`) when playlists and subscriptions are expanded.
+
+A yt-dlp configuration file that sets the same options (`--sponsorblock-*`, `--embed-metadata`, `--match-filters`, `--limit-rate`, output paths) keeps priority over these settings.
+
+#### Keyboard shortcuts (Main tab)
+
+| Shortcut | Action |
+| --- | --- |
+| Ctrl+V (outside a text field) | Add the pasted URL, or import several URLs |
+| Ctrl+Enter | Start downloading the queue |
+| Ctrl+F | Focus the queue search |
+| Ctrl+O | Import URLs from files |
+| Ctrl+R | Retry failed items |
+
+#### Building
+
+```bash
+cargo test
+```
+
+```bash
+cargo build --release
+```
+
+Windows is the supported target. Linux builds compile for development and CI; they need the ALSA, xkbcommon and Wayland development packages (`libasound2-dev libxkbcommon-dev libwayland-dev pkg-config` on Debian/Ubuntu). A few storage tests rely on Windows file-system behaviour and fail on Linux.
 
 <img src="./screenshot01.png" width="633" alt="yt-dlp-gui screenshot">
 

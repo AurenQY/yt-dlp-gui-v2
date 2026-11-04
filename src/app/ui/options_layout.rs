@@ -76,6 +76,10 @@ fn options_label_width(ui: &Ui, state: &AppState) -> f32 {
             always_on_top_text,
             window_position_text,
             window_size_text,
+            state.ui_i18n_text_for_key("options.playlist_filter"),
+            state.ui_i18n_text_for_key("options.history"),
+            state.ui_i18n_text_for_key("options.subscriptions"),
+            state.ui_i18n_text_for_key("options.site_rules"),
         ],
     )
 }

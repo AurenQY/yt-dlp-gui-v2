@@ -1106,7 +1106,7 @@ impl AppState {
         ) {
             return Ok(());
         }
-        if self.has_running_download_workflow() {
+        if !self.can_start_download_for_backend(true) {
             return Err("A download is already running.".to_owned());
         }
         let Some(item) = self.queue_item_by_id(item_id) else {
@@ -1135,7 +1135,7 @@ impl AppState {
                 .as_secs(),
         );
         let use_cookies = item.selection.use_cookies;
-        let destination = resolve_output_dir(&item.selection.output_dir);
+        let destination = resolve_output_dir(&self.effective_item_output_dir(item));
         let prepared = destination.and_then(|destination| {
             GalleryDlBackend::from_tool_paths(&self.tool_paths).prepare_item_download(
                 &source,

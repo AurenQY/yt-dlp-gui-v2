@@ -2,18 +2,25 @@ use super::*;
 
 impl AppState {
     pub fn item_output_feedback_text(&self, item_index: usize) -> Option<String> {
-        let run = self.queue_items.get(item_index)?.workflows.last()?;
-        let detail = run.error.as_deref().unwrap_or(&run.detail);
-        [
-            "Saved as ",
-            "Skipped existing destination: ",
-            "Output destination is in use.",
-            "Output publication failed: ",
-            "Download cancelled. Complete published files:",
-        ]
-        .iter()
-        .any(|prefix| detail.starts_with(prefix))
-        .then(|| detail.to_owned())
+        let feedback = self
+            .queue_items
+            .get(item_index)
+            .and_then(|item| item.workflows.last())
+            .and_then(|run| {
+                let detail = run.error.as_deref().unwrap_or(&run.detail);
+                [
+                    "Saved as ",
+                    "Skipped existing destination: ",
+                    "Output destination is in use.",
+                    "Output publication failed: ",
+                    "Download cancelled. Complete published files:",
+                    "Retrying in ",
+                ]
+                .iter()
+                .any(|prefix| detail.starts_with(prefix))
+                .then(|| detail.to_owned())
+            });
+        feedback.or_else(|| self.item_history_hint(item_index))
     }
     pub fn latest_download_status(&self) -> Option<String> {
         let item = self.queue_items.last()?;

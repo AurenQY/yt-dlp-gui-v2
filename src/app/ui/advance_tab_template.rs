@@ -119,6 +119,11 @@ fn advance_label_width(ui: &Ui, state: &AppState) -> f32 {
             "advance.thumbnail",
             "advance.subtitles",
             "advance.download_conversion",
+            "advance.parallel_downloads",
+            "advance.auto_retry",
+            "advance.scheduled_rate",
+            "advance.sponsorblock",
+            "advance.metadata",
         ],
     )
 }

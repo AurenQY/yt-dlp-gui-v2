@@ -21,7 +21,7 @@ Adopt the following bounded output policy for direct yt-dlp and app audio/conver
 5. Reserve one media/sidecar group through shared destination-local OS locks, including across installations. Final filesystem publication is always non-replacing, including a late non-cooperating writer. Same-volume atomic commit and a verified destination-local copy/commit handle cross-volume results.
 6. Report actual published paths, explicit skips and partial failures. Preserve every established conflicting file and any already published complete artifact; cleanup owns only this operation's unpublished work.
 
-The full contract is [backend sections 12/13](../backend-reference.md), [frontend section 8](../../EROffice_Frontend_Architecture.md) and product requirements OUTPUT-01 through OUTPUT-11. They define persisted keys, template grammar/fallbacks, save rollback, shared coordination namespace, artifact groups, finalization order, config compatibility and evidence cases. These details are normative for Builder implementation after confirmation.
+The full contract is [backend sections 12/13](../backend-reference.md), [frontend section 8](../../Frontend_Architecture.md) and product requirements OUTPUT-01 through OUTPUT-11. They define persisted keys, template grammar/fallbacks, save rollback, shared coordination namespace, artifact groups, finalization order, config compatibility and evidence cases. These details are normative for Builder implementation after confirmation.
 
 ## 3. Preserved boundaries
 

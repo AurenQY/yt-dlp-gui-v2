@@ -1,6 +1,6 @@
 # ADR-0002: Compatible gallery-dl Runtime for Delegated Playlists
 
-- Status: Accepted by the user on 2026-10-26; implemented with scoped Builder validation recorded in the [handoff](../implementation/CACHE_LOCATION_BUILDER_STATUS.md). Independent review and complete acceptance remain outstanding.
+- Status: Accepted by the user on 2026-10-26; implemented with scoped Builder validation recorded in the handoff (`CACHE_LOCATION_BUILDER_STATUS.md`, not published in this repository). Independent review and complete acceptance remain outstanding.
 - Date: 2026-10-26.
 - Application source baseline: `047113c` (`2026.10.10`) plus the existing uncommitted cache-location implementation.
 - Related decision: [ADR-0001](ADR-0001-unified-cache-location.md).

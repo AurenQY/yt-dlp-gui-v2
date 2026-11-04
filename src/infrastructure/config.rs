@@ -132,6 +132,20 @@ pub struct AppConfig {
     pub window_size: Option<WindowSize>,
     pub enable_batch_panel: bool,
     pub prepare_skipped: bool,
+    /// Parallel yt-dlp downloads in the Standard queue (1 keeps the classic serial queue).
+    pub max_concurrent_downloads: usize,
+    /// Automatic retries for transient network failures and HTTP 429 (0 disables).
+    pub auto_retry_count: usize,
+    pub sponsorblock_mode: SponsorBlockMode,
+    pub sponsorblock_categories: String,
+    pub embed_metadata: bool,
+    /// yt-dlp `--match-filters` expression applied while expanding playlists.
+    pub playlist_match_filter: String,
+    pub history_enabled: bool,
+    pub site_rules: Vec<SiteRule>,
+    pub limit_rate_schedule: RateLimitSchedule,
+    pub subscriptions_auto_check: bool,
+    pub subscriptions_interval_hours: u32,
     /// About version-check history persists in the executable-named YAML.
     #[serde(default)]
     pub component_update_cache: Option<serde_yaml::Value>,
@@ -973,6 +987,17 @@ impl Default for AppConfig {
             window_size: None,
             enable_batch_panel: true,
             prepare_skipped: false,
+            max_concurrent_downloads: 1,
+            auto_retry_count: 3,
+            sponsorblock_mode: SponsorBlockMode::Off,
+            sponsorblock_categories: DEFAULT_SPONSORBLOCK_CATEGORIES.to_owned(),
+            embed_metadata: false,
+            playlist_match_filter: String::new(),
+            history_enabled: true,
+            site_rules: Vec::new(),
+            limit_rate_schedule: RateLimitSchedule::default(),
+            subscriptions_auto_check: true,
+            subscriptions_interval_hours: DEFAULT_SUBSCRIPTION_INTERVAL_HOURS,
             component_update_cache: None,
             config_path: None,
             legacy_cache_notice: false,
@@ -1209,6 +1234,11 @@ impl AppConfig {
             no_check_certificates: self.no_check_certificates,
             impersonate: self.impersonate.clone(),
             limit_rate: self.limit_rate.clone(),
+            sponsorblock_mode: self.sponsorblock_mode,
+            sponsorblock_categories: self.sponsorblock_categories.clone(),
+            embed_metadata: self.embed_metadata,
+            playlist_match_filter: self.playlist_match_filter.clone(),
+            auto_retry_count: self.auto_retry_count,
             download_sections: self.download_sections.clone(),
             chapter_compatibility_mode: self.chapter_compatibility_mode,
             file_time_mode: self.file_time_mode,
@@ -1246,6 +1276,20 @@ impl AppConfig {
         self.impersonate = self.impersonate.trim().to_owned();
         self.limit_rate = self.limit_rate.trim().to_owned();
         self.download_sections = self.download_sections.trim().to_owned();
+        self.max_concurrent_downloads =
+            normalize_max_concurrent_downloads(self.max_concurrent_downloads);
+        self.auto_retry_count = self.auto_retry_count.min(MAX_AUTO_RETRY_COUNT);
+        self.sponsorblock_categories =
+            normalize_sponsorblock_categories(&self.sponsorblock_categories);
+        self.playlist_match_filter = self.playlist_match_filter.trim().to_owned();
+        self.site_rules = std::mem::take(&mut self.site_rules)
+            .into_iter()
+            .filter_map(SiteRule::normalized)
+            .collect();
+        self.limit_rate_schedule = self.limit_rate_schedule.clone().normalized();
+        self.subscriptions_interval_hours = self
+            .subscriptions_interval_hours
+            .clamp(1, MAX_SUBSCRIPTION_INTERVAL_HOURS);
 
         if let Some(legacy) = self.legacy_persist_window_state.take() {
             self.remember_window_position = legacy;
@@ -1281,6 +1325,164 @@ impl AppConfig {
                 self.window_size = None;
             }
         }
+    }
+}
+
+pub const MAX_CONCURRENT_DOWNLOADS: usize = 5;
+pub const MAX_AUTO_RETRY_COUNT: usize = 10;
+pub const DEFAULT_SPONSORBLOCK_CATEGORIES: &str = "sponsor,selfpromo,interaction";
+pub const DEFAULT_SUBSCRIPTION_INTERVAL_HOURS: u32 = 6;
+pub const MAX_SUBSCRIPTION_INTERVAL_HOURS: u32 = 168;
+
+pub fn normalize_max_concurrent_downloads(value: usize) -> usize {
+    value.clamp(1, MAX_CONCURRENT_DOWNLOADS)
+}
+
+/// Keep only SponsorBlock category tokens (letters, digits, `_`), comma separated.
+pub fn normalize_sponsorblock_categories(value: &str) -> String {
+    let categories = value
+        .split(',')
+        .map(|part| part.trim().to_ascii_lowercase())
+        .filter(|part| {
+            !part.is_empty()
+                && part
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        })
+        .collect::<Vec<_>>();
+    if categories.is_empty() {
+        DEFAULT_SPONSORBLOCK_CATEGORIES.to_owned()
+    } else {
+        categories.join(",")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SponsorBlockMode {
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    /// Add chapters for SponsorBlock segments.
+    #[serde(rename = "mark")]
+    Mark,
+    /// Cut SponsorBlock segments out of the media (requires FFmpeg).
+    #[serde(rename = "remove")]
+    Remove,
+}
+
+impl SponsorBlockMode {
+    pub fn variants() -> [Self; 3] {
+        [Self::Off, Self::Mark, Self::Remove]
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::Off => "advance.sponsorblock_off",
+            Self::Mark => "advance.sponsorblock_mark",
+            Self::Remove => "advance.sponsorblock_remove",
+        }
+    }
+}
+
+/// Route downloads from a site to its own folder. `domain` matches the URL
+/// host and its subdomains (`youtube.com` also matches `www.youtube.com`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SiteRule {
+    pub domain: String,
+    pub output_dir: String,
+}
+
+impl SiteRule {
+    pub fn normalized(self) -> Option<Self> {
+        let domain = normalize_site_rule_domain(&self.domain)?;
+        let output_dir = self.output_dir.trim().to_owned();
+        if output_dir.is_empty() {
+            return None;
+        }
+        Some(Self { domain, output_dir })
+    }
+
+    pub fn matches_url(&self, url: &str) -> bool {
+        let Some(host) = url_host(url) else {
+            return false;
+        };
+        host == self.domain || host.ends_with(&format!(".{}", self.domain))
+    }
+}
+
+/// Accepts `example.com`, `*.example.com`, `https://www.example.com/path`.
+pub fn normalize_site_rule_domain(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let host = if trimmed.contains("://") {
+        url_host(trimmed)?
+    } else {
+        trimmed
+            .trim_start_matches("*.")
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    };
+    let host = host.trim_start_matches("www.").trim_matches('.').to_owned();
+    let valid = !host.is_empty()
+        && host.contains('.')
+        && host
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '.');
+    valid.then_some(host)
+}
+
+/// Lowercase host of an http(s) URL without port or credentials.
+pub fn url_host(url: &str) -> Option<String> {
+    let rest = url.trim().split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host_port = authority.rsplit('@').next().unwrap_or_default();
+    let host = host_port.split(':').next().unwrap_or_default();
+    (!host.is_empty()).then(|| host.to_ascii_lowercase())
+}
+
+/// Use a different speed limit during a daily local-time window.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RateLimitSchedule {
+    pub enabled: bool,
+    /// Local start time, `HH:MM`.
+    pub start: String,
+    /// Local end time, `HH:MM`. An end before the start spans midnight.
+    pub end: String,
+    /// Rate during the window, for example `1M`. Empty means unlimited.
+    pub rate: String,
+}
+
+impl Default for RateLimitSchedule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            start: "09:00".to_owned(),
+            end: "18:00".to_owned(),
+            rate: "1M".to_owned(),
+        }
+    }
+}
+
+impl RateLimitSchedule {
+    pub fn normalized(mut self) -> Self {
+        let defaults = Self::default();
+        self.start = super::local_time::normalize_hhmm(&self.start).unwrap_or(defaults.start);
+        self.end = super::local_time::normalize_hhmm(&self.end).unwrap_or(defaults.end);
+        self.rate = self.rate.trim().to_owned();
+        self
+    }
+
+    /// The limit to apply at `minute_of_day`; `None` keeps the regular limit.
+    pub fn active_rate(&self, minute_of_day: u32) -> Option<&str> {
+        if !self.enabled {
+            return None;
+        }
+        let start = super::local_time::parse_hhmm(&self.start)?;
+        let end = super::local_time::parse_hhmm(&self.end)?;
+        super::local_time::minute_in_window(minute_of_day, start, end).then_some(self.rate.as_str())
     }
 }
 
@@ -1469,5 +1671,142 @@ fn portable_path_string(path: &Path) -> String {
         }
     } else {
         path.display().to_string()
+    }
+}
+
+#[cfg(test)]
+mod productivity_config_tests {
+    use super::*;
+
+    #[test]
+    fn new_settings_round_trip_through_the_document() {
+        let mut config = AppConfig::default();
+        config.max_concurrent_downloads = 3;
+        config.auto_retry_count = 5;
+        config.sponsorblock_mode = SponsorBlockMode::Remove;
+        config.sponsorblock_categories = "sponsor,intro".to_owned();
+        config.embed_metadata = true;
+        config.playlist_match_filter = "duration > 60".to_owned();
+        config.history_enabled = false;
+        config.site_rules = vec![SiteRule {
+            domain: "bilibili.com".to_owned(),
+            output_dir: "D:\\Bilibili".to_owned(),
+        }];
+        config.limit_rate_schedule = RateLimitSchedule {
+            enabled: true,
+            start: "08:30".to_owned(),
+            end: "23:00".to_owned(),
+            rate: "2M".to_owned(),
+        };
+        config.subscriptions_auto_check = false;
+        config.subscriptions_interval_hours = 12;
+        let text = document::encode(&config).unwrap();
+        assert!(text.contains("max_concurrent: 3"), "{text}");
+        assert!(text.contains("sponsorblock:"), "{text}");
+        let decoded = document::decode(&text).unwrap();
+        assert_eq!(decoded.max_concurrent_downloads, 3);
+        assert_eq!(decoded.auto_retry_count, 5);
+        assert_eq!(decoded.sponsorblock_mode, SponsorBlockMode::Remove);
+        assert_eq!(decoded.sponsorblock_categories, "sponsor,intro");
+        assert!(decoded.embed_metadata);
+        assert_eq!(decoded.playlist_match_filter, "duration > 60");
+        assert!(!decoded.history_enabled);
+        assert_eq!(decoded.site_rules, config.site_rules);
+        assert_eq!(decoded.limit_rate_schedule, config.limit_rate_schedule);
+        assert!(!decoded.subscriptions_auto_check);
+        assert_eq!(decoded.subscriptions_interval_hours, 12);
+    }
+
+    #[test]
+    fn defaults_are_not_written() {
+        let text = document::encode(&AppConfig::default()).unwrap();
+        for key in [
+            "max_concurrent",
+            "auto_retry",
+            "sponsorblock",
+            "site_rules",
+            "limit_rate_schedule",
+            "subscriptions",
+            "history",
+        ] {
+            assert!(!text.contains(key), "{key} should be omitted: {text}");
+        }
+    }
+
+    #[test]
+    fn normalization_clamps_and_cleans_values() {
+        let mut config = AppConfig::default();
+        config.max_concurrent_downloads = 99;
+        config.auto_retry_count = 99;
+        config.sponsorblock_categories = " Sponsor , bad value!, intro ".to_owned();
+        config.site_rules = vec![
+            SiteRule {
+                domain: "https://www.YouTube.com/watch?v=1".to_owned(),
+                output_dir: " D:\\YT ".to_owned(),
+            },
+            SiteRule {
+                domain: "localhost".to_owned(),
+                output_dir: "D:\\x".to_owned(),
+            },
+            SiteRule {
+                domain: "example.com".to_owned(),
+                output_dir: "  ".to_owned(),
+            },
+        ];
+        config.limit_rate_schedule.start = "25:00".to_owned();
+        config.subscriptions_interval_hours = 0;
+        config.normalize();
+        assert_eq!(config.max_concurrent_downloads, MAX_CONCURRENT_DOWNLOADS);
+        assert_eq!(config.auto_retry_count, MAX_AUTO_RETRY_COUNT);
+        assert_eq!(config.sponsorblock_categories, "sponsor,intro");
+        assert_eq!(
+            config.site_rules,
+            vec![SiteRule {
+                domain: "youtube.com".to_owned(),
+                output_dir: "D:\\YT".to_owned(),
+            }]
+        );
+        assert_eq!(config.limit_rate_schedule.start, "09:00");
+        assert_eq!(config.subscriptions_interval_hours, 1);
+        assert_eq!(
+            normalize_sponsorblock_categories(" , "),
+            DEFAULT_SPONSORBLOCK_CATEGORIES
+        );
+    }
+
+    #[test]
+    fn site_rules_match_hosts_and_subdomains() {
+        let rule = SiteRule::normalized(SiteRule {
+            domain: "*.youtube.com".to_owned(),
+            output_dir: "D:\\YT".to_owned(),
+        })
+        .unwrap();
+        assert!(rule.matches_url("https://www.youtube.com/watch?v=1"));
+        assert!(rule.matches_url("https://music.youtube.com/watch?v=1"));
+        assert!(rule.matches_url("https://user:pw@youtube.com:443/x"));
+        assert!(!rule.matches_url("https://notyoutube.com/watch"));
+        assert!(!rule.matches_url("youtube.com/watch"));
+        assert_eq!(
+            url_host("https://Example.COM/path"),
+            Some("example.com".to_owned())
+        );
+    }
+
+    #[test]
+    fn rate_schedule_applies_only_inside_window() {
+        let schedule = RateLimitSchedule {
+            enabled: true,
+            start: "22:00".to_owned(),
+            end: "06:00".to_owned(),
+            rate: "500K".to_owned(),
+        };
+        assert_eq!(schedule.active_rate(23 * 60), Some("500K"));
+        assert_eq!(schedule.active_rate(5 * 60), Some("500K"));
+        assert_eq!(schedule.active_rate(12 * 60), None);
+        let disabled = RateLimitSchedule {
+            enabled: false,
+            ..schedule
+        };
+        assert_eq!(disabled.active_rate(23 * 60), None);
     }
 }
