@@ -240,10 +240,8 @@ impl AppState {
         if !self.can_retry_failed_queue_items() {
             return;
         }
-        if let Err(error) = self.ensure_yt_dlp_ready() {
-            self.last_action = error;
-            return;
-        }
+        // gallery-dl items do not need yt-dlp; retry them even when it is missing.
+        let yt_dlp_ready = self.ensure_yt_dlp_ready();
         let ids = self
             .queue_items
             .iter()
@@ -252,10 +250,14 @@ impl AppState {
                 matches!(item_summary_bucket(item), QueueSummaryBucket::Failed)
                     && item_can_enter_download_queue(item)
                     && !self.item_is_busy(*index)
+                    && (yt_dlp_ready.is_ok() || matches!(item.backend, QueueBackend::GalleryDl(_)))
             })
             .map(|(_, item)| item.id)
             .collect::<Vec<_>>();
         if ids.is_empty() {
+            if let Err(error) = yt_dlp_ready {
+                self.last_action = error;
+            }
             return;
         }
         for item_id in &ids {

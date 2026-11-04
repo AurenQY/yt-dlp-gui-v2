@@ -1135,7 +1135,7 @@ impl AppState {
                 .as_secs(),
         );
         let use_cookies = item.selection.use_cookies;
-        let destination = resolve_output_dir(&item.selection.output_dir);
+        let destination = resolve_output_dir(&self.effective_item_output_dir(item));
         let prepared = destination.and_then(|destination| {
             GalleryDlBackend::from_tool_paths(&self.tool_paths).prepare_item_download(
                 &source,
