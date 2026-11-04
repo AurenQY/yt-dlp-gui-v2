@@ -25,6 +25,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The output-transaction tests check that an 8.3 short-name alias of a
+      # destination maps to the same output. Hosted runners disable short-name
+      # creation on the work volume, so enable it before tests create fixtures.
+      - name: Enable 8.3 short names on the work volume
+        shell: pwsh
+        run: |
+          $volume = $env:GITHUB_WORKSPACE.Substring(0, 2)
+          fsutil 8dot3name set $volume 0
+          fsutil 8dot3name query $volume
       - name: Test
         run: cargo test --locked
       # The size-optimized release profile is slow; build it for pushes only.
