@@ -13,9 +13,6 @@
 /assets/third-party/
 /resources/
 
-# Local user-facing and generated documentation.
-/docs/
-
 # Local runtime data.
 /.codex-yt-dlp-temp/
 /cache/

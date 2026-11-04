@@ -4,9 +4,9 @@
 
 This document covers the cache-location workflow for Issue #32 and the download-output workflow for Issue #33. The filename follows this workspace's `AGENTS.md`; the application is yt-dlp-gui v2, built with Rust and egui.
 
-Status: Issue #32 passed source/controlled-evidence review, including the supplied current-build GUI observations, in [Reviewer Round 3](docs/reviews/REVIEW_CACHE_LOCATION_ISSUES.md). The [cache Builder handoff](docs/implementation/CACHE_LOCATION_BUILDER_STATUS.md) retains execution/evidence boundaries. The user confirmed Section 8; its implementation and Builder checks are recorded in the [Issue #33 handoff](docs/implementation/ISSUE_33_BUILDER_HANDOFF.md). Independent combined review is pending. Package/release acceptance remains separate.
+Status: Issue #32 passed source/controlled-evidence review, including the supplied current-build GUI observations, in [Reviewer Round 3](docs/reviews/REVIEW_CACHE_LOCATION_ISSUES.md). The cache Builder handoff (`CACHE_LOCATION_BUILDER_STATUS.md`, not published in this repository) retains execution/evidence boundaries. The user confirmed Section 8; its implementation and Builder checks are recorded in the [Issue #33 handoff](docs/implementation/ISSUE_33_BUILDER_HANDOFF.md). Independent combined review is pending. Package/release acceptance remains separate.
 
-Related contracts: [product requirements](EROffice_Architecture_Spec.md), [backend reference](docs/backend-reference.md), [ADR-0001](docs/architecture-decisions/ADR-0001-unified-cache-location.md), and [ADR-0002](docs/architecture-decisions/ADR-0002-gallery-dl-playlist-runtime.md).
+Related contracts: [product requirements](Architecture_Spec.md), [backend reference](docs/backend-reference.md), [ADR-0001](docs/architecture-decisions/ADR-0001-unified-cache-location.md), and [ADR-0002](docs/architecture-decisions/ADR-0002-gallery-dl-playlist-runtime.md).
 
 Issue #33 decision: [ADR-0003](docs/architecture-decisions/ADR-0003-output-naming-and-no-clobber-publication.md).
 

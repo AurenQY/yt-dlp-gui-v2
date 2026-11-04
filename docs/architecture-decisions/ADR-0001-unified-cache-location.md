@@ -1,6 +1,6 @@
 # ADR-0001: One Application Cache Policy with Restart Activation
 
-- Status: Accepted and implemented with scoped Builder validation; see the [handoff](../implementation/CACHE_LOCATION_BUILDER_STATUS.md). Independent review and complete product acceptance remain outstanding.
+- Status: Accepted and implemented with scoped Builder validation; see the handoff (`CACHE_LOCATION_BUILDER_STATUS.md`, not published in this repository). Independent review and complete product acceptance remain outstanding.
 - Date: 2026-10-26.
 - Source baseline: `047113c` (`2026.10.10`).
 - Issue: [Cache location (bug, maybe)? #32](https://github.com/kannagi0303/yt-dlp-gui-v2/issues/32).
@@ -36,7 +36,7 @@ Do not sweep old snapshots from the shared temporary root, relocate persistent c
 
 The real delegated-playlist test subsequently failed despite `part-directory`. [ADR-0002](ADR-0002-gallery-dl-playlist-runtime.md) proposes the bounded source patch, compatible standalone dependency, per-artifact finalization/reporting, and installer/update protection needed to close that failure. It is the only confirmed exception to this decision's original no-new-dependency boundary. It does not replace the startup snapshot, cache ownership, or persistent-state policy.
 
-The complete path, initialization, persistence, migration, failure, concurrency, and validation contracts are in the [backend reference](../backend-reference.md). Product behavior and UI presentation are in the [requirements](../../EROffice_Architecture_Spec.md) and [frontend architecture](../../EROffice_Frontend_Architecture.md).
+The complete path, initialization, persistence, migration, failure, concurrency, and validation contracts are in the [backend reference](../backend-reference.md). Product behavior and UI presentation are in the [requirements](../../Architecture_Spec.md) and [frontend architecture](../../Frontend_Architecture.md).
 
 ## Alternatives considered
 

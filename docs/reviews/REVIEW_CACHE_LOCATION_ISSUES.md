@@ -89,7 +89,7 @@ planned_temp=C:\Users\SKY\cache-review-preview\fixture.mp4
 
 ## V-CACHE-001: Current-build GUI acceptance remains unverified
 
-- Locations: `EROffice_Frontend_Architecture.md` sections 3, 5, and 7; backend AC-03/09/16; `docs/implementation/CACHE_LOCATION_BUILDER_STATUS.md` sections 3 and 5.
+- Locations: `Frontend_Architecture.md` sections 3, 5, and 7; backend AC-03/09/16; `docs/implementation/CACHE_LOCATION_BUILDER_STATUS.md` sections 3 and 5.
 - Trigger/scope: interactive selector changes, rollback after failed save, active versus pending paths, legacy/storage error notices, cleanup busy/retained feedback, and long/non-ASCII paths/labels in the actual current GUI.
 - Available result: Builder explicitly states that `target/debug/yt-dlp-gui.exe` was compiled but not launched for GUI acceptance. The retained source build and scoped i18n checks do not demonstrate visible layout, interactions, disabled states, or actual user-facing error feedback.
 - Expected evidence: current-source GUI observations mapped to the cases above, with source/build identity, the controlled application/settings roots, steps, and outcomes. Do not infer package or complete product acceptance from this evidence.
