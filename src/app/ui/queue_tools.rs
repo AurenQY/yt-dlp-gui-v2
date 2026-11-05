@@ -214,7 +214,8 @@ pub(super) fn render_no_match_notice(ui: &mut Ui, state: &mut AppState) {
     });
 }
 
-/// Main-tab keyboard shortcuts. Text fields keep their own handling.
+/// Main-tab keyboard shortcuts. While a text field has focus only Ctrl+F is
+/// handled here; the field keeps every other key.
 ///
 /// - Ctrl+V outside a text field: add the pasted URL(s)
 /// - Ctrl+Enter: start downloading the queue
@@ -230,27 +231,30 @@ pub(super) fn handle_main_shortcuts(ctx: &egui::Context, state: &mut AppState, b
     {
         return;
     }
-    let text_focused = ctx.memory(|memory| memory.focused().is_some());
-    if !text_focused {
-        let pasted = ctx.input(|input| {
-            input.events.iter().find_map(|event| match event {
-                egui::Event::Paste(text) => Some(text.clone()),
-                _ => None,
-            })
-        });
-        if let Some(text) = pasted {
-            state.paste_urls_from_text(&text);
-        }
-    }
+    // Text fields keep their own Ctrl+V / Ctrl+Enter / Ctrl+R / Ctrl+O.
+    // Ctrl+F stays global because it only moves focus to the queue search.
+    let text_focused = ctx.text_edit_focused();
     let command = egui::Modifiers::COMMAND;
     let standard_queue = state.app_mode() != AppMode::Origin;
-    if ctx.input_mut(|input| input.consume_key(command, egui::Key::Enter)) {
-        state.start_queue_downloads_if_ready();
-    }
     if standard_queue && ctx.input_mut(|input| input.consume_key(command, egui::Key::F)) {
         if let Some(id) = ctx.data(|data| data.get_temp::<Id>(Id::new(SEARCH_FIELD_ID_KEY))) {
             ctx.memory_mut(|memory| memory.request_focus(id));
         }
+    }
+    if text_focused {
+        return;
+    }
+    let pasted = ctx.input(|input| {
+        input.events.iter().find_map(|event| match event {
+            egui::Event::Paste(text) => Some(text.clone()),
+            _ => None,
+        })
+    });
+    if let Some(text) = pasted {
+        state.paste_urls_from_text(&text);
+    }
+    if ctx.input_mut(|input| input.consume_key(command, egui::Key::Enter)) {
+        state.start_queue_downloads_if_ready();
     }
     if standard_queue && ctx.input_mut(|input| input.consume_key(command, egui::Key::O)) {
         open_import_dialog(state);

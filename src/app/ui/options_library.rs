@@ -86,15 +86,16 @@ pub(super) fn render_playlist_filter_row(
         form,
         state.ui_i18n_text_for_key("options.playlist_filter"),
         |ui| {
-            let mut filter = state.config.playlist_match_filter.clone();
-            if AppTextBox::new(&mut filter)
-                .hint_text(state.ui_i18n_text_for_key("options.playlist_filter_hint"))
-                .language(state.language())
-                .syntax(AppTextBoxSyntax::Plain)
-                .desired_width(semantic_ui_metrics::advance_form_standard_text_field_width())
-                .ui(ui)
-                .changed()
-            {
+            let current = state.config.playlist_match_filter.clone();
+            if let Some(filter) = super::settings_components::deferred_text_box(
+                ui,
+                "playlist-match-filter",
+                &current,
+                state.ui_i18n_text_for_key("options.playlist_filter_hint"),
+                state.language(),
+                semantic_ui_metrics::advance_form_standard_text_field_width(),
+                true,
+            ) {
                 state.set_playlist_match_filter(&filter);
             }
         },
@@ -307,15 +308,18 @@ fn render_subscriptions_body(ui: &mut Ui, state: &mut AppState) {
                     state.set_subscriptions_auto_check(auto_check);
                 }
                 let mut hours = state.config.subscriptions_interval_hours;
-                if ui
-                    .add_enabled(
-                        state.config.subscriptions_auto_check,
-                        egui::DragValue::new(&mut hours)
-                            .range(1..=crate::infrastructure::MAX_SUBSCRIPTION_INTERVAL_HOURS)
-                            .suffix(state.ui_i18n_text_for_key("subscriptions.hours_suffix")),
-                    )
-                    .changed()
-                {
+                let response = ui.add_enabled(
+                    state.config.subscriptions_auto_check,
+                    egui::DragValue::new(&mut hours)
+                        .range(1..=crate::infrastructure::MAX_SUBSCRIPTION_INTERVAL_HOURS)
+                        .suffix(state.ui_i18n_text_for_key("subscriptions.hours_suffix")),
+                );
+                // Dragging updates the value live; the file is written once,
+                // when the drag ends or a typed value is applied.
+                if response.changed() {
+                    state.preview_subscriptions_interval_hours(hours);
+                }
+                if response.drag_stopped() || (response.changed() && !response.dragged()) {
                     state.set_subscriptions_interval_hours(hours);
                 }
                 let running = state.subscription_check_running();

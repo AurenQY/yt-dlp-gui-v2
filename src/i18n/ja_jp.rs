@@ -654,6 +654,9 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count} 回",
         "advance.scheduled_rate" => "時間帯の速度制限",
         "advance.scheduled_rate_active" => "現在適用中",
+        "advance.scheduled_rate_note" => {
+            "この後に開始するダウンロードに適用されます。実行中のダウンロードは現在の制限のままです。"
+        }
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "オフ",
         "advance.sponsorblock_mark" => "チャプターとして表示",

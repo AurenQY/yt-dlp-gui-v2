@@ -66,6 +66,12 @@ fn stale(path: &Path) {
         use std::os::windows::fs::OpenOptionsExt;
         options.custom_flags(0x02000000); // FILE_FLAG_BACKUP_SEMANTICS for fixture directories.
     }
+    // Unix cannot open a directory for writing; a read-only handle can still
+    // set its times for the owner.
+    #[cfg(not(windows))]
+    if path.is_dir() {
+        options.write(false).read(true);
+    }
     options
         .open(path)
         .unwrap()

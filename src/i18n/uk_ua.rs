@@ -654,6 +654,9 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count} разів",
         "advance.scheduled_rate" => "Ліміт за розкладом",
         "advance.scheduled_rate_active" => "Зараз діє",
+        "advance.scheduled_rate_note" => {
+            "Діє для завантажень, що почнуться пізніше; поточні завантаження зберігають свій ліміт."
+        }
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "Вимк.",
         "advance.sponsorblock_mark" => "Позначити розділами",

@@ -5,6 +5,9 @@
 //! label and content cells.
 
 use eframe::egui::{self, Align, Layout, Ui};
+
+use crate::app::widgets::url_input::{AppTextBox, AppTextBoxSyntax};
+use crate::i18n::Language;
 use egui_taffy::Tui;
 
 use super::common::settings_taffy_section;
@@ -172,4 +175,36 @@ fn show_settings_cell_content(ui: &mut Ui, element: UiElement, add_contents: imp
             );
         }
     }
+}
+
+/// A single-line text box whose edits stay a local draft until it loses
+/// focus (click elsewhere or Enter). Returns the new value once, at that
+/// moment, when it differs from `current`. Use it for settings that are
+/// saved to disk or used by running work, so neither sees half-typed input.
+pub(super) fn deferred_text_box(
+    ui: &mut Ui,
+    id_salt: &str,
+    current: &str,
+    hint: &str,
+    language: Language,
+    width: f32,
+    enabled: bool,
+) -> Option<String> {
+    let draft_id = ui.make_persistent_id(("deferred-text-box", id_salt));
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(draft_id))
+        .unwrap_or_else(|| current.to_owned());
+    let response = AppTextBox::new(&mut text)
+        .hint_text(hint)
+        .language(language)
+        .syntax(AppTextBoxSyntax::Plain)
+        .desired_width(width)
+        .enabled(enabled)
+        .ui(ui);
+    if response.has_focus() {
+        ui.data_mut(|data| data.insert_temp(draft_id, text));
+        return None;
+    }
+    ui.data_mut(|data| data.remove::<String>(draft_id));
+    (response.lost_focus() && text != current).then_some(text)
 }

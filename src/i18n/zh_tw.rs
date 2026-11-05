@@ -590,6 +590,7 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count} 次",
         "advance.scheduled_rate" => "定時限速",
         "advance.scheduled_rate_active" => "目前生效",
+        "advance.scheduled_rate_note" => "僅對之後開始的下載生效；進行中的下載維持原有限速。",
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "關閉",
         "advance.sponsorblock_mark" => "標記為章節",

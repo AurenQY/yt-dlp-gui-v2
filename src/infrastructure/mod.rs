@@ -82,7 +82,7 @@ pub use config::{
 pub use config::{
     DEFAULT_SPONSORBLOCK_CATEGORIES, MAX_AUTO_RETRY_COUNT, MAX_CONCURRENT_DOWNLOADS,
     MAX_SUBSCRIPTION_INTERVAL_HOURS, RateLimitSchedule, SiteRule, SponsorBlockMode,
-    normalize_max_concurrent_downloads, url_host,
+    normalize_max_concurrent_downloads, normalize_sponsorblock_categories, url_host,
 };
 pub use edition::{
     load_current_runtime_edition, parse_edition_command, run_edition_command, runtime_window_title,

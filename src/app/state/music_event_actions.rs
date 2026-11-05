@@ -335,6 +335,14 @@ impl AppState {
                     }
                 }
 
+                if let Ok(output_path) = &result {
+                    if disposition
+                        == crate::infrastructure::output_policy::OutputDisposition::Published
+                    {
+                        self.note_download_published(item_id, output_path);
+                    }
+                }
+
                 match result {
                     Ok(output_path) => {
                         let source_label = match source_kind {

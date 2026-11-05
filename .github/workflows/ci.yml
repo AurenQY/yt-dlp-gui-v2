@@ -55,7 +55,7 @@ jobs:
           if-no-files-found: error
 
   linux:
-    name: Linux compile check
+    name: Linux build and tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,8 +63,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install system libraries
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev pkg-config
-      - name: Check
-        run: cargo check --locked --all-targets
+      - name: Test
+        run: cargo test --locked
 
   release:
     name: Draft release

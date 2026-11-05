@@ -648,6 +648,9 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count} razy",
         "advance.scheduled_rate" => "Limit według godzin",
         "advance.scheduled_rate_active" => "Aktywny teraz",
+        "advance.scheduled_rate_note" => {
+            "Dotyczy pobrań rozpoczętych później; trwające pobrania zachowują swój limit."
+        }
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "Wyłączone",
         "advance.sponsorblock_mark" => "Oznacz jako rozdziały",

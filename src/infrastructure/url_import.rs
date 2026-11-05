@@ -10,17 +10,45 @@ pub fn extract_urls(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut urls = Vec::new();
     for token in text.split(|ch: char| ch.is_whitespace() || matches!(ch, '"' | '\'' | '<' | '>')) {
-        let Some(start) = token.find("http://").or_else(|| token.find("https://")) else {
+        // The earliest scheme wins, so `https://a/?to=http://b` keeps the
+        // outer URL. ASCII lowercasing keeps byte offsets unchanged.
+        let lower = token.to_ascii_lowercase();
+        let Some(start) = [lower.find("http://"), lower.find("https://")]
+            .into_iter()
+            .flatten()
+            .min()
+        else {
             continue;
         };
-        let candidate = token[start..]
-            .trim_end_matches([',', ';', ')', ']', '}', '.', '!', '?'])
-            .to_owned();
+        let candidate = trim_url_end(&token[start..]).to_owned();
         if super::url_host(&candidate).is_some() && seen.insert(candidate.clone()) {
             urls.push(candidate);
         }
     }
     urls
+}
+
+/// Drop trailing sentence punctuation, and closing brackets only when they
+/// are unbalanced, so `https://en.wikipedia.org/wiki/Foo_(bar)` stays intact
+/// while `(see https://example.com)` loses its `)`.
+fn trim_url_end(mut url: &str) -> &str {
+    loop {
+        let Some(last) = url.chars().last() else {
+            return url;
+        };
+        let unbalanced = |open: char| url.matches(last).count() > url.matches(open).count();
+        let trim = match last {
+            ',' | ';' | '.' | '!' | '?' | ':' => true,
+            ')' => unbalanced('('),
+            ']' => unbalanced('['),
+            '}' => unbalanced('{'),
+            _ => false,
+        };
+        if !trim {
+            return url;
+        }
+        url = &url[..url.len() - last.len_utf8()];
+    }
 }
 
 /// URLs from a dropped or imported file: `.url` / `.webloc` shortcuts or any
@@ -99,6 +127,30 @@ mod tests {
             ]
         );
         assert!(extract_urls("no links here").is_empty());
+    }
+
+    #[test]
+    fn keeps_outer_urls_and_balanced_brackets() {
+        assert_eq!(
+            extract_urls("https://a.com/r?to=http://b.com"),
+            vec!["https://a.com/r?to=http://b.com"]
+        );
+        assert_eq!(
+            extract_urls("HTTPS://Example.com/Path"),
+            vec!["HTTPS://Example.com/Path"]
+        );
+        assert_eq!(
+            extract_urls("See https://en.wikipedia.org/wiki/Foo_(bar)."),
+            vec!["https://en.wikipedia.org/wiki/Foo_(bar)"]
+        );
+        assert_eq!(
+            extract_urls("(see https://example.com/x)"),
+            vec!["https://example.com/x"]
+        );
+        assert_eq!(
+            extract_urls("[link](https://example.com/a_(b)):"),
+            vec!["https://example.com/a_(b)"]
+        );
     }
 
     #[test]

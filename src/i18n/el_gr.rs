@@ -668,6 +668,9 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count} φορές",
         "advance.scheduled_rate" => "Προγραμματισμένο όριο",
         "advance.scheduled_rate_active" => "Ενεργό τώρα",
+        "advance.scheduled_rate_note" => {
+            "Ισχύει για λήψεις που ξεκινούν μετά· οι τρέχουσες λήψεις κρατούν το όριό τους."
+        }
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "Ανενεργό",
         "advance.sponsorblock_mark" => "Σήμανση ως κεφάλαια",

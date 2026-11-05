@@ -6,13 +6,14 @@ const PREFIXES: [&str; 5] = [
     "\"site_rules.",
     "\"item.downloaded_before",
 ];
-const SCOPED_KEYS: [&str; 15] = [
+const SCOPED_KEYS: [&str; 16] = [
     "advance.parallel_downloads",
     "advance.auto_retry",
     "advance.auto_retry_off",
     "advance.auto_retry_times",
     "advance.scheduled_rate",
     "advance.scheduled_rate_active",
+    "advance.scheduled_rate_note",
     "advance.sponsorblock",
     "advance.metadata",
     "advance.embed_metadata",

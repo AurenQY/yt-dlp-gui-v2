@@ -609,7 +609,7 @@ impl AppState {
                             && message.disposition
                                 == crate::infrastructure::output_policy::OutputDisposition::Published
                         {
-                            self.record_download_history(message.item_id, output_path);
+                            self.note_download_published(message.item_id, output_path);
                         }
                     }
 
@@ -749,7 +749,7 @@ impl AppState {
                         if message.disposition
                             == crate::infrastructure::output_policy::OutputDisposition::Published
                         {
-                            self.record_download_history(message.item_id, output_path);
+                            self.note_download_published(message.item_id, output_path);
                         }
                     }
 

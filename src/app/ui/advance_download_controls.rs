@@ -6,8 +6,8 @@ use crate::infrastructure::FileTimeMode;
 
 use super::semantic_ui_metrics;
 use super::settings_components::{
-    SettingsFormLayout, SettingsSelectOption, settings_flexible_form_row, settings_section,
-    settings_select_row, settings_toggle_row,
+    SettingsFormLayout, SettingsSelectOption, deferred_text_box, settings_flexible_form_row,
+    settings_section, settings_select_row, settings_toggle_row,
 };
 
 pub(super) fn render_aria2_section(tui: &mut Tui, state: &mut AppState, form: SettingsFormLayout) {
@@ -183,45 +183,59 @@ pub(super) fn render_download_processing_section(
 }
 
 fn render_scheduled_rate_controls(ui: &mut eframe::egui::Ui, state: &mut AppState) {
-    let mut schedule = state.config.limit_rate_schedule.clone();
-    let mut changed = false;
+    let current = state.config.limit_rate_schedule.clone();
+    let mut next = current.clone();
+    let mut commit = false;
     let language = state.language();
     ui.horizontal_wrapped(|ui| {
-        changed |= ui
+        commit |= ui
             .checkbox(
-                &mut schedule.enabled,
+                &mut next.enabled,
                 state.ui_i18n_text_for_key("options.enable"),
             )
             .changed();
-        for (value, hint) in [(&mut schedule.start, "09:00"), (&mut schedule.end, "18:00")] {
-            let response = AppTextBox::new(value)
-                .hint_text(hint)
-                .language(language)
-                .syntax(AppTextBoxSyntax::Plain)
-                .desired_width(SCHEDULE_TIME_FIELD_WIDTH)
-                .enabled(schedule.enabled)
-                .ui(ui);
-            // Commit clock times when editing ends; partial input stays local.
-            changed |= response.lost_focus();
+        let enabled = next.enabled;
+        for (salt, value, hint) in [
+            ("scheduled-rate-start", &mut next.start, "09:00"),
+            ("scheduled-rate-end", &mut next.end, "18:00"),
+        ] {
+            if let Some(text) = deferred_text_box(
+                ui,
+                salt,
+                value,
+                hint,
+                language,
+                SCHEDULE_TIME_FIELD_WIDTH,
+                enabled,
+            ) {
+                *value = text;
+                commit = true;
+            }
         }
         ui.label(state.ui_i18n_text_for_key("advance.rate_limit"));
-        changed |= AppTextBox::new(&mut schedule.rate)
-            .hint_text(state.ui_i18n_text_for_key("advance.e_g_2m_800k_leave_empty_for_unlimited"))
-            .language(language)
-            .syntax(AppTextBoxSyntax::Plain)
-            .desired_width(semantic_ui_metrics::advance_form_standard_text_field_width())
-            .enabled(schedule.enabled)
-            .ui(ui)
-            .changed();
-        if schedule.enabled && state.active_scheduled_rate_limit().is_some() {
+        if let Some(text) = deferred_text_box(
+            ui,
+            "scheduled-rate-value",
+            &current.rate,
+            state.ui_i18n_text_for_key("advance.e_g_2m_800k_leave_empty_for_unlimited"),
+            language,
+            semantic_ui_metrics::advance_form_standard_text_field_width(),
+            enabled,
+        ) {
+            next.rate = text;
+            commit = true;
+        }
+        if enabled && state.active_scheduled_rate_limit().is_some() {
             ui.label(state.ui_i18n_text_for_key("advance.scheduled_rate_active"));
         }
     });
-    if changed {
-        state.set_limit_rate_schedule(schedule.normalized());
-    } else if schedule != state.config.limit_rate_schedule {
-        // Keep in-progress time edits until focus leaves the field.
-        state.config.limit_rate_schedule = schedule;
+    ui.label(
+        eframe::egui::RichText::new(state.ui_i18n_text_for_key("advance.scheduled_rate_note"))
+            .weak()
+            .small(),
+    );
+    if commit {
+        state.set_limit_rate_schedule(next.normalized());
     }
 }
 

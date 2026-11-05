@@ -642,6 +642,9 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count}회",
         "advance.scheduled_rate" => "시간대 속도 제한",
         "advance.scheduled_rate_active" => "현재 적용 중",
+        "advance.scheduled_rate_note" => {
+            "이후 시작되는 다운로드에 적용됩니다. 진행 중인 다운로드는 기존 제한을 유지합니다."
+        }
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "끔",
         "advance.sponsorblock_mark" => "챕터로 표시",

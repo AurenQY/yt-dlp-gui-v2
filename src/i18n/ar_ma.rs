@@ -628,6 +628,9 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count} مرات",
         "advance.scheduled_rate" => "حد مجدول",
         "advance.scheduled_rate_active" => "نشط الآن",
+        "advance.scheduled_rate_note" => {
+            "ينطبق على التنزيلات التي تبدأ لاحقًا؛ تحتفظ التنزيلات الجارية بحدها."
+        }
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "إيقاف",
         "advance.sponsorblock_mark" => "وسم كفصول",
