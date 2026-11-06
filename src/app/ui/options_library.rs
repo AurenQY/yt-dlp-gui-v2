@@ -89,7 +89,7 @@ pub(super) fn render_playlist_filter_row(
             let current = state.config.playlist_match_filter.clone();
             if let Some(filter) = super::settings_components::deferred_text_box(
                 ui,
-                "playlist-match-filter",
+                crate::app::state::DeferredSetting::PlaylistMatchFilter,
                 &current,
                 state.ui_i18n_text_for_key("options.playlist_filter_hint"),
                 state.language(),

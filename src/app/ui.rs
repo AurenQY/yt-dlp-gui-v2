@@ -269,6 +269,7 @@ pub fn render_app(root_ui: &mut Ui, state: &mut AppState, render_resources: &UiR
     options_prompts::render_gallery_backend_prompt(root_ui.ctx(), state);
     options_prompts::render_music_download_prompt(root_ui.ctx(), state);
     advance_cookie_rescue::render_youtube_login_rescue_dialog(root_ui.ctx(), state);
+    settings_components::commit_orphaned_setting_drafts(root_ui.ctx(), state);
 }
 
 fn handle_hidden_music_aura_shortcut(ui: &Ui, render_resources: &UiRenderResources) {

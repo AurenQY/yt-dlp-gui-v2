@@ -69,6 +69,16 @@ pub enum TaskbarProgress {
     Error(f32),
 }
 
+/// A text setting edited through a draft that is applied when editing ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DeferredSetting {
+    PlaylistMatchFilter,
+    SponsorBlockCategories,
+    ScheduledRateStart,
+    ScheduledRateEnd,
+    ScheduledRateValue,
+}
+
 pub(crate) struct ProductivityState {
     pending_imports: VecDeque<String>,
     last_injected_import: Option<String>,
@@ -1113,6 +1123,28 @@ impl AppState {
     pub fn set_limit_rate_schedule(&mut self, schedule: crate::infrastructure::RateLimitSchedule) {
         self.config.limit_rate_schedule = schedule;
         let _ = self.config.save();
+    }
+
+    /// Applies a draft whose text box is gone (its page was left) or that is
+    /// still open when the window closes.
+    pub fn apply_deferred_setting(&mut self, setting: DeferredSetting, value: &str) {
+        let mut schedule = self.config.limit_rate_schedule.clone();
+        let field = match setting {
+            DeferredSetting::PlaylistMatchFilter => {
+                return self.set_playlist_match_filter(value);
+            }
+            DeferredSetting::SponsorBlockCategories => {
+                return self.set_sponsorblock_categories(value);
+            }
+            DeferredSetting::ScheduledRateStart => &mut schedule.start,
+            DeferredSetting::ScheduledRateEnd => &mut schedule.end,
+            DeferredSetting::ScheduledRateValue => &mut schedule.rate,
+        };
+        if field == value {
+            return;
+        }
+        *field = value.to_owned();
+        self.set_limit_rate_schedule(schedule.normalized());
     }
 
     // ---- site rules --------------------------------------------------------

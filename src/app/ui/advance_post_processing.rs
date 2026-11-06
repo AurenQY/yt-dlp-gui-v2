@@ -148,7 +148,7 @@ fn render_sponsorblock_controls(ui: &mut egui::Ui, state: &mut AppState) {
                 let current = state.config.sponsorblock_categories.clone();
                 if let Some(categories) = super::settings_components::deferred_text_box(
                     ui,
-                    "sponsorblock-categories",
+                    crate::app::state::DeferredSetting::SponsorBlockCategories,
                     &current,
                     crate::infrastructure::DEFAULT_SPONSORBLOCK_CATEGORIES,
                     state.language(),

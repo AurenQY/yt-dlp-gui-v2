@@ -107,6 +107,7 @@ pub(crate) use gallery_queue_actions::GalleryDownloaderChoice;
 pub use gallery_range_actions::{GalleryRangePicker, GalleryRangeSection};
 #[cfg(test)]
 mod cache_review_round2_tests;
+mod gallery_readiness_actions;
 mod item_format_actions;
 mod log;
 mod log_actions;
@@ -129,10 +130,11 @@ mod options_actions;
 mod origin_download_actions;
 #[cfg(test)]
 mod output_review_tests;
-mod gallery_readiness_actions;
 mod prepare_actions;
 mod productivity_actions;
-pub use self::productivity_actions::{AfterQueueAction, QueueStatusFilter, TaskbarProgress};
+pub use self::productivity_actions::{
+    AfterQueueAction, DeferredSetting, QueueStatusFilter, TaskbarProgress,
+};
 mod prepare_visibility_helpers;
 mod queue_batch_helpers;
 mod queue_input_actions;

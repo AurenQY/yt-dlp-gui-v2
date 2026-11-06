@@ -1,6 +1,6 @@
 use egui_taffy::Tui;
 
-use crate::app::state::AppState;
+use crate::app::state::{AppState, DeferredSetting};
 use crate::app::widgets::url_input::{AppTextBox, AppTextBoxSyntax};
 use crate::infrastructure::FileTimeMode;
 
@@ -195,13 +195,17 @@ fn render_scheduled_rate_controls(ui: &mut eframe::egui::Ui, state: &mut AppStat
             )
             .changed();
         let enabled = next.enabled;
-        for (salt, value, hint) in [
-            ("scheduled-rate-start", &mut next.start, "09:00"),
-            ("scheduled-rate-end", &mut next.end, "18:00"),
+        for (setting, value, hint) in [
+            (
+                DeferredSetting::ScheduledRateStart,
+                &mut next.start,
+                "09:00",
+            ),
+            (DeferredSetting::ScheduledRateEnd, &mut next.end, "18:00"),
         ] {
             if let Some(text) = deferred_text_box(
                 ui,
-                salt,
+                setting,
                 value,
                 hint,
                 language,
@@ -215,7 +219,7 @@ fn render_scheduled_rate_controls(ui: &mut eframe::egui::Ui, state: &mut AppStat
         ui.label(state.ui_i18n_text_for_key("advance.rate_limit"));
         if let Some(text) = deferred_text_box(
             ui,
-            "scheduled-rate-value",
+            DeferredSetting::ScheduledRateValue,
             &current.rate,
             state.ui_i18n_text_for_key("advance.e_g_2m_800k_leave_empty_for_unlimited"),
             language,
