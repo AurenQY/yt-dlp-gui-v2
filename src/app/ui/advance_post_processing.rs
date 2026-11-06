@@ -3,7 +3,6 @@ use egui_taffy::Tui;
 
 use crate::app::state::{AdvanceDetailPage, AppState};
 use crate::app::widgets::icon::AppIcon;
-use crate::app::widgets::url_input::{AppTextBox, AppTextBoxSyntax};
 use crate::infrastructure::{PostProcessMode, SponsorBlockMode};
 
 use super::common::{settings_taffy_form_row, settings_taffy_section, text_trailing_icon_button};
@@ -146,17 +145,16 @@ fn render_sponsorblock_controls(ui: &mut egui::Ui, state: &mut AppState) {
         if state.config.sponsorblock_mode != SponsorBlockMode::Off {
             ui.horizontal_wrapped(|ui| {
                 ui.label(state.ui_i18n_text_for_key("advance.sponsorblock_categories"));
-                let mut categories = state.config.sponsorblock_categories.clone();
-                if AppTextBox::new(&mut categories)
-                    .hint_text(crate::infrastructure::DEFAULT_SPONSORBLOCK_CATEGORIES)
-                    .language(state.language())
-                    .syntax(AppTextBoxSyntax::Plain)
-                    .desired_width(
-                        super::semantic_ui_metrics::advance_form_standard_text_field_width(),
-                    )
-                    .ui(ui)
-                    .changed()
-                {
+                let current = state.config.sponsorblock_categories.clone();
+                if let Some(categories) = super::settings_components::deferred_text_box(
+                    ui,
+                    crate::app::state::DeferredSetting::SponsorBlockCategories,
+                    &current,
+                    crate::infrastructure::DEFAULT_SPONSORBLOCK_CATEGORIES,
+                    state.language(),
+                    super::semantic_ui_metrics::advance_form_standard_text_field_width(),
+                    true,
+                ) {
                     state.set_sponsorblock_categories(&categories);
                 }
             });

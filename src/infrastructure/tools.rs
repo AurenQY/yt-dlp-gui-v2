@@ -649,6 +649,45 @@ impl ToolPaths {
         Ok(command)
     }
 
+    /// Flat listing for a subscription check: the first `limit` entries, and
+    /// with `include_tail` also the last `limit` entries. Reading the tail
+    /// needs the full entry count, so this listing is not lazy.
+    pub(crate) fn prepare_subscription_scan_command(
+        &self,
+        url: &str,
+        use_cookies: bool,
+        limit: usize,
+        include_tail: bool,
+    ) -> Result<Command, String> {
+        let tool_path = self.validate_yt_dlp_available()?;
+        let (tools, mut command) = self.prepare_metadata_command(&tool_path)?;
+        tools.apply_cookie_args(&mut command, use_cookies, Some(url))?;
+        command
+            .arg("--flat-playlist")
+            .arg("--dump-json")
+            .arg("--no-warnings")
+            .arg("--ignore-errors")
+            .arg("--yes-playlist");
+        tools.apply_playlist_match_filter(&mut command);
+        let limit = limit.max(1);
+        if include_tail {
+            command
+                .arg("--playlist-items")
+                .arg(format!("1:{limit},-{limit}:"));
+        } else {
+            command
+                .arg("--lazy-playlist")
+                .arg("--playlist-end")
+                .arg(limit.to_string());
+        }
+        command.arg(url);
+        eprintln!(
+            "[subscription] command: {}",
+            format_command_line(&tool_path, &command)
+        );
+        Ok(command)
+    }
+
     pub fn prepare_music_flat_update_command(
         &self,
         url: &str,

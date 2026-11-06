@@ -17,13 +17,13 @@ The release badges and installation link below point to the upstream project's r
 #### Additional features in this fork
 
 - **Parallel downloads**: Advanced › Download control › Parallel downloads (1–5). gallery-dl jobs, Origin Mode and Audio Mode keep downloading one item at a time.
-- **Automatic retry**: transient network errors and HTTP 429 are retried with exponential backoff (10 s, or 30 s for rate limits, doubling up to 5 min). Configure the count in Advanced › Download control. **Retry failed** re-queues every failed item.
+- **Automatic retry**: optional retries for transient network errors and HTTP 429 with exponential backoff (10 s, or 30 s for rate limits, doubling up to 5 min). It is off by default; set the count in Advanced › Download control. **Retry failed** re-queues every failed item.
 - **Import URLs**: drop `.txt`, `.url` or `.webloc` files on the main window, use **Import**, or press Ctrl+V outside a text field. Several URLs are added one after another through the normal add flow.
-- **Queue tools**: search and status filter for the queue; a one-time **When done** action (open folder, sleep, shut down with a 30-second cancellable countdown); **Start at** a local time. Windows shows overall progress on the taskbar button.
+- **Queue tools**: search and status filter for the queue; a one-time **When done** action (open the folder the downloads went to, sleep, or shut down with a 30-second cancellable countdown) that runs only when the queue finishes with at least one completed download and was not stopped by you; **Start at** a local time. Windows shows overall progress on the taskbar button.
 - **Download history**: completed downloads are stored in `data/history.yaml`. Options › Library › History can search them, open the file or folder, or add the source again. Queue items from a source you downloaded before are marked as such.
-- **Subscriptions**: Options › Library › Subscriptions checks channels and playlists for new items (every 6 hours by default) and adds them to the queue. The first check only records the existing items. Data is stored in `data/subscriptions.yaml`.
+- **Subscriptions**: Options › Library › Subscriptions checks channels and playlists for new items (every 6 hours by default) and adds them to the queue. The first check only records the existing items. YouTube channel tabs are read from the newest end; other playlists are read at both ends, so entries appended to a long playlist are found too. Data is stored in `data/subscriptions.yaml`.
 - **Site folders**: Options › Library › Site folders saves items from a site, for example `bilibili.com`, to its own folder when they use the main download folder.
-- **Scheduled speed limit**: Advanced › Download control › Scheduled limit uses a different `--limit-rate` during a daily time window.
+- **Scheduled speed limit**: Advanced › Download control › Scheduled limit uses a different `--limit-rate` during a daily time window. It applies to downloads that start inside the window; running downloads keep their limit.
 - **SponsorBlock and metadata**: Advanced › Post-processing can mark or remove SponsorBlock segments and embed title, artist and date metadata.
 - **Playlist filter**: Options › Playlist › Playlist filter passes a yt-dlp `--match-filters` expression (for example `duration > 60`) when playlists and subscriptions are expanded.
 
@@ -33,11 +33,13 @@ A yt-dlp configuration file that sets the same options (`--sponsorblock-*`, `--e
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+V (outside a text field) | Add the pasted URL, or import several URLs |
+| Ctrl+V | Add the pasted URL, or import several URLs |
 | Ctrl+Enter | Start downloading the queue |
-| Ctrl+F | Focus the queue search |
+| Ctrl+F | Focus the queue search (also from a text field) |
 | Ctrl+O | Import URLs from files |
 | Ctrl+R | Retry failed items |
+
+Except for Ctrl+F, these shortcuts apply only while no text field has focus, so text fields keep their own key handling.
 
 #### Building
 
@@ -49,7 +51,7 @@ cargo test
 cargo build --release
 ```
 
-Windows is the supported target. Linux builds compile for development and CI; they need the ALSA, xkbcommon and Wayland development packages (`libasound2-dev libxkbcommon-dev libwayland-dev pkg-config` on Debian/Ubuntu). A few storage tests rely on Windows file-system behaviour and fail on Linux.
+Windows is the supported target. Linux builds compile and run the test suite for development and CI; they need the ALSA, xkbcommon and Wayland development packages (`libasound2-dev libxkbcommon-dev libwayland-dev pkg-config` on Debian/Ubuntu). On non-Windows builds, schedules and history timestamps use UTC instead of the local time zone.
 
 <img src="./screenshot01.png" width="633" alt="yt-dlp-gui screenshot">
 

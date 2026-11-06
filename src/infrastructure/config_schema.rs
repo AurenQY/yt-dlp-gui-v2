@@ -165,7 +165,7 @@ pub(super) const FIELDS: &[Field] = &[
     Field {
         source: "auto_retry_count",
         path: "download.auto_retry",
-        comment: "Automatic retries after transient network errors or HTTP 429, from 0 to 10. 0 disables retries.",
+        comment: "Automatic retries after transient network errors or HTTP 429, from 0 to 10. 0 (the default) disables retries.",
     },
     Field {
         source: "site_rules",

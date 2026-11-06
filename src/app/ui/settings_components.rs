@@ -4,7 +4,13 @@
 //! width and spacing, while every row derives its height from its own rendered
 //! label and content cells.
 
+use std::collections::BTreeMap;
+
 use eframe::egui::{self, Align, Layout, Ui};
+
+use crate::app::state::{AppState, DeferredSetting};
+use crate::app::widgets::url_input::{AppTextBox, AppTextBoxSyntax};
+use crate::i18n::Language;
 use egui_taffy::Tui;
 
 use super::common::settings_taffy_section;
@@ -171,5 +177,85 @@ fn show_settings_cell_content(ui: &mut Ui, element: UiElement, add_contents: imp
                 add_contents,
             );
         }
+    }
+}
+
+/// Drafts of the deferred text boxes, with the frame each box last drew.
+#[derive(Clone, Default)]
+struct DeferredDrafts(BTreeMap<DeferredSetting, (String, u64)>);
+
+fn deferred_drafts_id() -> egui::Id {
+    egui::Id::new("deferred-setting-drafts")
+}
+
+/// A single-line text box whose edits stay a draft until editing ends:
+/// focus moves elsewhere or Enter is pressed. Returns the new value once, at
+/// that moment, when it differs from `current`. Use it for settings that are
+/// saved to disk or used by running work, so neither sees half-typed input.
+/// A draft whose box stops being drawn, for example because another page was
+/// opened, is applied by [`commit_orphaned_setting_drafts`].
+pub(super) fn deferred_text_box(
+    ui: &mut Ui,
+    setting: DeferredSetting,
+    current: &str,
+    hint: &str,
+    language: Language,
+    width: f32,
+    enabled: bool,
+) -> Option<String> {
+    let frame = ui.ctx().cumulative_frame_nr();
+    let mut text = ui
+        .data(|data| {
+            data.get_temp::<DeferredDrafts>(deferred_drafts_id())
+                .and_then(|drafts| drafts.0.get(&setting).map(|(text, _)| text.clone()))
+        })
+        .unwrap_or_else(|| current.to_owned());
+    let response = AppTextBox::new(&mut text)
+        .hint_text(hint)
+        .language(language)
+        .syntax(AppTextBoxSyntax::Plain)
+        .desired_width(width)
+        .enabled(enabled)
+        .ui(ui);
+    let entered = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if entered {
+        response.surrender_focus();
+    }
+    // Read focus before taking the data lock: `has_focus` locks the context too.
+    let editing = response.has_focus() && !entered;
+    ui.data_mut(|data| {
+        let drafts = data.get_temp_mut_or_default::<DeferredDrafts>(deferred_drafts_id());
+        if editing {
+            drafts.0.insert(setting, (text.clone(), frame));
+        } else {
+            drafts.0.remove(&setting);
+        }
+    });
+    if editing {
+        return None;
+    }
+    ((entered || response.lost_focus()) && text != current).then_some(text)
+}
+
+/// Applies drafts whose text box was not drawn this frame, and every draft
+/// when the window is closing. Call once per frame after the UI is drawn.
+pub(super) fn commit_orphaned_setting_drafts(ctx: &egui::Context, state: &mut AppState) {
+    let frame = ctx.cumulative_frame_nr();
+    let closing = ctx.input(|input| input.viewport().close_requested());
+    let orphaned = ctx.data_mut(|data| {
+        let drafts = data.get_temp_mut_or_default::<DeferredDrafts>(deferred_drafts_id());
+        let stale = drafts
+            .0
+            .iter()
+            .filter(|(_, (_, drawn))| closing || *drawn < frame)
+            .map(|(setting, (text, _))| (*setting, text.clone()))
+            .collect::<Vec<_>>();
+        for (setting, _) in &stale {
+            drafts.0.remove(setting);
+        }
+        stale
+    });
+    for (setting, text) in orphaned {
+        state.apply_deferred_setting(setting, &text);
     }
 }

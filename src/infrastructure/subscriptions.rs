@@ -1,8 +1,11 @@
 //! Channel and playlist subscriptions in `<application-root>/data/subscriptions.yaml`.
 //!
-//! A check lists the newest entries with `yt-dlp --flat-playlist` and reports
-//! the ones not seen before. The first check of a subscription only records
-//! what already exists, so subscribing never floods the queue with old items.
+//! A check lists entries with `yt-dlp --flat-playlist` and reports the ones
+//! not seen before. YouTube channel tabs list the newest upload first, so only
+//! their head is scanned; other playlists usually append new entries at the
+//! end, so both their head and their tail are scanned. The first check of a
+//! subscription only records what already exists, so subscribing never floods
+//! the queue with old items.
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
@@ -16,8 +19,44 @@ use serde_json::Value;
 
 use super::ToolPaths;
 
-/// Newest playlist entries inspected per check.
+/// Entries inspected at each scanned end of a playlist per check.
 pub const SUBSCRIPTION_SCAN_LIMIT: usize = 30;
+
+/// Which part of a listing a check reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScanWindow {
+    /// The first entries only (listings that put the newest entry first).
+    Head,
+    /// The first and the last entries (new entries may be appended).
+    HeadAndTail,
+}
+
+/// YouTube channel tabs are newest-first and can be thousands of entries
+/// long, so reading their tail would page through the whole channel.
+pub fn subscription_scan_window(url: &str) -> ScanWindow {
+    let Some(host) = super::url_host(url) else {
+        return ScanWindow::HeadAndTail;
+    };
+    if host != "youtube.com" && !host.ends_with(".youtube.com") {
+        return ScanWindow::HeadAndTail;
+    }
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let path = after_scheme
+        .split_once('/')
+        .map_or("", |(_, path)| path)
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default();
+    let first = path
+        .split('/')
+        .find(|part| !part.is_empty())
+        .unwrap_or_default();
+    if first.starts_with('@') || matches!(first, "channel" | "c" | "user") {
+        ScanWindow::Head
+    } else {
+        ScanWindow::HeadAndTail
+    }
+}
 /// Seen IDs kept per subscription; older ones cannot reappear in the scan window.
 const SEEN_ID_LIMIT: usize = 500;
 
@@ -72,30 +111,46 @@ impl Subscription {
             self.name = scan.title.trim().to_owned();
         }
         let seen = self.seen_ids.iter().cloned().collect::<HashSet<_>>();
-        let mut fresh = scan
+        let fresh = scan
             .entries
             .iter()
             .filter(|entry| !seen.contains(&entry.id))
             .cloned()
             .collect::<Vec<_>>();
+        let known_indices = scan
+            .entries
+            .iter()
+            .filter(|entry| seen.contains(&entry.id))
+            .filter_map(|entry| entry.index)
+            .collect::<Vec<_>>();
         let first_check = !self.initialized;
         self.initialized = true;
-        for entry in &scan.entries {
-            if !seen.contains(&entry.id) && !self.seen_ids.contains(&entry.id) {
-                self.seen_ids.push(entry.id.clone());
-            }
-        }
-        if self.seen_ids.len() > SEEN_ID_LIMIT {
-            let excess = self.seen_ids.len() - SEEN_ID_LIMIT;
-            self.seen_ids.drain(..excess);
-        }
+        self.remember_scanned_ids(scan);
         if first_check {
             return Vec::new();
         }
-        // Channel and playlist listings put the newest entry first.
-        fresh.reverse();
+        let fresh = order_new_entries(fresh, &known_indices);
         self.new_items_total += fresh.len() as u64;
         fresh
+    }
+
+    /// Keep every ID in the current scan window, then the most recent others.
+    fn remember_scanned_ids(&mut self, scan: &SubscriptionScan) {
+        let scanned = scan
+            .entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<HashSet<_>>();
+        let mut ids = std::mem::take(&mut self.seen_ids)
+            .into_iter()
+            .filter(|id| !scanned.contains(id.as_str()))
+            .collect::<Vec<_>>();
+        ids.extend(scan.entries.iter().map(|entry| entry.id.clone()));
+        if ids.len() > SEEN_ID_LIMIT {
+            let excess = ids.len() - SEEN_ID_LIMIT;
+            ids.drain(..excess);
+        }
+        self.seen_ids = ids;
     }
 
     pub fn record_error(&mut self, error: &str, checked_at: &str, unix: u64) {
@@ -192,6 +247,31 @@ pub struct SubscriptionEntry {
     pub id: String,
     pub url: String,
     pub title: String,
+    /// One-based `playlist_index` reported by yt-dlp, when available.
+    pub index: Option<usize>,
+}
+
+/// Order new entries oldest first. Entries listed before every known entry
+/// were prepended (newest-first listing) and are reversed; entries after the
+/// known ones were appended and keep their order.
+fn order_new_entries(
+    fresh: Vec<SubscriptionEntry>,
+    known_indices: &[usize],
+) -> Vec<SubscriptionEntry> {
+    if fresh.iter().any(|entry| entry.index.is_none()) {
+        // Without positions, fall back to the newest-first assumption.
+        let mut fresh = fresh;
+        fresh.reverse();
+        return fresh;
+    }
+    let first_known = known_indices.iter().copied().min().unwrap_or(usize::MAX);
+    let (mut prepended, mut appended): (Vec<_>, Vec<_>) = fresh
+        .into_iter()
+        .partition(|entry| entry.index.unwrap_or_default() < first_known);
+    prepended.sort_by_key(|entry| std::cmp::Reverse(entry.index));
+    appended.sort_by_key(|entry| entry.index);
+    prepended.extend(appended);
+    prepended
 }
 
 #[derive(Clone, Debug, Default)]
@@ -241,7 +321,16 @@ pub fn parse_flat_playlist_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        scan.entries.push(SubscriptionEntry { id, url, title });
+        let index = entry
+            .get("playlist_index")
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok());
+        scan.entries.push(SubscriptionEntry {
+            id,
+            url,
+            title,
+            index,
+        });
     }
     scan
 }
@@ -254,10 +343,11 @@ pub fn scan_subscription(
     cancel: &AtomicBool,
 ) -> Result<SubscriptionScan, String> {
     let _storage_use = super::storage_paths::use_cache()?;
-    let mut command = tool_paths.prepare_playlist_discovery_command(
+    let mut command = tool_paths.prepare_subscription_scan_command(
         url,
         use_cookies,
-        Some(SUBSCRIPTION_SCAN_LIMIT),
+        SUBSCRIPTION_SCAN_LIMIT,
+        subscription_scan_window(url) == ScanWindow::HeadAndTail,
     )?;
     command
         .stdout(Stdio::piped())
@@ -352,6 +442,118 @@ mod tests {
     fn scan(ids: &[&str]) -> SubscriptionScan {
         let lines = ids.iter().map(|id| line(id, id)).collect::<Vec<_>>();
         parse_flat_playlist_lines(lines.iter().map(String::as_str))
+    }
+
+    fn indexed_scan(entries: &[(&str, usize)]) -> SubscriptionScan {
+        let lines = entries
+            .iter()
+            .map(|(id, index)| {
+                format!(
+                    r#"{{"id":"{id}","title":"{id}","url":"https://example.com/{id}","playlist_index":{index}}}"#
+                )
+            })
+            .collect::<Vec<_>>();
+        parse_flat_playlist_lines(lines.iter().map(String::as_str))
+    }
+
+    /// Head and tail windows of a playlist with `len` entries `e1..=e{len}`.
+    fn playlist_window(len: usize) -> Vec<(String, usize)> {
+        let limit = SUBSCRIPTION_SCAN_LIMIT;
+        (1..=len)
+            .filter(|index| *index <= limit || *index + limit > len)
+            .map(|index| (format!("e{index}"), index))
+            .collect()
+    }
+
+    fn as_refs(entries: &[(String, usize)]) -> Vec<(&str, usize)> {
+        entries
+            .iter()
+            .map(|(id, index)| (id.as_str(), *index))
+            .collect()
+    }
+
+    #[test]
+    fn entries_appended_to_a_long_playlist_are_found_in_order() {
+        let mut subscription = Subscription::new("https://example.com/list/1").unwrap();
+        let first = playlist_window(45);
+        assert!(
+            subscription
+                .apply_scan(&indexed_scan(&as_refs(&first)), "t1", 1)
+                .is_empty()
+        );
+        let grown = playlist_window(48);
+        let fresh = subscription.apply_scan(&indexed_scan(&as_refs(&grown)), "t2", 2);
+        assert_eq!(
+            fresh
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["e46", "e47", "e48"],
+            "appended entries are reported oldest first"
+        );
+        assert!(
+            subscription
+                .apply_scan(&indexed_scan(&as_refs(&grown)), "t3", 3)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn entries_prepended_to_a_newest_first_listing_are_reversed() {
+        let mut subscription = Subscription::new("https://www.youtube.com/@name/videos").unwrap();
+        subscription.apply_scan(&indexed_scan(&[("a", 1), ("b", 2)]), "t1", 1);
+        let fresh = subscription.apply_scan(
+            &indexed_scan(&[("z", 1), ("y", 2), ("a", 3), ("b", 4)]),
+            "t2",
+            2,
+        );
+        assert_eq!(
+            fresh
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["y", "z"]
+        );
+    }
+
+    #[test]
+    fn scanned_ids_survive_the_seen_limit() {
+        let mut subscription = Subscription::new("https://example.com/list/2").unwrap();
+        subscription.apply_scan(&indexed_scan(&[("keep", 1)]), "t1", 1);
+        subscription
+            .seen_ids
+            .extend((0..SEEN_ID_LIMIT).map(|n| format!("old{n}")));
+        let fresh = subscription.apply_scan(&indexed_scan(&[("keep", 1), ("new", 2)]), "t2", 2);
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(subscription.seen_ids.len(), SEEN_ID_LIMIT);
+        assert!(subscription.seen_ids.contains(&"keep".to_owned()));
+        assert!(
+            subscription
+                .apply_scan(&indexed_scan(&[("keep", 1), ("new", 2)]), "t3", 3)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn only_youtube_channel_tabs_scan_the_head_alone() {
+        for url in [
+            "https://www.youtube.com/@name/videos",
+            "https://youtube.com/channel/UC1/streams",
+            "https://www.youtube.com/c/name/videos",
+        ] {
+            assert_eq!(subscription_scan_window(url), ScanWindow::Head, "{url}");
+        }
+        for url in [
+            "https://www.youtube.com/playlist?list=PL1",
+            "https://www.bilibili.com/@name",
+            "https://example.com/feed.xml",
+        ] {
+            assert_eq!(
+                subscription_scan_window(url),
+                ScanWindow::HeadAndTail,
+                "{url}"
+            );
+        }
     }
 
     #[test]

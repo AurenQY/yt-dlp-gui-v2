@@ -134,7 +134,8 @@ pub struct AppConfig {
     pub prepare_skipped: bool,
     /// Parallel yt-dlp downloads in the Standard queue (1 keeps the classic serial queue).
     pub max_concurrent_downloads: usize,
-    /// Automatic retries for transient network failures and HTTP 429 (0 disables).
+    /// Automatic retries for transient network failures and HTTP 429. Off (0)
+    /// by default, matching the earlier website-friendly no-retry policy.
     pub auto_retry_count: usize,
     pub sponsorblock_mode: SponsorBlockMode,
     pub sponsorblock_categories: String,
@@ -988,7 +989,7 @@ impl Default for AppConfig {
             enable_batch_panel: true,
             prepare_skipped: false,
             max_concurrent_downloads: 1,
-            auto_retry_count: 3,
+            auto_retry_count: 0,
             sponsorblock_mode: SponsorBlockMode::Off,
             sponsorblock_categories: DEFAULT_SPONSORBLOCK_CATEGORIES.to_owned(),
             embed_metadata: false,

@@ -670,6 +670,9 @@ pub fn text<'a>(key: &'a str) -> &'a str {
         "advance.auto_retry_times" => "{count}-mal",
         "advance.scheduled_rate" => "Zeitgesteuertes Limit",
         "advance.scheduled_rate_active" => "Jetzt aktiv",
+        "advance.scheduled_rate_note" => {
+            "Gilt für danach gestartete Downloads; laufende Downloads behalten ihr Limit."
+        }
         "advance.sponsorblock" => "SponsorBlock",
         "advance.sponsorblock_off" => "Aus",
         "advance.sponsorblock_mark" => "Als Kapitel markieren",

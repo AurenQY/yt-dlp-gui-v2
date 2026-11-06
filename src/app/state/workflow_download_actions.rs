@@ -428,6 +428,7 @@ impl AppState {
                 }
             });
         }
+        self.note_download_stopped_by_user();
         self.last_action = "Stopping download...".to_owned();
     }
 

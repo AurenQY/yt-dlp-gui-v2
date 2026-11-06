@@ -69,6 +69,16 @@ pub enum TaskbarProgress {
     Error(f32),
 }
 
+/// A text setting edited through a draft that is applied when editing ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DeferredSetting {
+    PlaylistMatchFilter,
+    SponsorBlockCategories,
+    ScheduledRateStart,
+    ScheduledRateEnd,
+    ScheduledRateValue,
+}
+
 pub(crate) struct ProductivityState {
     pending_imports: VecDeque<String>,
     last_injected_import: Option<String>,
@@ -79,6 +89,14 @@ pub(crate) struct ProductivityState {
     queue_run_active: bool,
     run_baseline_done: usize,
     run_baseline_failed: usize,
+    /// Outputs published during the current queue run.
+    run_published: usize,
+    /// Folders that received the current run's outputs.
+    run_output_dirs: std::collections::BTreeSet<PathBuf>,
+    /// The user stopped a download during the current run.
+    run_stopped_by_user: bool,
+    /// The "imports are waiting for a downloader" notice was shown.
+    import_blocked_notice_shown: bool,
     scheduled_start_minute: Option<u32>,
     scheduled_start_deadline: Option<Instant>,
     history: DownloadHistory,
@@ -108,6 +126,10 @@ impl ProductivityState {
             queue_run_active: false,
             run_baseline_done: 0,
             run_baseline_failed: 0,
+            run_published: 0,
+            run_output_dirs: Default::default(),
+            run_stopped_by_user: false,
+            import_blocked_notice_shown: false,
             scheduled_start_minute: None,
             scheduled_start_deadline: None,
             history: DownloadHistory::load(),
@@ -297,6 +319,7 @@ impl AppState {
                 continue;
             }
             self.productivity.pending_imports.push_back(url);
+            self.productivity.import_blocked_notice_shown = false;
             added += 1;
         }
         self.last_action = if added == 0 {
@@ -396,11 +419,20 @@ impl AppState {
             }
             return;
         };
+        // gallery-dl can analyze URLs without yt-dlp, exactly like the Add
+        // button; wait only when neither downloader is available, and say so
+        // once instead of overwriting the status line on every poll.
         if let Err(error) = self.ensure_yt_dlp_ready() {
-            self.productivity.pending_imports.push_front(url);
-            self.last_action = error;
-            return;
+            if !self.gallery_is_ready_for_display() {
+                self.productivity.pending_imports.push_front(url);
+                if !self.productivity.import_blocked_notice_shown {
+                    self.productivity.import_blocked_notice_shown = true;
+                    self.last_action = error;
+                }
+                return;
+            }
         }
+        self.productivity.import_blocked_notice_shown = false;
         self.url_input = url.clone();
         self.productivity.last_injected_import = Some(url);
         if self.queue_display_mode_is_audio() {
@@ -473,7 +505,30 @@ impl AppState {
 
     // ---- download history ------------------------------------------------
 
-    pub(super) fn record_download_history(&mut self, item_id: QueueItemId, output_path: &str) {
+    /// A download, post-process or music export published `output_path`.
+    pub(super) fn note_download_published(&mut self, item_id: QueueItemId, output_path: &str) {
+        self.productivity.run_published += 1;
+        let path = Path::new(output_path);
+        let folder = if path.is_dir() {
+            Some(path.to_path_buf())
+        } else {
+            path.parent().map(Path::to_path_buf)
+        };
+        if let Some(folder) = folder.filter(|folder| !folder.as_os_str().is_empty()) {
+            self.productivity.run_output_dirs.insert(folder);
+        }
+        self.record_download_history(item_id, output_path);
+    }
+
+    /// The user stopped a download; the queue-finished action is not run
+    /// for this run.
+    pub(super) fn note_download_stopped_by_user(&mut self) {
+        if self.productivity.queue_run_active {
+            self.productivity.run_stopped_by_user = true;
+        }
+    }
+
+    fn record_download_history(&mut self, item_id: QueueItemId, output_path: &str) {
         if !self.config.history_enabled {
             return;
         }
@@ -582,6 +637,9 @@ impl AppState {
         let busy = self.has_running_download_workflow();
         if busy && !self.productivity.queue_run_active {
             self.productivity.queue_run_active = true;
+            self.productivity.run_published = 0;
+            self.productivity.run_output_dirs.clear();
+            self.productivity.run_stopped_by_user = false;
             self.productivity.run_baseline_done = self
                 .queue_items
                 .iter()
@@ -674,14 +732,25 @@ impl AppState {
     }
 
     fn on_queue_run_finished(&mut self) {
-        match self.productivity.after_queue_action {
+        let action = self.productivity.after_queue_action;
+        if action == AfterQueueAction::Nothing {
+            return;
+        }
+        if let Some(reason) = finish_action_block_reason(
+            self.productivity.run_published,
+            self.productivity.run_stopped_by_user,
+        ) {
+            self.last_action = reason.to_owned();
+            return;
+        }
+        match action {
             AfterQueueAction::Nothing => {}
             AfterQueueAction::OpenFolder => {
                 self.productivity.after_queue_action = AfterQueueAction::Nothing;
-                let folder = resolve_output_dir(&self.item_defaults.output_dir)
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|_| self.item_defaults.output_dir.clone());
-                if let Err(error) = crate::infrastructure::open_output_folder(&folder) {
+                let folder = self.run_output_folder();
+                if let Err(error) =
+                    crate::infrastructure::open_output_folder(&folder.display().to_string())
+                {
                     self.last_action = error;
                 }
             }
@@ -690,6 +759,21 @@ impl AppState {
                     Some(Instant::now() + AFTER_QUEUE_COUNTDOWN);
             }
         }
+    }
+
+    /// The single folder this run published to; with several folders (site
+    /// rules) or none recorded, the main download folder.
+    fn run_output_folder(&mut self) -> PathBuf {
+        let main = resolve_output_dir(&self.item_defaults.output_dir)
+            .unwrap_or_else(|_| PathBuf::from(&self.item_defaults.output_dir));
+        let dirs = &self.productivity.run_output_dirs;
+        if dirs.len() > 1 {
+            self.last_action = i18n::format_fixed_english(
+                "Downloads were saved to {count} folders; opened the main download folder.",
+                &[("{count}", &dirs.len().to_string())],
+            );
+        }
+        folder_to_open(dirs, main)
     }
 
     fn poll_after_queue_countdown(&mut self) {
@@ -852,6 +936,12 @@ impl AppState {
         let _ = self.config.save();
     }
 
+    /// Update the interval in memory while it is being dragged.
+    pub fn preview_subscriptions_interval_hours(&mut self, hours: u32) {
+        self.config.subscriptions_interval_hours =
+            hours.clamp(1, crate::infrastructure::MAX_SUBSCRIPTION_INTERVAL_HOURS);
+    }
+
     pub fn set_subscriptions_interval_hours(&mut self, hours: u32) {
         self.config.subscriptions_interval_hours =
             hours.clamp(1, crate::infrastructure::MAX_SUBSCRIPTION_INTERVAL_HOURS);
@@ -1007,10 +1097,11 @@ impl AppState {
         let _ = self.config.save();
     }
 
+    /// Called once editing ends (see `deferred_text_box`).
     pub fn set_sponsorblock_categories(&mut self, value: &str) {
-        // Keep the raw draft while typing; normalize when building commands.
-        self.config.sponsorblock_categories = value.to_owned();
-        self.tool_paths.sponsorblock_categories = value.to_owned();
+        let categories = crate::infrastructure::normalize_sponsorblock_categories(value);
+        self.config.sponsorblock_categories = categories.clone();
+        self.tool_paths.sponsorblock_categories = categories;
         let _ = self.config.save();
     }
 
@@ -1020,15 +1111,40 @@ impl AppState {
         let _ = self.config.save();
     }
 
+    /// Called once editing ends (see `deferred_text_box`), so a half-typed
+    /// expression never reaches a playlist expansion.
     pub fn set_playlist_match_filter(&mut self, value: &str) {
-        self.config.playlist_match_filter = value.to_owned();
-        self.tool_paths.playlist_match_filter = value.trim().to_owned();
+        let filter = value.trim().to_owned();
+        self.config.playlist_match_filter = filter.clone();
+        self.tool_paths.playlist_match_filter = filter;
         let _ = self.config.save();
     }
 
     pub fn set_limit_rate_schedule(&mut self, schedule: crate::infrastructure::RateLimitSchedule) {
         self.config.limit_rate_schedule = schedule;
         let _ = self.config.save();
+    }
+
+    /// Applies a draft whose text box is gone (its page was left) or that is
+    /// still open when the window closes.
+    pub fn apply_deferred_setting(&mut self, setting: DeferredSetting, value: &str) {
+        let mut schedule = self.config.limit_rate_schedule.clone();
+        let field = match setting {
+            DeferredSetting::PlaylistMatchFilter => {
+                return self.set_playlist_match_filter(value);
+            }
+            DeferredSetting::SponsorBlockCategories => {
+                return self.set_sponsorblock_categories(value);
+            }
+            DeferredSetting::ScheduledRateStart => &mut schedule.start,
+            DeferredSetting::ScheduledRateEnd => &mut schedule.end,
+            DeferredSetting::ScheduledRateValue => &mut schedule.rate,
+        };
+        if field == value {
+            return;
+        }
+        *field = value.to_owned();
+        self.set_limit_rate_schedule(schedule.normalized());
     }
 
     // ---- site rules --------------------------------------------------------
@@ -1071,5 +1187,50 @@ impl AppState {
             self.config.site_rules.remove(index);
             let _ = self.config.save();
         }
+    }
+}
+
+/// Why the queue-finished action must not run, if it must not. Only a run
+/// that completed something counts as finished; a run the user stopped, or
+/// one where everything failed, keeps the action armed for the next run.
+fn finish_action_block_reason(published: usize, stopped_by_user: bool) -> Option<&'static str> {
+    if stopped_by_user {
+        Some("Downloads were stopped, so the queue finish action did not run.")
+    } else if published == 0 {
+        Some("No download completed, so the queue finish action did not run.")
+    } else {
+        None
+    }
+}
+
+/// The single folder a run published to, else the main download folder.
+fn folder_to_open(dirs: &std::collections::BTreeSet<PathBuf>, main: PathBuf) -> PathBuf {
+    match dirs.len() {
+        1 => dirs.iter().next().cloned().unwrap_or(main),
+        _ => main,
+    }
+}
+
+#[cfg(test)]
+mod finish_action_tests {
+    use super::*;
+
+    #[test]
+    fn finish_action_needs_a_completed_download_and_no_user_stop() {
+        assert!(finish_action_block_reason(0, false).is_some());
+        assert!(finish_action_block_reason(3, true).is_some());
+        assert!(finish_action_block_reason(0, true).is_some());
+        assert_eq!(finish_action_block_reason(1, false), None);
+    }
+
+    #[test]
+    fn opens_the_only_output_folder_or_the_main_folder() {
+        let main = PathBuf::from("main");
+        let mut dirs = std::collections::BTreeSet::new();
+        assert_eq!(folder_to_open(&dirs, main.clone()), main);
+        dirs.insert(PathBuf::from("site"));
+        assert_eq!(folder_to_open(&dirs, main.clone()), PathBuf::from("site"));
+        dirs.insert(PathBuf::from("other"));
+        assert_eq!(folder_to_open(&dirs, main.clone()), main);
     }
 }
